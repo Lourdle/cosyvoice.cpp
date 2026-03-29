@@ -107,14 +107,13 @@ cosyvoice_frontend_context_t cosyvoice_frontend_load_from_files(const char* spee
 	if (cp_fd < 0) return nullptr;
 
     struct stat cur_stat;
-    if (fstat(cp_fd, &cur_stat) != 0) return nullptr;
     if (fstat(st_fd, &cur_stat) != 0) return nullptr;
-
     std::unique_ptr<void, munmapper> data_st(
         mmap(nullptr, cur_stat.st_size, PROT_READ, MAP_SHARED, st_fd, 0),
         munmapper{ cur_stat.st_size });
     if (data_st.get() == MAP_FAILED) return nullptr;
 
+    if (fstat(cp_fd, &cur_stat) != 0) return nullptr;
     std::unique_ptr<void, munmapper> data_cp(
         mmap(nullptr, cur_stat.st_size, PROT_READ, MAP_SHARED, cp_fd, 0),
         munmapper{ cur_stat.st_size });
