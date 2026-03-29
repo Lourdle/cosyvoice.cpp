@@ -1,0 +1,77 @@
+# Visual Studio
+.vs/
+*.user
+*.aps
+*.pch
+*.vspscc
+*.vssscc
+*_i.c
+*_p.c
+*.ncb
+*.suo
+*.tlb
+*.tlh
+*.bak
+*.[Cc]ache
+*.ilk
+*.log
+*.lib
+*.sbr
+*.sdf
+*.opendb
+*.VC.db
+*.pdb
+*.obj
+*.exe
+*.dll
+*.exp
+x64/
+x86/
+Debug/
+Release/
+
+# VS Code
+.vscode/
+
+# CMake
+build/
+out/
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+
+# vcpkg
+vcpkg_installed/
+.vcpkg/
+
+# Data, Models, Audio outputs
+*.gguf
+*.bin
+*.wav
+*.onnx
+*.flac
+*.mp3
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Dependencies
+packages/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+# Build directories
+build/
+out/
+bin/
+
+# Dependencies
+vendor/ggml/
+_deps/
