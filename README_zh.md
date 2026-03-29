@@ -42,7 +42,7 @@
 - **实现说明**：本仓库是基于模型架构与推理行为的独立 C++/GGML 重实现，并非官方 fork 或官方发布。
 - **GGUF 模型产物**：发布的模型文件继续保持 Apache-2.0。
   - ModelScope：<https://modelscope.cn/models/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
-  - Hugging Face：<https://huggingface.co/models/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
+  - Hugging Face：<https://huggingface.co/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
 - **模型许可证文件**：[MODEL_LICENSE.md](MODEL_LICENSE.md)
 
 ## 快速开始

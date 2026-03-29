@@ -42,7 +42,7 @@ This project provides:
 - **Implementation note**: this repository is an independent C++/GGML re-implementation based on model architecture and inference behavior, and is not an official fork or release.
 - **GGUF model artifacts**: published model files remain under Apache-2.0.
   - ModelScope: <https://modelscope.cn/models/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
-  - Hugging Face: <https://huggingface.co/models/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
+  - Hugging Face: <https://huggingface.co/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
 - **Model license file**: [MODEL_LICENSE.md](MODEL_LICENSE.md)
 
 ## Quick Start
