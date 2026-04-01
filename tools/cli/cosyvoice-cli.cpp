@@ -60,6 +60,9 @@ struct cli_options
 {
 	uint32_t max_llm_len = 2048;
 	float speed = 1.0f;
+#ifndef COSYVOICE_NO_ICU
+	bool text_normalization_enabled = true;
+#endif
 	std::string model;
 #ifndef COSYVOICE_NO_FRONTEND
 	bool frontend_only = false;
@@ -181,7 +184,11 @@ Options:
 #endif
 R"(
   --mode <zero-shot|instruct|cross-lingual>   TTS mode. Default: auto-detect based on the presence of --instruction.
-  --speed, -s <value>                         Speech speed. Default: 1.0.
+)"
+#ifndef COSYVOICE_NO_ICU
+"  --disable-text-normalization                Disable ICU text normalization before tokenization.\n"
+#endif
+R"(  --speed, -s <value>                         Speech speed. Default: 1.0.
 )", exe.c_str()
 #ifndef COSYVOICE_NO_FRONTEND
 , exe.c_str(), exe.c_str()
@@ -444,6 +451,10 @@ int main(int argc, char** argv)
 			options.output = arg_to_utf8(get_arg_value());
 		else if (tstrcmp(arg, _TEXT("--mode")) == 0)
 			options.mode = to_lower(arg_to_utf8(get_arg_value()));
+#ifndef COSYVOICE_NO_ICU
+		else if (tstrcmp(arg, _TEXT("--disable-text-normalization")) == 0)
+			options.text_normalization_enabled = false;
+#endif
 		else if (tstrcmp(arg, _TEXT("--speed")) == 0 || tstrcmp(arg, _TEXT("-s")) == 0)
 		{
 			auto value = arg_to_utf8(get_arg_value());
@@ -613,6 +624,9 @@ int main(int argc, char** argv)
 		print_error_log("Error: failed to create TTS context.\n");
 		return 1;
 	}
+#ifndef COSYVOICE_NO_ICU
+	cosyvoice_tts_context_set_text_normalization_enabled(tts_ctx.get(), options.text_normalization_enabled);
+#endif
 
 	cosyvoice_generated_speech result = {};
 	bool ok = false;

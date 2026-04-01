@@ -837,6 +837,51 @@ COSYVOICE_API void cosyvoice_tts_context_set_prompt(cosyvoice_tts_context_t ctx,
 
 会重置该会话缓存的指令文本。
 
+## cosyvoice_tts_context_set_text_normalization_enabled
+
+### 语法
+
+```c
+COSYVOICE_API void cosyvoice_tts_context_set_text_normalization_enabled(cosyvoice_tts_context_t ctx, bool enabled);
+```
+
+### 说明
+
+为指定 TTS 会话开启或关闭前端文本标准化。
+
+### 参数
+
+- `ctx`：会话句柄。
+- `enabled`：`true` 表示开启文本标准化；`false` 表示跳过标准化，直接对原始文本分词。
+
+### 返回值
+
+无返回值。
+
+### 备注
+
+新创建的 TTS 会话默认开启文本标准化。
+
+## cosyvoice_tts_context_get_text_normalization_enabled
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_tts_context_get_text_normalization_enabled(cosyvoice_tts_context_t ctx);
+```
+
+### 说明
+
+查询指定 TTS 会话当前是否开启前端文本标准化。
+
+### 参数
+
+- `ctx`：会话句柄。
+
+### 返回值
+
+开启时返回 `true`，关闭时返回 `false`。
+
 ## cosyvoice_tts_zero_shot
 
 ### 语法

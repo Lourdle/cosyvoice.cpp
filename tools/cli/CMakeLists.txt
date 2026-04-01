@@ -11,6 +11,10 @@ if(COSYVOICE_NO_FRONTEND)
     target_compile_definitions(cosyvoice-cli PRIVATE COSYVOICE_NO_FRONTEND)
 endif()
 
+if(COSYVOICE_NO_ICU)
+    target_compile_definitions(cosyvoice-cli PRIVATE COSYVOICE_NO_ICU)
+endif()
+
 if(WIN32)
     add_custom_command(TARGET cosyvoice-cli POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

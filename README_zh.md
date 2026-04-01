@@ -298,6 +298,7 @@ cosyvoice-cli \
 其他常用选项：
 - `--speed`
 - `--max-llm-len`
+- `--disable-text-normalization`（仅在启用 ICU 支持时可用）
 
 ## 已知问题
 当前生成稳定性与后端关系较大。

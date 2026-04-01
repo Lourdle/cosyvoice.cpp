@@ -339,7 +339,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_prompt, std::string
 {
 	cosyvoice_tts_context(cosyvoice_context_t ctx, cosyvoice_prompt_t prompt)
-		: cosyvoice_prompt(*prompt), ctx(ctx)
+		: cosyvoice_prompt(*prompt), ctx(ctx), text_normalization_enabled(true)
 	{
 		const auto instruction_prefix = ctx->get_instruction_prefix();
 		if (instruction_prefix)
@@ -364,7 +364,9 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
 			mode,
 			instruction_cache.c_str());
 
-		auto normalized = cosyvoice_frontend_util_text_normalize(*this, text, static_cast<uint32_t>(strlen(text)), nullptr);
+		bool normalized = false;
+		if (text_normalization_enabled)
+			normalized = cosyvoice_frontend_util_text_normalize(*this, text, static_cast<uint32_t>(strlen(text)), nullptr);
 		cosyvoice_tokenize(
 			ctx,
 			normalized ? c_str() : text,
@@ -377,6 +379,7 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
 	cosyvoice_context_t ctx;
 	std::string instruction_cache;
 	size_t prefix_len;
+	bool text_normalization_enabled;
 };
 
 cosyvoice_tts_context_t cosyvoice_tts_context_new(cosyvoice_context_t ctx, cosyvoice_prompt_t prompt)
@@ -392,6 +395,16 @@ void cosyvoice_tts_context_free(cosyvoice_tts_context_t ctx)
 void cosyvoice_tts_context_set_prompt(cosyvoice_tts_context_t ctx, cosyvoice_prompt_t prompt)
 {
 	*static_cast<cosyvoice_prompt_t>(ctx) = *prompt;
+}
+
+void cosyvoice_tts_context_set_text_normalization_enabled(cosyvoice_tts_context_t ctx, bool enabled)
+{
+	ctx->text_normalization_enabled = enabled;
+}
+
+bool cosyvoice_tts_context_get_text_normalization_enabled(cosyvoice_tts_context_t ctx)
+{
+	return ctx->text_normalization_enabled;
 }
 
 bool cosyvoice_tts_zero_shot(cosyvoice_tts_context_t ctx, const char* text, float speed, cosyvoice_generated_speech_ptr result)

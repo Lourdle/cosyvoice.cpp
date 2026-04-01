@@ -789,6 +789,47 @@ Updates the prompt used by an existing TTS session.
 
 Calling this API resets cached instruction text associated with the session.
 
+## cosyvoice_tts_context_set_text_normalization_enabled
+
+### Syntax
+
+```c
+COSYVOICE_API void cosyvoice_tts_context_set_text_normalization_enabled(cosyvoice_tts_context_t ctx, bool enabled);
+```
+
+### Description
+
+Enables or disables frontend text normalization for a TTS session.
+
+### Parameters
+
+- `ctx`: TTS context handle.
+- `enabled`: `true` to enable text normalization; `false` to bypass normalization and tokenize raw input text directly.
+
+### Remarks
+
+Text normalization is enabled by default for newly created TTS contexts.
+
+## cosyvoice_tts_context_get_text_normalization_enabled
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_tts_context_get_text_normalization_enabled(cosyvoice_tts_context_t ctx);
+```
+
+### Description
+
+Queries whether frontend text normalization is enabled for a TTS session.
+
+### Parameters
+
+- `ctx`: TTS context handle.
+
+### Returns
+
+`true` when text normalization is enabled; otherwise `false`.
+
 ## cosyvoice_tts_zero_shot
 
 ### Syntax

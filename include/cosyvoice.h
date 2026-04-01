@@ -331,6 +331,17 @@ COSYVOICE_API void                    cosyvoice_tts_context_free(cosyvoice_tts_c
 COSYVOICE_API void cosyvoice_tts_context_set_prompt(cosyvoice_tts_context_t ctx, cosyvoice_prompt_t prompt);
 
 /**
+ * @brief Enable or disable frontend text normalization for this TTS context.
+ * @note Enabled by default.
+ */
+COSYVOICE_API void cosyvoice_tts_context_set_text_normalization_enabled(cosyvoice_tts_context_t ctx, bool enabled);
+
+/**
+ * @brief Query whether frontend text normalization is enabled for this TTS context.
+ */
+COSYVOICE_API bool cosyvoice_tts_context_get_text_normalization_enabled(cosyvoice_tts_context_t ctx);
+
+/**
  * @brief Generate speech in zero-shot mode.
  */
 COSYVOICE_API bool cosyvoice_tts_zero_shot(

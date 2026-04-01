@@ -298,6 +298,7 @@ Mode options:
 Other useful options:
 - `--speed`
 - `--max-llm-len`
+- `--disable-text-normalization` (available only when ICU support is enabled)
 
 ## Known Issues
 Current generation stability is backend-dependent.
