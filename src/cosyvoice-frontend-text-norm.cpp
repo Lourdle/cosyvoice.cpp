@@ -84,6 +84,13 @@ static icu::UnicodeString replace_with_matcher(
     out.append(input, last, input.length() - last);
     return out;
 }
+
+static void normalize_fullwidth_digits(icu::UnicodeString& text)
+{
+    for (auto& c : std::wstring_view(text))
+        if (c >= 0xFF10 && c <= 0xFF19)
+            const_cast<std::remove_const_t<std::remove_reference_t<decltype(c)>>&>(c) -= 0xFF10 + '0';
+}
 #endif
 
 static bool strip(const char*& orig_text, uint32_t& text_len)
@@ -138,13 +145,16 @@ bool cosyvoice_frontend_util_text_normalize(std::string& text, const char* orig_
     strip(orig_text, text_len);
 
     UErrorCode status = U_ZERO_ERROR;
-    const icu::Normalizer2* nfkc = icu::Normalizer2::getNFKCInstance(status);
+    const icu::Normalizer2* nfc = icu::Normalizer2::getNFCInstance(status);
     if (U_FAILURE(status)) return false;
 
     icu::UnicodeString utext = icu::UnicodeString::fromUTF8(icu::StringPiece(orig_text, text_len));
     icu::UnicodeString norm;
-    nfkc->normalize(utext, norm, status);
+    nfc->normalize(utext, norm, status);
     if (U_FAILURE(status)) return false;
+
+    // Keep fullwidth punctuation unchanged while still normalizing fullwidth digits.
+    normalize_fullwidth_digits(norm);
 
     icu::Locale loc = is_valid_locale(locale) ? icu::Locale(locale) : detect_locale(norm);
 
