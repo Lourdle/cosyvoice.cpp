@@ -160,7 +160,7 @@ cosyvoice_prompt_t cosyvoice_prompt_set_ext(cosyvoice_context_t ctx, cosyvoice_p
 	}
 }
 
-cosyvoice_prompt_t cosyvoice_prompt_set(cosyvoice_context_t ctx, cosyvoice_prompt_t prompt, cosyvoice_inference_mode_t mode, const char* instruction, uint32_t instruction_length, const char* locale, bool inplace)
+cosyvoice_prompt_t cosyvoice_prompt_set(cosyvoice_context_t ctx, cosyvoice_prompt_t prompt, cosyvoice_inference_mode_t mode, const char* instruction, uint32_t instruction_length, bool inplace)
 {
 	if (instruction && instruction_length == 0xFFFFFFFFU)
 		instruction_length = static_cast<uint32_t>(strlen(instruction));
