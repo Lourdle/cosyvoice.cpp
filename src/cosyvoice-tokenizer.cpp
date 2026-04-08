@@ -70,12 +70,6 @@ struct llm_tokenizer_bpe_session {
             int index = 0;
             size_t offset = 0;
 
-            //if (vocab.tokenizer_ignore_merges && vocab.token_to_id.find(word) != vocab.token_to_id.end()) {
-            if (vocab.text_to_token(word) != -1) {
-                symbols.emplace_back(llm_symbol{ -1, -1, word.c_str(), word.size() });
-                offset = word.size();
-            }
-
             while (offset < word.size()) {
                 llm_symbol sym;
                 size_t char_len = std::min(word.size() - offset, (size_t)unicode_len_utf8(word[offset]));
