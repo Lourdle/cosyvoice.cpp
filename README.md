@@ -17,7 +17,9 @@ This project provides:
 
 ## Contents
 - [Documentation](#documentation)
+- [AI Usage Disclosure](#ai-usage-disclosure)
 - [Quick Start](#quick-start)
+- [Inference Pipeline](#inference-pipeline)
 - [Build](#build)
 - [Dependency Resolution](#dependency-resolution)
 - [CMake Options](#cmake-options)
@@ -35,6 +37,11 @@ This project provides:
 
 ## Documentation
 - API index: [docs/API.md](docs/API.md)
+
+## AI Usage Disclosure
+- Most project code is written by the author.
+- Parts of the documentation are drafted and edited with AI assistance.
+- Documentation may contain mistakes or lag behind implementation details; when in doubt, treat source code and header files as the ground truth, and feel free to open an issue/PR.
 
 ## Third-Party Notices
 - See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for bundled dependency license details.
@@ -54,6 +61,22 @@ This project provides:
 2. Configure and build this project.
 3. (Optional) Quantize the GGUF model with `quantize`.
 4. Run `cosyvoice-cli` for synthesis.
+
+## Inference Pipeline
+This project supports two equivalent inference paths:
+
+1. **End-to-end frontend + TTS (recommended for first run)**
+   - Input: reference audio (and reference text when required by mode) + target text
+   - Flow: frontend extracts `prompt_speech` -> TTS runs with `prompt_speech` and target text
+   - Mode notes:
+     - `zero-shot` requires `--prompt-text`
+     - `instruct` and `cross-lingual` ignore `--prompt-text`
+
+2. **Reuse saved `prompt_speech` (recommended for batch/repeated synthesis)**
+   - Save `prompt_speech` as `.gguf` first (for example via `--prompt-speech-output` or API `cosyvoice_prompt_speech_save_to_file`)
+   - Later runs can pass `--prompt-speech <file>` directly, so frontend ONNX does **not** need to run again
+
+In short: encode reference conditions (voice/speaker traits) into `prompt_speech` first, then combine `prompt_speech` with target text to generate audio.
 
 ## Build
 
@@ -324,6 +347,7 @@ Prompt source options:
   - a saved `--prompt-speech`, or
   - frontend inputs (`--speech-tokenizer`, `--campplus`, audio input, optional/required `--prompt-text` depending on mode).
 - Using `--prompt-speech` and frontend inputs together is rejected.
+- Typical reuse workflow: generate and save `prompt_speech.gguf` with `--frontend-only`, then run future synthesis with `--prompt-speech` directly.
 
 Text normalization:
 - `--disable-text-normalization`: Disable ICU text normalization before tokenization.

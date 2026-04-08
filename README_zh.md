@@ -17,7 +17,9 @@
 
 ## 目录
 - [文档](#文档)
+- [AI 使用说明](#ai-使用说明)
 - [快速开始](#快速开始)
+- [推理流程](#推理流程)
 - [构建](#构建)
 - [依赖解析方式](#依赖解析方式)
 - [CMake 选项](#cmake-选项)
@@ -35,6 +37,11 @@
 
 ## 文档
 - API 索引：[docs/API_zh.md](docs/API_zh.md)
+
+## AI 使用说明
+- 项目代码主要由作者手工实现。
+- 文档内容部分由 AI 协助撰写与整理。
+- 文档可能存在错误或与实现不同步的情况；如有疑问请以源码与头文件为准，也欢迎提交 Issue/PR 纠正。
 
 ## 第三方许可说明
 - 已打包依赖的许可证信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
@@ -54,6 +61,22 @@
 2. 配置并编译本项目。
 3. （可选）用 `quantize` 对 GGUF 模型量化。
 4. 使用 `cosyvoice-cli` 合成语音。
+
+## 推理流程
+本项目支持两条等价推理路径：
+
+1. **前端 + TTS 一体流程（首次推荐）**
+   - 输入：参考音频（以及按模式要求的参考文本）+ 目标文本
+   - 流程：前端提取 `prompt_speech` -> 使用 `prompt_speech` 与目标文本执行 TTS
+   - 模式说明：
+     - `zero-shot` 模式需要 `--prompt-text`
+     - `instruct` / `cross-lingual` 模式下 `--prompt-text` 会被忽略
+
+2. **复用 `prompt_speech`（批量合成推荐）**
+   - 可将 `prompt_speech` 保存为 `.gguf`（例如通过 `--prompt-speech-output` 或 API `cosyvoice_prompt_speech_save_to_file`）
+   - 后续直接传入 `--prompt-speech <file>` 即可合成，**不需要再次运行前端 ONNX**
+
+简化理解：先把参考条件（音色/说话人信息）编码成 `prompt_speech`，再将 `prompt_speech` 与目标文本结合生成语音。
 
 ## 构建
 
@@ -324,6 +347,7 @@ cosyvoice-cli \
   - 使用 `--prompt-speech`，或
   - 提供前端输入（`--speech-tokenizer`、`--campplus`、音频输入，以及按模式要求是否提供 `--prompt-text`）。
 - 同时传入 `--prompt-speech` 和前端输入会报错。
+- 典型复用流程：先用 `--frontend-only` 生成并保存 `prompt_speech.gguf`，后续合成时直接用 `--prompt-speech`。
 
 文本规范化：
 - `--disable-text-normalization`：关闭分词前 ICU 文本规范化。

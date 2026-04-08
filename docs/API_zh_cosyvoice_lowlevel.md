@@ -906,11 +906,9 @@ COSYVOICE_API cosyvoice_prompt_t cosyvoice_prompt_set(
     const char*                instruction,
 #ifdef __cplusplus
     uint32_t                   instruction_length = 0xFFFFFFFFU,
-    const char*                locale = nullptr,
     bool                       inplace = true
 #else
     uint32_t                   instruction_length,
-    const char*                locale,
     bool                       inplace
 #endif
 );
@@ -927,7 +925,6 @@ COSYVOICE_API cosyvoice_prompt_t cosyvoice_prompt_set(
 - `mode`：推理模式。
 - `instruction`：指令文本。
 - `instruction_length`：指令字节长度。
-- `locale`：归一化地区提示。
 - `inplace`：是否原地更新。
 
 ### 返回值

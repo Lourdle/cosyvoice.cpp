@@ -902,11 +902,9 @@ COSYVOICE_API cosyvoice_prompt_t cosyvoice_prompt_set(
     const char*                instruction,
 #ifdef __cplusplus
     uint32_t                   instruction_length = 0xFFFFFFFFU,
-    const char*                locale = nullptr,
     bool                       inplace = true
 #else
     uint32_t                   instruction_length,
-    const char*                locale,
     bool                       inplace
 #endif
 );
@@ -923,7 +921,6 @@ Sets prompt mode and instruction text using raw text input.
 - `mode`: Inference mode.
 - `instruction`: Instruction text.
 - `instruction_length`: Instruction length in bytes.
-- `locale`: Optional locale hint for normalization.
 - `inplace`: Whether to modify input prompt in place.
 
 ### Returns
