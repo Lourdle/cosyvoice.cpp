@@ -2,9 +2,10 @@
 	#define _CRT_SECURE_NO_WARNINGS
 #endif
 
+#include "common.h"
+
 #include <cstring>
 #include <cinttypes>
-#include <cwchar>
 #include <memory>
 #include <string>
 #include <map>
@@ -12,35 +13,6 @@
 #include <tuple>
 #include <thread>
 #include <atomic>
-
-#ifdef _WIN32
-	#define NOMINMAX
-	#include <Windows.h>
-
-using tchar = wchar_t;
-static std::string to_utf8(const wchar_t* wstr)
-{
-	int wch = static_cast<int>(wcslen(wstr));
-	int cch = WideCharToMultiByte(CP_UTF8, 0, wstr, wch, nullptr, 0, nullptr, nullptr);
-	if (cch <= 0)
-		return {};
-	std::string str(static_cast<size_t>(cch), '\0');
-	if (WideCharToMultiByte(CP_UTF8, 0, wstr, wch, &str[0], cch, nullptr, nullptr) <= 0)
-		return {};
-	return str;
-}
-
-#define _TEXT(x) L##x
-	#define tstrcmp _wcsicmp
-#else
-	#include <strings.h>
-
-	#define _TEXT(x) x
-	#define tstrcmp strcasecmp
-
-using tchar = char;
-using to_utf8 = std::string;
-#endif
 
 #include <ggml.h>
 #include <gguf.h>
@@ -75,7 +47,7 @@ static ggml_type get_rollback_type(ggml_type type, int64_t ne)
 #ifdef _WIN32
 int wmain(int argc, wchar_t** argv)
 {
-	SetConsoleOutputCP(CP_UTF8);
+	setup_console_utf8();
 #else
 int main(int argc, char** argv)
 {
@@ -89,17 +61,17 @@ int main(int argc, char** argv)
 	{
 		auto arg = argv[i];
 		auto get_arg_value = [&]()
+		{
+			if (++i == argc)
 			{
-				if (++i == argc)
-				{
-					fprintf(stderr, "Error: missing value for the command-line option \"%s\".\n", to_utf8(arg).c_str());
-					exit(1);
-				}
+				fprintf(stderr, "Error: missing value for the command-line option \"%s\".\n", tchar_to_utf8(arg).c_str());
+				exit(1);
+			}
 
-				return argv[i];
-			};
+			return argv[i];
+		};
 
-		if (tstrcmp(arg, _TEXT("--help")) == 0 || tstrcmp(arg, _TEXT("-h")) == 0)
+		if (tchar_casecmp(arg, COSYVOICE_TEXT("--help")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-h")) == 0)
 		{
 			printf(
 				R"(gguf quantize - a tool for quantizing gguf files.
@@ -112,44 +84,44 @@ Options:\n
   --custom-string, -c <key> <value>     Specify a custom string key-value pair to be included in the output file. This option can be used multiple times for different key-value pairs.
 Example:
 %s -f /path/to/file.gguf -o /path/to/output.gguf -t Q4_K -c general.quantized_by Lourdle -c general.description model_description
-)", to_utf8(argv[0]).c_str(), to_utf8(argv[0]).c_str());
+)", tchar_to_utf8(argv[0]).c_str(), tchar_to_utf8(argv[0]).c_str());
 			return 0;
 		}
-		else if (tstrcmp(arg, _TEXT("--file")) == 0 || tstrcmp(arg, _TEXT("-f")) == 0)
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--file")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-f")) == 0)
 			input = get_arg_value();
-		else if (tstrcmp(arg, _TEXT("--output-file")) == 0 || tstrcmp(arg, _TEXT("-o")) == 0)
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--output-file")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-o")) == 0)
 			output = get_arg_value();
-		else if (tstrcmp(arg, _TEXT("--type")) == 0 || tstrcmp(arg, _TEXT("-t")) == 0)
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--type")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-t")) == 0)
 		{
 			arg = get_arg_value();
 
-			if (tstrcmp(arg, _TEXT("F16")) == 0) ftype = GGML_FTYPE_MOSTLY_F16;
-			else if (tstrcmp(arg, _TEXT("Q8_0")) == 0) ftype = GGML_FTYPE_MOSTLY_Q8_0;
-			else if (tstrcmp(arg, _TEXT("Q5_0")) == 0) ftype = GGML_FTYPE_MOSTLY_Q5_0;
-			else if (tstrcmp(arg, _TEXT("Q5_1")) == 0) ftype = GGML_FTYPE_MOSTLY_Q5_1;
-			else if (tstrcmp(arg, _TEXT("Q4_0")) == 0) ftype = GGML_FTYPE_MOSTLY_Q4_0;
-			else if (tstrcmp(arg, _TEXT("Q4_1")) == 0) ftype = GGML_FTYPE_MOSTLY_Q4_1;
-			else if (tstrcmp(arg, _TEXT("Q6_K")) == 0) ftype = GGML_FTYPE_MOSTLY_Q6_K;
-			else if (tstrcmp(arg, _TEXT("Q5_K")) == 0) ftype = GGML_FTYPE_MOSTLY_Q5_K;
-			else if (tstrcmp(arg, _TEXT("Q4_K")) == 0) ftype = GGML_FTYPE_MOSTLY_Q4_K;
-			else if (tstrcmp(arg, _TEXT("Q3_K")) == 0) ftype = GGML_FTYPE_MOSTLY_Q3_K;
-			else if (tstrcmp(arg, _TEXT("Q2_K")) == 0) ftype = GGML_FTYPE_MOSTLY_Q2_K;
-			else if (tstrcmp(arg, _TEXT("COPY")) == 0) ftype = GGML_FTYPE_UNKNOWN;
+			if (tchar_casecmp(arg, COSYVOICE_TEXT("F16")) == 0) ftype = GGML_FTYPE_MOSTLY_F16;
+			else if (tchar_casecmp(arg, COSYVOICE_TEXT("Q8_0")) == 0) ftype = GGML_FTYPE_MOSTLY_Q8_0;
+			else if (tchar_casecmp(arg, COSYVOICE_TEXT("Q5_0")) == 0) ftype = GGML_FTYPE_MOSTLY_Q5_0;
+			else if (tchar_casecmp(arg, COSYVOICE_TEXT("Q5_1")) == 0) ftype = GGML_FTYPE_MOSTLY_Q5_1;
+			else if (tchar_casecmp(arg, COSYVOICE_TEXT("Q4_0")) == 0) ftype = GGML_FTYPE_MOSTLY_Q4_0;
+			else if (tchar_casecmp(arg, COSYVOICE_TEXT("Q4_1")) == 0) ftype = GGML_FTYPE_MOSTLY_Q4_1;
+			else if (tchar_casecmp(arg, COSYVOICE_TEXT("Q6_K")) == 0) ftype = GGML_FTYPE_MOSTLY_Q6_K;
+			else if (tchar_casecmp(arg, COSYVOICE_TEXT("Q5_K")) == 0) ftype = GGML_FTYPE_MOSTLY_Q5_K;
+			else if (tchar_casecmp(arg, COSYVOICE_TEXT("Q4_K")) == 0) ftype = GGML_FTYPE_MOSTLY_Q4_K;
+			else if (tchar_casecmp(arg, COSYVOICE_TEXT("Q3_K")) == 0) ftype = GGML_FTYPE_MOSTLY_Q3_K;
+			else if (tchar_casecmp(arg, COSYVOICE_TEXT("Q2_K")) == 0) ftype = GGML_FTYPE_MOSTLY_Q2_K;
+			else if (tchar_casecmp(arg, COSYVOICE_TEXT("COPY")) == 0) ftype = GGML_FTYPE_UNKNOWN;
 			else
 			{
-				fprintf(stderr, "Error: unsupported quantization type \"%s\".\n", to_utf8(arg).c_str());
+				fprintf(stderr, "Error: unsupported quantization type \"%s\".\n", tchar_to_utf8(arg).c_str());
 				return 1;
 			}
 		}
-		else if (tstrcmp(arg, _TEXT("--custom-string")) == 0 || tstrcmp(arg, _TEXT("-c")) == 0)
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--custom-string")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-c")) == 0)
 		{
 			auto key = get_arg_value();
 			auto value = get_arg_value();
-			custom_strings[to_utf8(key)] = to_utf8(value);
+			custom_strings[tchar_to_utf8(key)] = tchar_to_utf8(value);
 		}
 		else
 		{
-			fprintf(stderr, "Error: the program doesn't recognize the command-line option \"%s\".\n", to_utf8(arg).c_str());
+			fprintf(stderr, "Error: the program doesn't recognize the command-line option \"%s\".\n", tchar_to_utf8(arg).c_str());
 			return 1;
 		}
 	}
@@ -164,10 +136,10 @@ Example:
 		return 1;
 
 	ggml_context* ctx;
-	gguf_context_ptr input_gguf_ctx(gguf_init_from_file(to_utf8(input).c_str(), gguf_init_params{ .no_alloc = false, .ctx = &ctx }));
+	gguf_context_ptr input_gguf_ctx(gguf_init_from_file(tchar_to_utf8(input).c_str(), gguf_init_params{ .no_alloc = false, .ctx = &ctx }));
 	if (!input_gguf_ctx)
 	{
-		fprintf(stderr, "Error: failed to load the input file \"%s\".\n", to_utf8(input).c_str());
+		fprintf(stderr, "Error: failed to load the input file \"%s\".\n", tchar_to_utf8(input).c_str());
 		fprintf(stderr, "Reason: %s\n", strerror(errno));
 		return 1;
 	}
@@ -276,9 +248,9 @@ Example:
 		gguf_add_tensor(output_gguf_ctx.get(), tensor);
 	}
 
-	if (!gguf_write_to_file(output_gguf_ctx.get(), to_utf8(output).c_str(), false))
+	if (!gguf_write_to_file(output_gguf_ctx.get(), tchar_to_utf8(output).c_str(), false))
 	{
-		fprintf(stderr, "Error: failed to save the output file \"%s\".\n", to_utf8(output).c_str());
+		fprintf(stderr, "Error: failed to save the output file \"%s\".\n", tchar_to_utf8(output).c_str());
 		fprintf(stderr, "Reason: %s\n", strerror(errno));
 		return 1;
 	}

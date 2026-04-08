@@ -2,6 +2,7 @@
 #include "cosyvoice-tokenizer.h"
 #include "cosyvoice-model.h"
 #include "cosyvoice-loader.h"
+#include "common.h"
 
 #include <ggml-backend.h>
 
@@ -376,8 +377,8 @@ void cosyvoice_call_ggml_log_callback(ggml_log_level level, const char* message)
 
 bool cosyvoice_save_wav(const char* filename, const float* data, uint32_t data_len, uint32_t sample_rate)
 {
-	auto fp = ggml_fopen(filename, "wb");
-	if (!fp) return false;
+	auto f = open_ofstream_utf8(filename);
+	if (!f) return false;
 
 	struct {
 		char     riff[4] = { 'R', 'I', 'F', 'F' };
@@ -399,8 +400,7 @@ bool cosyvoice_save_wav(const char* filename, const float* data, uint32_t data_l
 	header.data_size = static_cast<uint32_t>(data_len * header.num_channels * header.bits_per_sample / 8);
 	header.riff_size = 4 + (8 + header.fmt_size) + (8 + header.data_size);
 
-	fwrite(&header, sizeof(header), 1, fp);
-	fwrite(data, sizeof(float), data_len, fp);
-	fclose(fp);
-	return true;
+	f.write(reinterpret_cast<const char*>(&header), static_cast<std::streamsize>(sizeof(header)));
+	f.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(sizeof(float) * data_len));
+	return f.good();
 }

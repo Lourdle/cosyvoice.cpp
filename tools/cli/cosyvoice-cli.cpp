@@ -15,46 +15,18 @@
 	#include "cosyvoice-frontend.h"
 #endif
 
+#include "common.h"
+
 #include <cstdarg>
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
-#include <cwchar>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <string>
-
-#ifdef _WIN32
-	#define NOMINMAX
-	#include <Windows.h>
-
-using tchar = wchar_t;
-
-	#define _TEXT(x) L##x
-	#define tstrcmp _wcsicmp
-
-static std::string arg_to_utf8(const tchar* value)
-{
-	int wch = static_cast<int>(wcslen(value));
-	int cch = WideCharToMultiByte(CP_UTF8, 0, value, wch, nullptr, 0, nullptr, nullptr);
-	if (cch <= 0)
-		return {};
-	std::string result(static_cast<size_t>(cch), '\0');
-	if (WideCharToMultiByte(CP_UTF8, 0, value, wch, &result[0], cch, nullptr, nullptr) <= 0)
-		return {};
-	return result;
-}
-#else
-	#include <strings.h>
-	#define _TEXT(x) x
-	#define tstrcmp strcasecmp
-
-using tchar = char;
-using arg_to_utf8 = std::string;
-#endif
 
 struct cli_options
 {
@@ -93,8 +65,6 @@ struct cosyvoice_prompt_deleter { void operator()(cosyvoice_prompt_t prompt) con
 struct cosyvoice_tts_context_deleter { void operator()(cosyvoice_tts_context_t ctx) const noexcept { cosyvoice_tts_context_free(ctx); } };
 #ifndef COSYVOICE_NO_AUDIO
 struct audio_buffer_deleter { void operator()(float* data) const noexcept { cosyvoice_audio_free(data); } };
-#else
-struct fp_deleter { void operator()(FILE* fp) const noexcept { fclose(fp); } };
 #endif
 
 using cosyvoice_context_handle = std::unique_ptr<cosyvoice_context, cosyvoice_context_deleter>;
@@ -106,8 +76,6 @@ using cosyvoice_prompt_handle = std::unique_ptr<cosyvoice_prompt, cosyvoice_prom
 using cosyvoice_tts_context_handle = std::unique_ptr<cosyvoice_tts_context, cosyvoice_tts_context_deleter>;
 #ifndef COSYVOICE_NO_AUDIO
 using audio_buffer_handle = std::unique_ptr<float, audio_buffer_deleter>;
-#else
-using fp_handle = std::unique_ptr<FILE, fp_deleter>;
 #endif
 
 static std::string to_lower(std::string&& value)
@@ -141,7 +109,7 @@ static bool parse_uint32_arg(const std::string& value, uint32_t* result)
 
 static void print_usage(const tchar* argv0)
 {
-	auto exe = arg_to_utf8(argv0);
+	auto exe = tchar_to_utf8(argv0);
 	printf(
 		R"(cosyvoice-cli - command line TTS tool
 Usage:
@@ -375,7 +343,7 @@ static bool validate_options(cli_options& options)
 #ifdef _WIN32
 int wmain(int argc, wchar_t** argv)
 {
-	SetConsoleOutputCP(CP_UTF8);
+	setup_console_utf8();
 #else
 int main(int argc, char** argv)
 {
@@ -391,27 +359,27 @@ int main(int argc, char** argv)
 	{
 		auto arg = argv[i];
 		auto get_arg_value = [&]() -> tchar*
+		{
+			if (++i == argc)
 			{
-				if (++i == argc)
-				{
-					auto option = arg_to_utf8(arg);
-					print_error_log("Error: missing value for the command-line option \"%s\".\n", option.c_str());
-					exit(1);
-				}
+				auto option = tchar_to_utf8(arg);
+				print_error_log("Error: missing value for the command-line option \"%s\".\n", option.c_str());
+				exit(1);
+			}
 
-				return argv[i];
-			};
+			return argv[i];
+		};
 
-		if (tstrcmp(arg, _TEXT("--help")) == 0 || tstrcmp(arg, _TEXT("-h")) == 0)
+		if (tchar_casecmp(arg, COSYVOICE_TEXT("--help")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-h")) == 0)
 		{
 			print_usage(argv[0]);
 			return 0;
 		}
-		else if (tstrcmp(arg, _TEXT("--model")) == 0 || tstrcmp(arg, _TEXT("-m")) == 0)
-			options.model = arg_to_utf8(get_arg_value());
-		else if (tstrcmp(arg, _TEXT("--max-llm-len")) == 0)
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--model")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-m")) == 0)
+			options.model = tchar_to_utf8(get_arg_value());
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--max-llm-len")) == 0)
 		{
-			auto value = arg_to_utf8(get_arg_value());
+			auto value = tchar_to_utf8(get_arg_value());
 			uint32_t max_llm_len;
 			if (!parse_uint32_arg(value, &max_llm_len) || max_llm_len <= 0)
 			{
@@ -421,43 +389,43 @@ int main(int argc, char** argv)
 			options.max_llm_len = max_llm_len;
 		}
 #ifndef COSYVOICE_NO_FRONTEND
-		else if (tstrcmp(arg, _TEXT("--frontend-only")) == 0)
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--frontend-only")) == 0)
 			options.frontend_only = true;
-		else if (tstrcmp(arg, _TEXT("--speech-tokenizer")) == 0)
-			options.speech_tokenizer = arg_to_utf8(get_arg_value());
-		else if (tstrcmp(arg, _TEXT("--campplus")) == 0)
-			options.campplus = arg_to_utf8(get_arg_value());
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--speech-tokenizer")) == 0)
+			options.speech_tokenizer = tchar_to_utf8(get_arg_value());
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--campplus")) == 0)
+			options.campplus = tchar_to_utf8(get_arg_value());
 	#ifdef COSYVOICE_NO_AUDIO
-		else if (tstrcmp(arg, _TEXT("--prompt-audio-16k")) == 0)
-			options.prompt_audio_16k = arg_to_utf8(get_arg_value());
-		else if (tstrcmp(arg, _TEXT("--prompt-audio-24k")) == 0)
-			options.prompt_audio_24k = arg_to_utf8(get_arg_value());
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--prompt-audio-16k")) == 0)
+			options.prompt_audio_16k = tchar_to_utf8(get_arg_value());
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--prompt-audio-24k")) == 0)
+			options.prompt_audio_24k = tchar_to_utf8(get_arg_value());
 	#else
-		else if (tstrcmp(arg, _TEXT("--prompt-audio")) == 0)
-			options.prompt_audio = arg_to_utf8(get_arg_value());
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--prompt-audio")) == 0)
+			options.prompt_audio = tchar_to_utf8(get_arg_value());
 	#endif
-		else if (tstrcmp(arg, _TEXT("--prompt-text")) == 0)
-			options.prompt_text = arg_to_utf8(get_arg_value());
-		else if (tstrcmp(arg, _TEXT("--prompt-speech-output")) == 0)
-			options.prompt_speech_output = arg_to_utf8(get_arg_value());
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--prompt-text")) == 0)
+			options.prompt_text = tchar_to_utf8(get_arg_value());
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--prompt-speech-output")) == 0)
+			options.prompt_speech_output = tchar_to_utf8(get_arg_value());
 #endif
-		else if (tstrcmp(arg, _TEXT("--prompt-speech")) == 0)
-			options.prompt_speech = arg_to_utf8(get_arg_value());
-		else if (tstrcmp(arg, _TEXT("--text")) == 0 || tstrcmp(arg, _TEXT("-t")) == 0)
-			options.text = arg_to_utf8(get_arg_value());
-		else if (tstrcmp(arg, _TEXT("--instruction")) == 0 || tstrcmp(arg, _TEXT("-i")) == 0)
-			options.instruction = arg_to_utf8(get_arg_value());
-		else if (tstrcmp(arg, _TEXT("--output")) == 0 || tstrcmp(arg, _TEXT("-o")) == 0)
-			options.output = arg_to_utf8(get_arg_value());
-		else if (tstrcmp(arg, _TEXT("--mode")) == 0)
-			options.mode = to_lower(arg_to_utf8(get_arg_value()));
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--prompt-speech")) == 0)
+			options.prompt_speech = tchar_to_utf8(get_arg_value());
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--text")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-t")) == 0)
+			options.text = tchar_to_utf8(get_arg_value());
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--instruction")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-i")) == 0)
+			options.instruction = tchar_to_utf8(get_arg_value());
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--output")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-o")) == 0)
+			options.output = tchar_to_utf8(get_arg_value());
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--mode")) == 0)
+			options.mode = to_lower(tchar_to_utf8(get_arg_value()));
 #ifndef COSYVOICE_NO_ICU
-		else if (tstrcmp(arg, _TEXT("--disable-text-normalization")) == 0)
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--disable-text-normalization")) == 0)
 			options.text_normalization_enabled = false;
 #endif
-		else if (tstrcmp(arg, _TEXT("--speed")) == 0 || tstrcmp(arg, _TEXT("-s")) == 0)
+		else if (tchar_casecmp(arg, COSYVOICE_TEXT("--speed")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-s")) == 0)
 		{
-			auto value = arg_to_utf8(get_arg_value());
+			auto value = tchar_to_utf8(get_arg_value());
 			float speed;
 			if (!parse_float_arg(value, &speed) || speed <= 0.0f)
 			{
@@ -468,7 +436,7 @@ int main(int argc, char** argv)
 		}
 		else
 		{
-			auto option = arg_to_utf8(arg);
+			auto option = tchar_to_utf8(arg);
 			print_error_log("Error: the program doesn't recognize the command-line option \"%s\".\n", option.c_str());
 			return 1;
 		}
@@ -500,65 +468,79 @@ int main(int argc, char** argv)
 			return 1;
 		}
 	#ifdef COSYVOICE_NO_AUDIO
-		fp_handle fp(ggml_fopen(options.prompt_audio_16k.c_str(), "rb"));
-		if (!fp)
+		auto f = open_ifstream_utf8(options.prompt_audio_16k.c_str());
+		if (!f)
 		{
 			print_error_log("Error: failed to open prompt audio file \"%s\".\n", options.prompt_audio_16k.c_str());
 			return 1;
 		}
-		fseek(fp.get(), 0, SEEK_END);
-		long prompt_audio_16k_size = ftell(fp.get());
+		f.seekg(0, std::ios::end);
+		const auto prompt_audio_16k_end = f.tellg();
+		if (prompt_audio_16k_end == std::streampos(-1))
+		{
+			print_error_log("Error: failed to query prompt audio file \"%s\".\n", options.prompt_audio_16k.c_str());
+			return 1;
+		}
+		const auto prompt_audio_16k_size = static_cast<std::streamoff>(prompt_audio_16k_end);
 		if (prompt_audio_16k_size <= 0)
 		{
 			print_error_log("Error: prompt audio file \"%s\" is empty.\n", options.prompt_audio_16k.c_str());
 			return 1;
 		}
-		if (prompt_audio_16k_size % sizeof(float) != 0)
+		if (prompt_audio_16k_size % static_cast<std::streamoff>(sizeof(float)) != 0)
 		{
 			print_error_log("Error: prompt audio file \"%s\" size is not aligned to float samples.\n", options.prompt_audio_16k.c_str());
 			return 1;
 		}
-		if (prompt_audio_16k_size / sizeof(float) > std::numeric_limits<uint32_t>::max())
+		if (prompt_audio_16k_size / static_cast<std::streamoff>(sizeof(float)) > static_cast<std::streamoff>(std::numeric_limits<uint32_t>::max()))
 		{
 			print_error_log("Error: prompt audio file \"%s\" is too large.\n", options.prompt_audio_16k.c_str());
 			return 1;
 		}
-		uint32_t prompt_audio_16k_length = static_cast<uint32_t>(prompt_audio_16k_size / sizeof(float));
+		uint32_t prompt_audio_16k_length = static_cast<uint32_t>(prompt_audio_16k_size / static_cast<std::streamoff>(sizeof(float)));
 		auto prompt_audio_16k_data = std::make_unique<float[]>(prompt_audio_16k_length);
-		fseek(fp.get(), 0, SEEK_SET);
-		if (fread(prompt_audio_16k_data.get(), sizeof(float), prompt_audio_16k_length, fp.get()) != prompt_audio_16k_length)
+		f.seekg(0, std::ios::beg);
+		f.read(reinterpret_cast<char*>(prompt_audio_16k_data.get()), static_cast<std::streamsize>(prompt_audio_16k_length) * static_cast<std::streamsize>(sizeof(float)));
+		if (!f)
 		{
 			print_error_log("Error: failed to read prompt audio file \"%s\".\n", options.prompt_audio_16k.c_str());
 			return 1;
 		}
 
-		fp.reset(ggml_fopen(options.prompt_audio_24k.c_str(), "rb"));
-		if (!fp)
+		f = open_ifstream_utf8(options.prompt_audio_24k.c_str());
+		if (!f)
 		{
 			print_error_log("Error: failed to open prompt audio file \"%s\".\n", options.prompt_audio_24k.c_str());
 			return 1;
 		}
-		fseek(fp.get(), 0, SEEK_END);
-		long prompt_audio_24k_size = ftell(fp.get());
+		f.seekg(0, std::ios::end);
+		const auto prompt_audio_24k_end = f.tellg();
+		if (prompt_audio_24k_end == std::streampos(-1))
+		{
+			print_error_log("Error: failed to query prompt audio file \"%s\".\n", options.prompt_audio_24k.c_str());
+			return 1;
+		}
+		const auto prompt_audio_24k_size = static_cast<std::streamoff>(prompt_audio_24k_end);
 		if (prompt_audio_24k_size <= 0)
 		{
 			print_error_log("Error: prompt audio file \"%s\" is empty.\n", options.prompt_audio_24k.c_str());
 			return 1;
 		}
-		if (prompt_audio_24k_size % static_cast<long>(sizeof(float)) != 0)
+		if (prompt_audio_24k_size % static_cast<std::streamoff>(sizeof(float)) != 0)
 		{
 			print_error_log("Error: prompt audio file \"%s\" size is not aligned to float samples.\n", options.prompt_audio_24k.c_str());
 			return 1;
 		}
-		if (prompt_audio_24k_size / static_cast<long>(sizeof(float)) > static_cast<long>(std::numeric_limits<uint32_t>::max()))
+		if (prompt_audio_24k_size / static_cast<std::streamoff>(sizeof(float)) > static_cast<std::streamoff>(std::numeric_limits<uint32_t>::max()))
 		{
 			print_error_log("Error: prompt audio file \"%s\" is too large.\n", options.prompt_audio_24k.c_str());
 			return 1;
 		}
-		uint32_t prompt_audio_24k_length = static_cast<uint32_t>(prompt_audio_24k_size / static_cast<long>(sizeof(float)));
+		uint32_t prompt_audio_24k_length = static_cast<uint32_t>(prompt_audio_24k_size / static_cast<std::streamoff>(sizeof(float)));
 		auto prompt_audio_24k_data = std::make_unique<float[]>(prompt_audio_24k_length);
-		fseek(fp.get(), 0, SEEK_SET);
-		if (fread(prompt_audio_24k_data.get(), sizeof(float), prompt_audio_24k_length, fp.get()) != prompt_audio_24k_length)
+		f.seekg(0, std::ios::beg);
+		f.read(reinterpret_cast<char*>(prompt_audio_24k_data.get()), static_cast<std::streamsize>(prompt_audio_24k_length) * static_cast<std::streamsize>(sizeof(float)));
+		if (!f)
 		{
 			print_error_log("Error: failed to read prompt audio file \"%s\".\n", options.prompt_audio_24k.c_str());
 			return 1;

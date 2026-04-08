@@ -3,6 +3,7 @@
 #include "cosyvoice-tokenizer.h"
 #include "cosyvoice-audio.h"
 #include "fft.h"
+#include "common.h"
 
 #include <immintrin.h>
 #include <float.h>
@@ -47,11 +48,7 @@ cosyvoice_frontend_context_t cosyvoice_frontend_load_from_files(const char* spee
 #ifdef _WIN32
     auto OpenFileByUTF8Name = [](PCSTR pFileName)
     {
-        int cch = MultiByteToWideChar(CP_UTF8, 0, pFileName, -1, nullptr, 0);
-        if (cch <= 0) return INVALID_HANDLE_VALUE;
-        auto pwFileName = std::make_unique<WCHAR[]>(cch);
-        MultiByteToWideChar(CP_UTF8, 0, pFileName, -1, pwFileName.get(), cch);
-        return CreateFileW(pwFileName.get(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        return CreateFileW(utf8_to_wstr(pFileName).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     };
 
     struct KernelObjCloser { void operator()(HANDLE hObject) const { CloseHandle(hObject); } };

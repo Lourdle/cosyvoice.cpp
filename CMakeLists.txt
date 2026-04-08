@@ -34,6 +34,11 @@ set(ORT_PREBUILT_DIR "${CMAKE_BINARY_DIR}/_deps/onnxruntime" CACHE PATH "Path to
 include(cmake/Dependencies.cmake)
 
 # -----------------------------------------------------------------------------
+# Internal Common Utilities
+# -----------------------------------------------------------------------------
+add_subdirectory(common)
+
+# -----------------------------------------------------------------------------
 # Core Library: cosyvoice
 # -----------------------------------------------------------------------------
 file(GLOB COSYVOICE_SOURCES "src/*.cpp" "src/*.h" "include/*.h")
@@ -64,8 +69,8 @@ list(APPEND OBJECT_LIBS cosyvoice-frontend-text-norm)
 # ONNX Frontend
 if(NOT COSYVOICE_NO_FRONTEND)
     add_library(cosyvoice-frontend OBJECT "src/cosyvoice-frontend.cpp")
-    target_include_directories(cosyvoice-frontend PRIVATE "include" "vendor/miniaudio")
-    target_link_libraries(cosyvoice-frontend PRIVATE ggml pcre2-8 pcre2-16 onnxruntime)
+    target_include_directories(cosyvoice-frontend PRIVATE "include" "vendor/miniaudio" "common")
+    target_link_libraries(cosyvoice-frontend PRIVATE ggml common pcre2-8 pcre2-16 onnxruntime)
     if(COSYVOICE_NO_AUDIO)
         target_compile_definitions(cosyvoice-frontend PRIVATE COSYVOICE_NO_AUDIO)
     endif()
@@ -73,10 +78,10 @@ if(NOT COSYVOICE_NO_FRONTEND)
 endif()
 
 add_library(cosyvoice ${COSYVOICE_SOURCES})
-target_link_libraries(cosyvoice PRIVATE ${OBJECT_LIBS})
+target_link_libraries(cosyvoice PRIVATE common ${OBJECT_LIBS})
 
 target_include_directories(cosyvoice PUBLIC "include")
-target_include_directories(cosyvoice PRIVATE "vendor/miniaudio")
+target_include_directories(cosyvoice PRIVATE "vendor/miniaudio" "common")
 
 # -----------------------------------------------------------------------------
 # Compiler Flags & SIMD Support
