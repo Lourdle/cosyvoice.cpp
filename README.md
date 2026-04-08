@@ -1,6 +1,10 @@
 # CosyVoice.cpp
 
+Language: [中文](README_zh.md)
+
 > Unofficial project notice: this repository is **not** affiliated with, endorsed by, or maintained by the official CosyVoice team. It is a community-maintained C++/GGML port created by an independent developer.
+
+> **Current status notice:** Audio generation is currently unstable on multiple tested backend/build combinations and may produce noisy output. Please review [Known Issues](#known-issues) before production use.
 
 C++/GGML port of the Python CosyVoice inference pipeline released by the original CosyVoice project, currently focused on **CosyVoice3**.
 
@@ -289,16 +293,56 @@ cosyvoice-cli \
   --prompt-speech-output prompt_speech.gguf
 ```
 
-Mode options:
-- `--mode zero-shot`
-- `--mode instruct` (use `--instruction`)
-- `--mode cross-lingual`
-- `--mode auto` (default)
+### Option Reference
 
-Other useful options:
-- `--speed`
-- `--max-llm-len`
-- `--disable-text-normalization` (available only when ICU support is enabled)
+Core options:
+- `--help, -h`: Show help message and exit.
+- `--model, -m <file>`: CosyVoice model file (`.gguf`) used for TTS.
+- `--text, -t <text>`: Text to synthesize.
+- `--output, -o <file>`: Output audio path.
+  - Normal build: format is inferred from file extension.
+  - `COSYVOICE_NO_AUDIO=ON`: output is always WAV.
+- `--speed, -s <value>`: Speech speed multiplier. Default: `1.0`. Must be `> 0`.
+- `--max-llm-len <value>`: Maximum input token count for LLM (`n_max_seq`). Default: `2048`. Must be a positive integer.
+- `--mode <zero-shot|instruct|cross-lingual>`: TTS mode. Default: auto-detect from `--instruction`.
+- `--instruction, -i <text>`: Instruction text for instruct mode.
+
+Frontend options (available when frontend is compiled, i.e. `COSYVOICE_NO_FRONTEND=OFF`):
+- `--frontend-only`: Run frontend only, save `prompt_speech`, then exit.
+- `--speech-tokenizer <file>`: Frontend speech tokenizer ONNX file.
+- `--campplus <file>`: Frontend campplus ONNX file.
+- `--prompt-audio <file>`: Reference audio file for frontend.
+  - If built with `COSYVOICE_NO_AUDIO=ON`, use:
+    - `--prompt-audio-16k <16k_pcm_file>`: 16 kHz float PCM file.
+    - `--prompt-audio-24k <24k_pcm_file>`: 24 kHz float PCM file.
+- `--prompt-text <text>`: Transcript of the reference audio.
+- `--prompt-speech-output <file>`: Save generated `prompt_speech` to file.
+
+Prompt source options:
+- `--prompt-speech <file>`: Use a saved `prompt_speech` file.
+- Choose exactly one source:
+  - a saved `--prompt-speech`, or
+  - frontend inputs (`--speech-tokenizer`, `--campplus`, audio input, optional/required `--prompt-text` depending on mode).
+- Using `--prompt-speech` and frontend inputs together is rejected.
+
+Text normalization:
+- `--disable-text-normalization`: Disable ICU text normalization before tokenization.
+- This option exists only when ICU is enabled (`COSYVOICE_NO_ICU=OFF`).
+
+### Validation and Mode Behavior
+
+- `--frontend-only` requires: `--speech-tokenizer`, `--campplus`, audio input, and `--prompt-speech-output`.
+- Normal TTS requires: `--model`, `--text`, `--output`, and one prompt source.
+- If `--prompt-speech` is not provided:
+  - frontend inputs are required;
+  - `--prompt-text` is required in `zero-shot` mode;
+  - `--prompt-text` is ignored in `instruct` and `cross-lingual` modes.
+- `--mode` behavior:
+  - `auto`: resolves to `instruct` when `--instruction` is provided, otherwise `zero-shot`.
+  - `instruct` without `--instruction`: warning, then fallback to `zero-shot`.
+  - `zero-shot` with `--instruction`: warning, and `--instruction` is ignored.
+  - unrecognized mode value: warning, then auto-detect.
+- If frontend is not available (`COSYVOICE_NO_FRONTEND=ON`), `--prompt-speech` is mandatory.
 
 ## Known Issues
 Current generation stability is backend-dependent.

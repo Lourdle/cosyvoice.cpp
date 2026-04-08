@@ -1,6 +1,10 @@
 # CosyVoice.cpp
 
+语言： [English](README.md)
+
 > 非官方说明：本仓库**与 CosyVoice 官方团队无隶属关系**，也未获得官方背书或维护。本项目是社区开发者发起和维护的 C++/GGML 移植实现。
+
+> **当前状态提示：** 目前在多种已测试的后端/构建组合下，音频生成仍存在稳定性问题，可能出现噪音。用于生产前请先阅读[已知问题](#已知问题)。
 
 本项目将原始 CosyVoice 项目发布的 Python 推理流程迁移到 C++/GGML，目前主要支持 **CosyVoice3**。
 
@@ -273,7 +277,7 @@ cosyvoice-cli \
   --speech-tokenizer speech_tokenizer.onnx \
   --campplus campplus.onnx \
   --prompt-audio ref.wav \
-  --prompt-text "reference transcript" \
+  --prompt-text "参考语音文本" \
   --text "target text" \
   --output out.wav
 ```
@@ -285,20 +289,60 @@ cosyvoice-cli \
   --speech-tokenizer speech_tokenizer.onnx \
   --campplus campplus.onnx \
   --prompt-audio ref.wav \
-  --prompt-text "reference transcript" \
+  --prompt-text "参考语音文本" \
   --prompt-speech-output prompt_speech.gguf
 ```
 
-模式选项：
-- `--mode zero-shot`
-- `--mode instruct`（配合 `--instruction`）
-- `--mode cross-lingual`
-- `--mode auto`（默认）
+### 参数说明
 
-其他常用选项：
-- `--speed`
-- `--max-llm-len`
-- `--disable-text-normalization`（仅在启用 ICU 支持时可用）
+核心参数：
+- `--help, -h`：显示帮助并退出。
+- `--model, -m <file>`：TTS 使用的 CosyVoice 模型文件（`.gguf`）。
+- `--text, -t <text>`：待合成文本。
+- `--output, -o <file>`：输出音频文件路径。
+  - 常规构建：输出格式由文件扩展名决定。
+  - `COSYVOICE_NO_AUDIO=ON`：输出始终为 WAV。
+- `--speed, -s <value>`：语速倍率，默认 `1.0`，必须大于 `0`。
+- `--max-llm-len <value>`：LLM 最大输入 token 数（`n_max_seq`），默认 `2048`，必须为正整数。
+- `--mode <zero-shot|instruct|cross-lingual>`：TTS 模式。默认按 `--instruction` 自动判定。
+- `--instruction, -i <text>`：instruct 模式指令文本。
+
+前端参数（仅在启用前端构建时可用，即 `COSYVOICE_NO_FRONTEND=OFF`）：
+- `--frontend-only`：仅运行前端，保存 `prompt_speech` 后退出。
+- `--speech-tokenizer <file>`：前端 speech tokenizer ONNX 文件。
+- `--campplus <file>`：前端 campplus ONNX 文件。
+- `--prompt-audio <file>`：前端参考音频。
+  - 若使用 `COSYVOICE_NO_AUDIO=ON` 构建，则改用：
+    - `--prompt-audio-16k <16k_pcm_file>`：16 kHz float PCM 文件。
+    - `--prompt-audio-24k <24k_pcm_file>`：24 kHz float PCM 文件。
+- `--prompt-text <text>`：参考音频对应文本。
+- `--prompt-speech-output <file>`：将生成的 `prompt_speech` 保存到文件。
+
+提示源相关参数：
+- `--prompt-speech <file>`：直接使用已保存的 `prompt_speech` 文件。
+- 提示源二选一：
+  - 使用 `--prompt-speech`，或
+  - 提供前端输入（`--speech-tokenizer`、`--campplus`、音频输入，以及按模式要求是否提供 `--prompt-text`）。
+- 同时传入 `--prompt-speech` 和前端输入会报错。
+
+文本规范化：
+- `--disable-text-normalization`：关闭分词前 ICU 文本规范化。
+- 该选项仅在启用 ICU 时可用（`COSYVOICE_NO_ICU=OFF`）。
+
+### 参数校验与模式行为
+
+- `--frontend-only` 必需：`--speech-tokenizer`、`--campplus`、音频输入、`--prompt-speech-output`。
+- 常规 TTS 必需：`--model`、`--text`、`--output`，以及一个提示源。
+- 未提供 `--prompt-speech` 时：
+  - 必须提供前端输入；
+  - `zero-shot` 模式下必须提供 `--prompt-text`；
+  - `instruct`/`cross-lingual` 模式下 `--prompt-text` 会被忽略。
+- `--mode` 行为：
+  - `auto`：有 `--instruction` 则用 `instruct`，否则用 `zero-shot`。
+  - `instruct` 且缺少 `--instruction`：给出警告并回退到 `zero-shot`。
+  - `zero-shot` 且提供 `--instruction`：给出警告并忽略 `--instruction`。
+  - 传入未知 mode：给出警告并自动判定模式。
+- 若未启用前端（`COSYVOICE_NO_FRONTEND=ON`），则必须使用 `--prompt-speech`。
 
 ## 已知问题
 当前生成稳定性与后端关系较大。
