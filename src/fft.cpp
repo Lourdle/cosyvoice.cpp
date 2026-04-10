@@ -15,7 +15,7 @@ struct fft_context
     int factors[63];
     int max_factor_value;
     int nfft;
-	std::atomic_uint workers;
+    std::atomic_uint workers;
     std::atomic_int64_t idx;
     std::unique_ptr<float[]> twiddles_r;
     float* twiddles_i;
@@ -220,7 +220,7 @@ static void kf_bfly4(
         vidx1 = _mm_mullo_epi32(
             vidx0, _mm_set1_epi32(2)),  /* 2 * fstride */
         vidx2 = _mm_mullo_epi32(
-            vidx0, _mm_set1_epi32(3))  /* 3 * fstride */; k + 3 < m; k += 3)
+            vidx0, _mm_set1_epi32(3))  /* 3 * fstride */; k + 3 < m; k += 4)
     {
         float* p0r = Foutr + k;
         float* p0i = Fouti + k;
@@ -419,7 +419,7 @@ static void kf_bfly3(
 
             const int s2 = fstride * 2;
             __m128i idx2 = _mm_setr_epi32(
-                k * fstride, (k + 1) * s2, (k + 2) * s2, (k + 3) * s2);
+                k * s2, (k + 1) * s2, (k + 2) * s2, (k + 3) * s2);
             tw2r = _mm_i32gather_ps(tw1_r, idx2, 4);
             tw2i = _mm_i32gather_ps(tw1_i, idx2, 4);
         }
@@ -948,13 +948,13 @@ fft_context::fft_context(int nfft) : nfft(nfft), idx(0), workers(0), twiddles_r(
 
     int i = 0;
     constexpr float pi = 3.1415926535897932f;
-	const float factor = -2 * pi / nfft;
+    const float factor = -2 * pi / nfft;
 #ifdef _MSC_VER
     {
         const __m256 factor256 = _mm256_set1_ps(factor);
         __m256 _8 = _mm256_set1_ps(8.f);
         __m256 base = _mm256_setr_ps(0, 1, 2, 3, 4, 5, 6, 7);
-        for (; i < nfft; i += 8)
+        for (; i + 7 < nfft; i += 8)
         {
             __m256 phase = _mm256_mul_ps(base, factor256);
             base = _mm256_add_ps(base, _8);
@@ -970,7 +970,7 @@ fft_context::fft_context(int nfft) : nfft(nfft), idx(0), workers(0), twiddles_r(
         const __m128 factor128 = _mm_set_ps1(factor);
         __m128 _4 = _mm_set_ps1(4.f);
         __m128 base = _mm_setr_ps(i, i + 1, i + 2, i + 3);
-        for (; i < nfft; i += 4)
+        for (; i + 3 < nfft; i += 4)
         {
             __m128 phase = _mm_mul_ps(base, factor128);
             base = _mm_add_ps(base, _4);
@@ -1048,7 +1048,7 @@ static void ggml_fft_op(struct ggml_tensor* dst, int ith, int nth, fft_context* 
 
 void delete_fft_context(fft_context* ctx)
 {
-	delete ctx;
+    delete ctx;
 }
 
 fft_context_ptr create_fft_context(int nfft)
@@ -1061,7 +1061,7 @@ void fft(const float* signal, float* buffer, fft_context& ctx)
     auto nfft = ctx.nfft;
     auto foutr = reinterpret_cast<float*>(alloca(sizeof(float) * nfft * 2 + sizeof(float) * ctx.max_factor_value * 2));
     auto fouti = foutr + nfft;
-	auto buffer_scratchr = fouti + nfft;
+    auto buffer_scratchr = fouti + nfft;
     auto buffer_scratchi = buffer_scratchr + ctx.max_factor_value;
     memset(fouti, 0, sizeof(float) * nfft);
 
@@ -1075,7 +1075,7 @@ void fft(const float* signal, float* buffer, fft_context& ctx)
         _mm256_storeu_ps(buffer + i, abs);
         i += 8;
     }
-	while (i + 3 < nfft)
+    while (i + 3 < nfft)
     {
         __m128 tr = _mm_loadu_ps(foutr + i);
         __m128 ti = _mm_loadu_ps(fouti + i);
@@ -1104,14 +1104,14 @@ ggml_tensor* ggml_stft(ggml_context* ctx, ggml_tensor* a, ggml_tensor* b, int ho
 
     if (center)
     {
-		const auto pad_amount = fctx->nfft / 2;
-		a = ggml_pad_reflect_1d(ctx, a, pad_amount, pad_amount);
+        const auto pad_amount = fctx->nfft / 2;
+        a = ggml_pad_reflect_1d(ctx, a, pad_amount, pad_amount);
     }
 
     const auto win_size = b->ne[0];
     const auto n_frames = (a->ne[0] - win_size) / hop_len + 1;
 
-	a = ggml_dup_inplace(ctx, a);
+    a = ggml_dup_inplace(ctx, a);
     a->ne[0] = win_size;
     a->ne[1] = n_frames;
     a->nb[1] = hop_len * a->nb[0];
@@ -1133,7 +1133,7 @@ struct istft_context
 
 void delete_istft_context(istft_context* ctx)
 {
-	delete ctx;
+    delete ctx;
 }
 
 istft_context_ptr create_istft_context(int nfft, ggml_context* ctx, std::function<void(ggml_tensor*, void*, size_t)> set_data)
@@ -1141,7 +1141,7 @@ istft_context_ptr create_istft_context(int nfft, ggml_context* ctx, std::functio
     const int f = nfft / 2 + 1;
     const int stride = f * nfft;
     auto idft_real = std::make_unique<float[]>(stride * 2);
-	auto idft_imag = idft_real.get() + stride;
+    auto idft_imag = idft_real.get() + stride;
     for (int y = 0; y != f; ++y)
         for (int x = 0; x != nfft; ++x)
         {
@@ -1172,12 +1172,12 @@ istft_context_ptr create_istft_context(int nfft, ggml_context* ctx, std::functio
         }
 
     auto ictx = new istft_context;
-	ictx->nfft = nfft;
+    ictx->nfft = nfft;
     ictx->idft_real = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, f, nfft);
-	ictx->idft_imag = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, f, nfft);
+    ictx->idft_imag = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, f, nfft);
     set_data(ictx->idft_real, idft_real.get(), sizeof(float) * stride);
     set_data(ictx->idft_imag, idft_imag, sizeof(float) * stride);
-	return istft_context_ptr(ictx);
+    return istft_context_ptr(ictx);
 }
 
 static void ggml_istft_finalize_op(struct ggml_tensor* dst, int ith, int nth, void* userdata)
