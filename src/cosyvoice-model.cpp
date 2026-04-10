@@ -199,7 +199,7 @@ static void allocate_tensors(ggml_backend_buffer_t buffer, char* buffer_base, st
 
 void CausalHiFTGenerator::set_rand_ini(const float* data) const
 {
-	ggml_backend_tensor_set(m_source.l_sin_gen.rand_ini, data, 0, nfft / 2 + 1);
+	ggml_backend_tensor_set(m_source.l_sin_gen.rand_ini, data, 0, (nfft / 2 + 1) * sizeof(float));
 }
 
 bool cosyvoice_model_3::llm_is_stop_token(int token_id)
