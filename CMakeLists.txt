@@ -119,16 +119,18 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
                     "${CMAKE_CURRENT_SOURCE_DIR}/vendor/simde")
     if(SIMDE_INCLUDE_DIR)
         message(STATUS "SIMDe found: ${SIMDE_INCLUDE_DIR}")
-        target_include_directories(cosyvoice PRIVATE ${SIMDE_INCLUDE_DIR})
+        target_include_directories(cosyvoice SYSTEM PRIVATE ${SIMDE_INCLUDE_DIR})
         if(TARGET cosyvoice-frontend)
-            target_include_directories(cosyvoice-frontend PRIVATE ${SIMDE_INCLUDE_DIR})
+            target_include_directories(cosyvoice-frontend SYSTEM PRIVATE ${SIMDE_INCLUDE_DIR})
         endif()
         if(TARGET cosyvoice-frontend-text-norm)
-            target_include_directories(cosyvoice-frontend-text-norm PRIVATE ${SIMDE_INCLUDE_DIR})
+            target_include_directories(cosyvoice-frontend-text-norm SYSTEM PRIVATE ${SIMDE_INCLUDE_DIR})
         endif()
     else()
-        message(WARNING "SIMDe not found — AVX2 intrinsics in cosyvoice-frontend and fft "
-                        "will fail to compile on ARM. Install SIMDe or set SIMDE_INCLUDE_DIR.")
+        message(FATAL_ERROR
+                "SIMDe is required on ARM64 because AVX2 intrinsics in cosyvoice-frontend and fft "
+                "unconditionally include SIMDe headers. Install SIMDe or set SIMDE_INCLUDE_DIR to "
+                "the directory containing the top-level 'simde/' folder.")
     endif()
 endif()
 
