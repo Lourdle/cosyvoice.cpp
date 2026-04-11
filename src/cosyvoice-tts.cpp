@@ -162,7 +162,6 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
 			reset_builtin_sampler_rng();
 		return false;
 	}
-
 	if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
 	{
 		ggml_backend_sched_reset(sched.get());
@@ -226,7 +225,8 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 	auto ditctx = flow.decoder.prepare_context(ctx1.get(), mu, spks, conds);
 	do
 	{
-		auto buft = ggml_backend_get_default_buffer_type(backend.get());
+		// CPU-only workaround: allocate ditctx on CPU to match CPU graph execution
+		auto buft = ggml_backend_get_default_buffer_type(cpu_backend.get());
 		auto size = ggml_backend_alloc_ctx_tensors_from_buft_size(ctx1.get(), buft);
 
 		if (!token2wav_buffer || size > ggml_backend_buffer_get_size(token2wav_buffer.get()))
@@ -248,19 +248,21 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 
 	uint32_t noise_len = static_cast<uint32_t>(ggml_nelements(ditctx.x));
 	float* noise_buffer = noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_FLOW, noise_len, nullptr, noise_callback_ctx);
-	ggml_backend_tensor_set_async(backend.get(), ditctx.x, noise_buffer, 0, ggml_nbytes(ditctx.x));
+	ggml_backend_tensor_set_async(cpu_backend.get(), ditctx.x, noise_buffer, 0, ggml_nbytes(ditctx.x));
 
 	auto feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 1, op_caps, cut_len);
 	ggml_build_forward_expand(gf, feat);
-	set_graph_backend(gf, sched.get(), backend.get(), cpu_backend.get());
+	// CPU-only workaround: avoid Metal/CPU mixed execution segfault in token2wav.
+	// Metal↔CPU tensor buffer transfer causes segfault when unsupported ops (PAD, IM2COL)
+	// are scattered across the graph. Running token2wav entirely on CPU avoids the issue.
+	set_graph_backend(gf, sched.get(), cpu_backend.get(), cpu_backend.get());
 	ggml_backend_sched_synchronize(sched.get());
 	ggml_backend_sched_alloc_graph(sched.get(), gf);
 
-	ggml_backend_tensor_set_async(backend.get(), token, token_ids, 0, token->nb[1]);
-	ggml_backend_tensor_set_async(backend.get(), prompt_token, prompt->flow_prompt_speech_tokens.first.get(), 0, prompt_token->nb[1]);
-	ggml_backend_tensor_set_async(backend.get(), prompt_feat, prompt->prompt_speech_feat.data, 0, prompt_feat->nb[2]);
-	ggml_backend_tensor_set_async(backend.get(), embedding, prompt->flow_embedding.data, 0, embedding->nb[2]);
-
+	ggml_backend_tensor_set_async(cpu_backend.get(), token, token_ids, 0, token->nb[1]);
+	ggml_backend_tensor_set_async(cpu_backend.get(), prompt_token, prompt->flow_prompt_speech_tokens.first.get(), 0, prompt_token->nb[1]);
+	ggml_backend_tensor_set_async(cpu_backend.get(), prompt_feat, prompt->prompt_speech_feat.data, 0, prompt_feat->nb[2]);
+	ggml_backend_tensor_set_async(cpu_backend.get(), embedding, prompt->flow_embedding.data, 0, embedding->nb[2]);
 	status = ggml_backend_sched_graph_compute(sched.get(), gf);
 	noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_FLOW, noise_len, noise_buffer, noise_callback_ctx);
 	if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED)
@@ -277,7 +279,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 	}
 
 	ggml_tensor* t_leaf;
-	ggml_backend_tensor_copy_async(backend.get(), backend.get(), feat, ditctx.x);
+	ggml_backend_tensor_copy_async(cpu_backend.get(), cpu_backend.get(), feat, ditctx.x);
 
 	ggml_reset(ctx0.get());
 	ggml_backend_sched_reset(sched.get());
@@ -285,7 +287,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 	feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 1, op_caps, cut_len, &t_leaf);
 
 	ggml_build_forward_expand(gf, feat);
-	set_graph_backend(gf, sched.get(), backend.get(), cpu_backend.get());
+	set_graph_backend(gf, sched.get(), cpu_backend.get(), cpu_backend.get());
 
 	ggml_backend_sched_alloc_graph(sched.get(), gf);
 	status = ggml_backend_sched_graph_compute(sched.get(), gf);
@@ -296,7 +298,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 
 	for (int step = 3; step != flow.decoder.t_span.size() - 1; ++step)
 	{
-		ggml_backend_tensor_copy_async(backend.get(), backend.get(), feat, ditctx.x);
+		ggml_backend_tensor_copy_async(cpu_backend.get(), cpu_backend.get(), feat, ditctx.x);
 
 		auto [t, dt] = flow.decoder.get_t_and_dt(ctx0.get(), step);
 		reinterpret_cast<float*>(t_leaf->op_params)[0] = t;
@@ -307,14 +309,14 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 			return false;
 	}
 
-	ggml_backend_tensor_copy_async(backend.get(), backend.get(), feat, ditctx.x);
+	ggml_backend_tensor_copy_async(cpu_backend.get(), cpu_backend.get(), feat, ditctx.x);
 	ggml_reset(ctx0.get());
 	ggml_backend_sched_reset(sched.get());
 	gf = ggml_new_graph(ctx0.get());
 	feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, static_cast<int>(flow.decoder.t_span.size() - 1), op_caps, cut_len, nullptr);
 
 	ggml_build_forward_expand(gf, feat);
-	set_graph_backend(gf, sched.get(), backend.get(), cpu_backend.get());
+	set_graph_backend(gf, sched.get(), cpu_backend.get(), cpu_backend.get());
 
 	ggml_backend_sched_alloc_graph(sched.get(), gf);
 	status = ggml_backend_sched_graph_compute(sched.get(), gf);
@@ -323,7 +325,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 	ggml_reset(ctx1.get());
 	ggml_tensor* speech_feat = ggml_new_tensor(ctx1.get(), feat->type, GGML_MAX_DIMS, feat->ne);
 	ggml_backend_tensor_alloc(token2wav_buffer.get(), speech_feat, ggml_backend_buffer_get_base(token2wav_buffer.get()));
-	ggml_backend_tensor_copy_async(backend.get(), backend.get(), feat, speech_feat);
+	ggml_backend_tensor_copy_async(cpu_backend.get(), cpu_backend.get(), feat, speech_feat);
 
 	ggml_reset(ctx0.get());
 	ggml_backend_sched_reset(sched.get());
@@ -336,7 +338,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 
 	auto [generated_speech, noise] = hift.build_cgraph(ctx0.get(), speech_feat);
 	ggml_build_forward_expand(gf, generated_speech);
-	set_graph_backend(gf, sched.get(), backend.get(), cpu_backend.get(), ggml_graph_n_nodes(gf) - 1);
+	set_graph_backend(gf, sched.get(), cpu_backend.get(), cpu_backend.get(), ggml_graph_n_nodes(gf) - 1);
 
 	ggml_backend_sched_set_tensor_backend(sched.get(), generated_speech, cpu_backend.get());
 	ggml_backend_sched_alloc_graph(sched.get(), gf);
@@ -348,7 +350,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 	}
 	noise_len = static_cast<uint32_t>(ggml_nelements(noise));
 	noise_buffer = noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_HIFT, noise_len, nullptr, noise_callback_ctx);
-	ggml_backend_tensor_set_async(backend.get(), noise, noise_buffer, 0, noise->nb[2]);
+	ggml_backend_tensor_set_async(cpu_backend.get(), noise, noise_buffer, 0, noise->nb[2]);
 
 	result->data = reinterpret_cast<float*>(generated_speech->data);
 	result->length = static_cast<uint32_t>(generated_speech->ne[0]);
