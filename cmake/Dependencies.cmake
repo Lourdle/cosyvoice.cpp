@@ -26,77 +26,117 @@ add_subdirectory("${GGML_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/_deps/ggml-build")
 
 # 3. ICU
 if(NOT COSYVOICE_NO_ICU)
-    if(NOT EXISTS "${ICU_PREBUILT_DIR}/include/unicode/utypes.h")
-        find_package(ICU COMPONENTS i18n uc data QUIET)
-        if(ICU_FOUND)
-            message(STATUS "Found ICU via find_package: ${ICU_INCLUDE_DIRS}")
-        else()
-            if(WIN32)
-                message(STATUS "ICU not found. Downloading pre-built Windows binaries to ${ICU_PREBUILT_DIR}...")
-                if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
-                    set(ICU_ZIP_URL "https://github.com/unicode-org/icu/releases/download/release-78.2/icu4c-78.2-WinARM64-MSVC2022.zip")
-                else()
-                    set(ICU_ZIP_URL "https://github.com/unicode-org/icu/releases/download/release-78.2/icu4c-78.2-Win64-MSVC2022.zip")
-                endif()
-                
-                file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps")
-                file(DOWNLOAD ${ICU_ZIP_URL} "${CMAKE_BINARY_DIR}/_deps/icu.zip" STATUS DL_STATUS)
-                list(GET DL_STATUS 0 DL_ERR_CODE)
-                if(DL_ERR_CODE EQUAL 0)
-                    execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf "${CMAKE_BINARY_DIR}/_deps/icu.zip" WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/_deps/")
-                    # The official ICU zip extracts into a folder named "icu", so it naturally creates ${CMAKE_BINARY_DIR}/_deps/icu
-                else()
-                    message(FATAL_ERROR "Failed to download ICU from ${ICU_ZIP_URL}")
-                endif()
-            else()
-                message(FATAL_ERROR "ICU not found! Please install libicu-dev (Linux) or icu4c (macOS).")
-            endif()
-        endif()
-    endif()
+  if(NOT EXISTS "${ICU_PREBUILT_DIR}/include/unicode/utypes.h")
+    find_package(ICU COMPONENTS i18n uc data QUIET)
 
-    if(EXISTS "${ICU_PREBUILT_DIR}/include/unicode/utypes.h")
-        message(STATUS "Using prebuilt ICU from ${ICU_PREBUILT_DIR}")
-        add_library(ICU::uc SHARED IMPORTED)
-        add_library(ICU::i18n SHARED IMPORTED)
-        
-        if(WIN32)
-            # Find exact DLL name since version suffix varies (e.g. icuuc78.dll vs icuuc.dll)
-            file(GLOB ICU_UC_DLL "${ICU_PREBUILT_DIR}/bin64/icuuc*.dll" "${ICU_PREBUILT_DIR}/lib64/icuuc*.dll")
-            file(GLOB ICU_I18N_DLL "${ICU_PREBUILT_DIR}/bin64/icuin*.dll" "${ICU_PREBUILT_DIR}/lib64/icuin*.dll")
-            file(GLOB ICU_DT_DLL "${ICU_PREBUILT_DIR}/bin64/icudt*.dll" "${ICU_PREBUILT_DIR}/lib64/icudt*.dll")
-            list(GET ICU_UC_DLL 0 ICU_UC_DLL_PATH)
-            list(GET ICU_I18N_DLL 0 ICU_I18N_DLL_PATH)
-            list(GET ICU_DT_DLL 0 ICU_DT_DLL_PATH)
-            
-            # We define ICU::data to track the data DLL (icudt) so we can easily copy it
-            add_library(ICU::data SHARED IMPORTED)
-            set_target_properties(ICU::data PROPERTIES
-                IMPORTED_LOCATION "${ICU_DT_DLL_PATH}"
-                IMPORTED_IMPLIB "${ICU_PREBUILT_DIR}/lib64/icudt.lib"
-            )
-            
-            set_target_properties(ICU::uc PROPERTIES
-                IMPORTED_LOCATION "${ICU_UC_DLL_PATH}"
-                IMPORTED_IMPLIB "${ICU_PREBUILT_DIR}/lib64/icuuc.lib"
-                INTERFACE_INCLUDE_DIRECTORIES "${ICU_PREBUILT_DIR}/include"
-            )
-            set_target_properties(ICU::i18n PROPERTIES
-                IMPORTED_LOCATION "${ICU_I18N_DLL_PATH}"
-                IMPORTED_IMPLIB "${ICU_PREBUILT_DIR}/lib64/icuin.lib"
-                INTERFACE_INCLUDE_DIRECTORIES "${ICU_PREBUILT_DIR}/include"
-            )
+    if(ICU_FOUND)
+      message(STATUS "Found ICU via find_package: ${ICU_INCLUDE_DIRS}")
+    else()
+      if(WIN32)
+        message(STATUS "ICU not found. Downloading pre-built Windows binaries to ${ICU_PREBUILT_DIR}...")
+
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
+          set(ICU_ZIP_URL "https://github.com/unicode-org/icu/releases/download/release-78.2/icu4c-78.2-WinARM64-MSVC2022.zip")
         else()
-            # Basic Unix fallback if manually placed
-            set_target_properties(ICU::uc PROPERTIES
-                IMPORTED_LOCATION "${ICU_PREBUILT_DIR}/lib/libicuuc.so"
-                INTERFACE_INCLUDE_DIRECTORIES "${ICU_PREBUILT_DIR}/include"
-            )
-            set_target_properties(ICU::i18n PROPERTIES
-                IMPORTED_LOCATION "${ICU_PREBUILT_DIR}/lib/libicui18n.so"
-                INTERFACE_INCLUDE_DIRECTORIES "${ICU_PREBUILT_DIR}/include"
-            )
+          set(ICU_ZIP_URL "https://github.com/unicode-org/icu/releases/download/release-78.2/icu4c-78.2-Win64-MSVC2022.zip")
         endif()
+
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps")
+        file(DOWNLOAD "${ICU_ZIP_URL}" "${CMAKE_BINARY_DIR}/_deps/icu.zip" STATUS DL_STATUS)
+        list(GET DL_STATUS 0 DL_ERR_CODE)
+
+        if(DL_ERR_CODE EQUAL 0)
+          file(MAKE_DIRECTORY "${ICU_PREBUILT_DIR}")
+          execute_process(
+            COMMAND ${CMAKE_COMMAND} -E tar xf "${CMAKE_BINARY_DIR}/_deps/icu.zip"
+            WORKING_DIRECTORY "${ICU_PREBUILT_DIR}"
+          )
+
+          # Auto-detect actual ICU root after extraction.
+          unset(_ICU_FOUND_ROOT)
+          if(EXISTS "${ICU_PREBUILT_DIR}/include/unicode/utypes.h")
+            set(_ICU_FOUND_ROOT "${ICU_PREBUILT_DIR}")
+          endif()
+
+          if(NOT _ICU_FOUND_ROOT)
+            file(GLOB _ICU_DIRS LIST_DIRECTORIES true "${ICU_PREBUILT_DIR}/*")
+            foreach(_dir IN LISTS _ICU_DIRS)
+              if(EXISTS "${_dir}/include/unicode/utypes.h")
+                set(_ICU_FOUND_ROOT "${_dir}")
+                break()
+              endif()
+            endforeach()
+          endif()
+
+          if(_ICU_FOUND_ROOT)
+            set(ICU_PREBUILT_DIR "${_ICU_FOUND_ROOT}" CACHE PATH "Path to custom prebuilt ICU" FORCE)
+            message(STATUS "Using detected ICU root: ${ICU_PREBUILT_DIR}")
+          else()
+            message(FATAL_ERROR
+              "ICU downloaded but could not locate include/unicode/utypes.h under ${CMAKE_BINARY_DIR}/_deps"
+            )
+          endif()
+        else()
+          message(FATAL_ERROR "Failed to download ICU from ${ICU_ZIP_URL}")
+        endif()
+      else()
+        message(FATAL_ERROR "ICU not found! Please install libicu-dev (Linux) or icu4c (macOS).")
+      endif()
     endif()
+  endif()
+
+  if(EXISTS "${ICU_PREBUILT_DIR}/include/unicode/utypes.h")
+    message(STATUS "Using prebuilt ICU from ${ICU_PREBUILT_DIR}")
+
+    add_library(ICU::uc SHARED IMPORTED)
+    add_library(ICU::i18n SHARED IMPORTED)
+
+    if(WIN32)
+      file(GLOB ICU_UC_DLL   "${ICU_PREBUILT_DIR}/bin64/icuuc*.dll" "${ICU_PREBUILT_DIR}/lib64/icuuc*.dll")
+      file(GLOB ICU_I18N_DLL "${ICU_PREBUILT_DIR}/bin64/icuin*.dll" "${ICU_PREBUILT_DIR}/lib64/icuin*.dll")
+      file(GLOB ICU_DT_DLL   "${ICU_PREBUILT_DIR}/bin64/icudt*.dll" "${ICU_PREBUILT_DIR}/lib64/icudt*.dll")
+
+      list(LENGTH ICU_UC_DLL _icu_uc_len)
+      list(LENGTH ICU_I18N_DLL _icu_i18n_len)
+      list(LENGTH ICU_DT_DLL _icu_dt_len)
+
+      if(_icu_uc_len EQUAL 0 OR _icu_i18n_len EQUAL 0 OR _icu_dt_len EQUAL 0)
+        message(FATAL_ERROR
+          "ICU root found at ${ICU_PREBUILT_DIR}, but required DLLs were not found in bin64/lib64"
+        )
+      endif()
+
+      list(GET ICU_UC_DLL 0 ICU_UC_DLL_PATH)
+      list(GET ICU_I18N_DLL 0 ICU_I18N_DLL_PATH)
+      list(GET ICU_DT_DLL 0 ICU_DT_DLL_PATH)
+
+      add_library(ICU::data SHARED IMPORTED)
+
+      set_target_properties(ICU::data PROPERTIES
+        IMPORTED_LOCATION "${ICU_DT_DLL_PATH}"
+        IMPORTED_IMPLIB "${ICU_PREBUILT_DIR}/lib64/icudt.lib"
+      )
+      set_target_properties(ICU::uc PROPERTIES
+        IMPORTED_LOCATION "${ICU_UC_DLL_PATH}"
+        IMPORTED_IMPLIB "${ICU_PREBUILT_DIR}/lib64/icuuc.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${ICU_PREBUILT_DIR}/include"
+      )
+      set_target_properties(ICU::i18n PROPERTIES
+        IMPORTED_LOCATION "${ICU_I18N_DLL_PATH}"
+        IMPORTED_IMPLIB "${ICU_PREBUILT_DIR}/lib64/icuin.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${ICU_PREBUILT_DIR}/include"
+      )
+    else()
+      set_target_properties(ICU::uc PROPERTIES
+        IMPORTED_LOCATION "${ICU_PREBUILT_DIR}/lib/libicuuc.so"
+        INTERFACE_INCLUDE_DIRECTORIES "${ICU_PREBUILT_DIR}/include"
+      )
+      set_target_properties(ICU::i18n PROPERTIES
+        IMPORTED_LOCATION "${ICU_PREBUILT_DIR}/lib/libicui18n.so"
+        INTERFACE_INCLUDE_DIRECTORIES "${ICU_PREBUILT_DIR}/include"
+      )
+    endif()
+  endif()
 endif()
 
 # 4. ONNX Runtime
