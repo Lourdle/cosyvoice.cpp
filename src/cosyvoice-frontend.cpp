@@ -7,10 +7,12 @@
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
-#else
+#elif defined(__aarch64__) || defined(_M_ARM64)
 #define SIMDE_ENABLE_NATIVE_ALIASES
 #include <simde/x86/avx2.h>
 #include <simde/x86/fma.h>
+#else
+#error "src/cosyvoice-frontend.cpp requires x86_64 or ARM64 SIMD support"
 #endif
 #include <float.h>
 
