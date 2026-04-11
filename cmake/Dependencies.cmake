@@ -46,28 +46,20 @@ if(NOT COSYVOICE_NO_ICU)
         list(GET DL_STATUS 0 DL_ERR_CODE)
 
         if(DL_ERR_CODE EQUAL 0)
+          file(MAKE_DIRECTORY "${ICU_PREBUILT_DIR}")
           execute_process(
             COMMAND ${CMAKE_COMMAND} -E tar xf "${CMAKE_BINARY_DIR}/_deps/icu.zip"
-            WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/_deps"
+            WORKING_DIRECTORY "${ICU_PREBUILT_DIR}"
           )
 
           # Auto-detect actual ICU root after extraction.
-          set(_ICU_CANDIDATES
-            "${ICU_PREBUILT_DIR}"
-            "${CMAKE_BINARY_DIR}/_deps"
-            "${CMAKE_BINARY_DIR}/_deps/icu"
-          )
-
           unset(_ICU_FOUND_ROOT)
-          foreach(_cand IN LISTS _ICU_CANDIDATES)
-            if(EXISTS "${_cand}/include/unicode/utypes.h")
-              set(_ICU_FOUND_ROOT "${_cand}")
-              break()
-            endif()
-          endforeach()
+          if(EXISTS "${ICU_PREBUILT_DIR}/include/unicode/utypes.h")
+            set(_ICU_FOUND_ROOT "${ICU_PREBUILT_DIR}")
+          endif()
 
           if(NOT _ICU_FOUND_ROOT)
-            file(GLOB _ICU_DIRS LIST_DIRECTORIES true "${CMAKE_BINARY_DIR}/_deps/*")
+            file(GLOB _ICU_DIRS LIST_DIRECTORIES true "${ICU_PREBUILT_DIR}/*")
             foreach(_dir IN LISTS _ICU_DIRS)
               if(EXISTS "${_dir}/include/unicode/utypes.h")
                 set(_ICU_FOUND_ROOT "${_dir}")
