@@ -342,6 +342,10 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 
 	ggml_backend_sched_set_tensor_backend(sched.get(), generated_speech, cpu_backend.get());
 	ggml_backend_sched_alloc_graph(sched.get(), gf);
+	// Disable oversized IM2COL ops that would require multi-GB intermediate buffers.
+	// This is a known limitation — long sequences (>~400 speech tokens) produce
+	// IM2COL tensors with ne[1] > 0xFFFF that exhaust memory. The workaround is to
+	// split long texts into shorter segments before synthesis.
 	for (int i = 0; i != ggml_graph_n_nodes(gf); ++i)
 	{
 		auto node = ggml_graph_node(gf, i);
