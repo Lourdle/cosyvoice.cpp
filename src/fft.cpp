@@ -2,7 +2,13 @@
 #include "ggml-fft.h"
 
 #include <math.h>
+#if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
+#else
+#define SIMDE_ENABLE_NATIVE_ALIASES
+#include <simde/x86/avx2.h>
+#include <simde/x86/fma.h>
+#endif
 
 #include <cstring>
 #include <atomic>

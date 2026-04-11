@@ -6,6 +6,14 @@
 #include <span>
 #include <ranges>
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#else
+#define SIMDE_ENABLE_NATIVE_ALIASES
+#include <simde/x86/avx2.h>
+#include <simde/x86/fma.h>
+#endif
+
 static void build_causal_mask(ggml_fp16_t* mask, uint32_t n_batch, uint32_t seq_len)
 {
     uint32_t visible_prefix_end = seq_len - n_batch;

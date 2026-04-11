@@ -22,6 +22,27 @@ if(NOT EXISTS "${GGML_SOURCE_DIR}/CMakeLists.txt")
         COMMAND git clone --depth=1 https://github.com/ggml-org/ggml.git "${GGML_SOURCE_DIR}"
     )
 endif()
+
+# Apply local patches to ggml (idempotent — skips if already applied).
+set(GGML_PAD_PATCH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/patches/ggml-metal-pad-beg.patch")
+if(APPLE AND EXISTS "${GGML_PAD_PATCH}")
+    execute_process(
+        COMMAND git apply --check "${GGML_PAD_PATCH}"
+        WORKING_DIRECTORY "${GGML_SOURCE_DIR}"
+        RESULT_VARIABLE PATCH_CHECK_RESULT
+        OUTPUT_QUIET ERROR_QUIET
+    )
+    if(PATCH_CHECK_RESULT EQUAL 0)
+        message(STATUS "Applying ggml-metal PAD beg-padding patch...")
+        execute_process(
+            COMMAND git apply "${GGML_PAD_PATCH}"
+            WORKING_DIRECTORY "${GGML_SOURCE_DIR}"
+        )
+    else()
+        message(STATUS "ggml-metal PAD beg-padding patch already applied or not applicable — skipping.")
+    endif()
+endif()
+
 add_subdirectory("${GGML_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/_deps/ggml-build")
 
 # 3. ICU
