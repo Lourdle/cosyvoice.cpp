@@ -1,0 +1,80 @@
+--- a/src/ggml-metal/ggml-metal-impl.h
++++ b/src/ggml-metal/ggml-metal-impl.h
+@@ -993,6 +993,10 @@
+     uint64_t nb1;
+     uint64_t nb2;
+     uint64_t nb3;
++    int32_t  p0_beg;
++    int32_t  p1_beg;
++    int32_t  p2_beg;
++    int32_t  p3_beg;
+ } ggml_metal_kargs_pad;
+
+ typedef struct {
+--- a/src/ggml-metal/ggml-metal-ops.cpp
++++ b/src/ggml-metal/ggml-metal-ops.cpp
+@@ -3965,7 +3965,11 @@
+         /*.nb0  =*/ nb0,
+         /*.nb1  =*/ nb1,
+         /*.nb2  =*/ nb2,
+-        /*.nb3  =*/ nb3
++        /*.nb3  =*/ nb3,
++        /*.p0_beg =*/ ggml_get_op_params_i32(op, 0),
++        /*.p1_beg =*/ ggml_get_op_params_i32(op, 2),
++        /*.p2_beg =*/ ggml_get_op_params_i32(op, 4),
++        /*.p3_beg =*/ ggml_get_op_params_i32(op, 6),
+     };
+
+     auto pipeline = ggml_metal_library_get_pipeline_pad(lib, op);
+--- a/src/ggml-metal/ggml-metal.metal
++++ b/src/ggml-metal/ggml-metal.metal
+@@ -5249,18 +5249,22 @@
+     const int64_t i3 = tgpig.z;
+     const int64_t i2 = tgpig.y;
+     const int64_t i1 = tgpig.x;
+
+-    const int64_t i03 = i3;
+-    const int64_t i02 = i2;
+-    const int64_t i01 = i1;
++    // Source indices with beg-padding offset
++    const int64_t i03 = i3 - args.p3_beg;
++    const int64_t i02 = i2 - args.p2_beg;
++    const int64_t i01 = i1 - args.p1_beg;
+
+-    device const float * src0_ptr = (device const float *) (src0 + i03*args.nb03 + i02*args.nb02 + i01*args.nb01);
+-    device       float * dst_ptr  = (device       float *) (dst  +  i3*args.nb3  +  i2*args.nb2  +  i1*args.nb1);
++    device float * dst_ptr = (device float *) (dst + i3*args.nb3 + i2*args.nb2 + i1*args.nb1);
+
+-    if (i1 < args.ne01 && i2 < args.ne02 && i3 < args.ne03) {
++    if (i01 >= 0 && i01 < args.ne01 &&
++        i02 >= 0 && i02 < args.ne02 &&
++        i03 >= 0 && i03 < args.ne03) {
++        device const float * src0_ptr = (device const float *) (src0 + i03*args.nb03 + i02*args.nb02 + i01*args.nb01);
+         for (int i0 = tpitg.x; i0 < args.ne0; i0 += ntg.x) {
+-            if (i0 < args.ne00) {
+-                dst_ptr[i0] = src0_ptr[i0];
++            const int64_t i00 = i0 - args.p0_beg;
++            if (i00 >= 0 && i00 < args.ne00) {
++                dst_ptr[i0] = src0_ptr[i00];
+             } else {
+                 dst_ptr[i0] = 0.0f;
+             }
+--- a/src/ggml-metal/ggml-metal-device.m
++++ b/src/ggml-metal/ggml-metal-device.m
+@@ -1123,13 +1123,9 @@
+         case GGML_OP_POOL_2D:
+             return op->src[0]->type == GGML_TYPE_F32;
+         case GGML_OP_PAD:
+-            // TODO: add circular padding support for metal, see https://github.com/ggml-org/llama.cpp/pull/16985
+-            if (ggml_get_op_params_i32(op, 8) != 0) {
+-                return false;
+-            }
+-
+-            return (ggml_get_op_params_i32(op, 0) == 0) && (ggml_get_op_params_i32(op, 2) == 0) &&
+-                   (ggml_get_op_params_i32(op, 4) == 0) && (ggml_get_op_params_i32(op, 6) == 0);
++            // Circular padding not yet supported on Metal.
++            // Zero-padding with arbitrary beg/end offsets is supported.
++            return ggml_get_op_params_i32(op, 8) == 0;
+         case GGML_OP_PAD_REFLECT_1D:
+         case GGML_OP_TIMESTEP_EMBEDDING:
+         case GGML_OP_LEAKY_RELU:

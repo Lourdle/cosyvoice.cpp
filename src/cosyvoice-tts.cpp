@@ -123,17 +123,34 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
 		{
 			if (!llm_decode(speech_type, cur))
 				throw std::runtime_error("Failed to decode LLM output.\n");
-			int stop_token_trials = 0;
-		resample:
-			const auto token_id = llm_sample_token();
-			if (llm_is_stop_token(token_id))
-				if (n > min_len) break;
-				else
+			auto token_id = llm_sample_token();
+			if (llm_is_stop_token(token_id) && n <= min_len)
+			{
+				// Before min_len, suppress stop tokens by zeroing their
+				// probability in the nucleus set and re-normalizing.
+				auto* np = reinterpret_cast<cosyvoice_llm_token_prob_t*>(nucleus_probs.get() + 1);
+				int nk = *reinterpret_cast<int*>(nucleus_probs.get());
+				float sum = 0.f;
+				for (int i = 0; i < nk; ++i)
 				{
-					if (++stop_token_trials > 100)
-						throw std::runtime_error("Too many stop tokens sampled, something might be wrong with the model or the sampling parameters.\n");
-					goto resample;
+					if (llm_is_stop_token(np[i].token_id))
+						np[i].prob = 0.f;
+					else
+						sum += np[i].prob;
 				}
+				if (sum > 0.f)
+				{
+					for (int i = 0; i < nk; ++i)
+						np[i].prob /= sum;
+					token_id = llm_sample_token();
+				}
+				// If all candidates are stop tokens, accept the original
+				// stop token and let the outer loop break naturally.
+				if (llm_is_stop_token(token_id))
+					break;
+			}
+			else if (llm_is_stop_token(token_id))
+				break;
 			llm_accept_token(token_id);
 			cur = speech_emb + token_id * speech_row_size;
 		}
@@ -166,18 +183,27 @@ static void set_graph_backend(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml_
 		auto node = ggml_graph_node(gf, i);
 		if (node->op == GGML_OP_CUSTOM)
 		{
-			do {
+			// CUSTOM ops always run on CPU (require host function pointers).
+			if (cpu_backend)
 				ggml_backend_sched_set_tensor_backend(sched, node, cpu_backend);
-				if (++i == nodes) return;
-				node = ggml_graph_node(gf, i);
-			} while ((node->op == GGML_OP_VIEW || node->op == GGML_OP_PERMUTE));
-
-			goto set_main_backend;
+			// Also move subsequent VIEW/PERMUTE to CPU to keep data locality.
+			while (i + 1 < nodes) {
+				auto next = ggml_graph_node(gf, i + 1);
+				if (next->op != GGML_OP_VIEW && next->op != GGML_OP_PERMUTE)
+					break;
+				if (cpu_backend)
+					ggml_backend_sched_set_tensor_backend(sched, next, cpu_backend);
+				++i;
+			}
 		}
-		else
+		else if (ggml_backend_supports_op(backend, node))
 		{
-		set_main_backend:
 			ggml_backend_sched_set_tensor_backend(sched, node, backend);
+		}
+		else if (cpu_backend)
+		{
+			// Unsupported op on main backend — explicitly route to CPU.
+			ggml_backend_sched_set_tensor_backend(sched, node, cpu_backend);
 		}
 	}
 }
@@ -226,7 +252,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 
 	auto feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 1, op_caps, cut_len);
 	ggml_build_forward_expand(gf, feat);
-	set_graph_backend(gf, sched.get(), backend.get(), nullptr);
+	set_graph_backend(gf, sched.get(), backend.get(), cpu_backend.get());
 	ggml_backend_sched_synchronize(sched.get());
 	ggml_backend_sched_alloc_graph(sched.get(), gf);
 
@@ -259,7 +285,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 	feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 1, op_caps, cut_len, &t_leaf);
 
 	ggml_build_forward_expand(gf, feat);
-	set_graph_backend(gf, sched.get(), backend.get(), nullptr);
+	set_graph_backend(gf, sched.get(), backend.get(), cpu_backend.get());
 
 	ggml_backend_sched_alloc_graph(sched.get(), gf);
 	status = ggml_backend_sched_graph_compute(sched.get(), gf);
@@ -288,7 +314,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 	feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, static_cast<int>(flow.decoder.t_span.size() - 1), op_caps, cut_len, nullptr);
 
 	ggml_build_forward_expand(gf, feat);
-	set_graph_backend(gf, sched.get(), backend.get(), nullptr);
+	set_graph_backend(gf, sched.get(), backend.get(), cpu_backend.get());
 
 	ggml_backend_sched_alloc_graph(sched.get(), gf);
 	status = ggml_backend_sched_graph_compute(sched.get(), gf);

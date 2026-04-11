@@ -110,6 +110,26 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
             target_compile_options(cosyvoice-frontend-text-norm PRIVATE "/arch:AVX2")
         endif()
     endif()
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+    # ARM: Use SIMDe (SIMD Everywhere) for AVX2/FMA→NEON translation.
+    # Install SIMDe via your package manager (e.g. `brew install simde`)
+    # or place headers under vendor/simde/.
+    find_path(SIMDE_INCLUDE_DIR NAMES simde/x86/avx2.h
+              HINTS /opt/homebrew/include /usr/local/include /usr/include
+                    "${CMAKE_CURRENT_SOURCE_DIR}/vendor/simde")
+    if(SIMDE_INCLUDE_DIR)
+        message(STATUS "SIMDe found: ${SIMDE_INCLUDE_DIR}")
+        target_include_directories(cosyvoice PRIVATE ${SIMDE_INCLUDE_DIR})
+        if(TARGET cosyvoice-frontend)
+            target_include_directories(cosyvoice-frontend PRIVATE ${SIMDE_INCLUDE_DIR})
+        endif()
+        if(TARGET cosyvoice-frontend-text-norm)
+            target_include_directories(cosyvoice-frontend-text-norm PRIVATE ${SIMDE_INCLUDE_DIR})
+        endif()
+    else()
+        message(WARNING "SIMDe not found — AVX2 intrinsics in cosyvoice-frontend and fft "
+                        "will fail to compile on ARM. Install SIMDe or set SIMDE_INCLUDE_DIR.")
+    endif()
 endif()
 
 if(NOT BUILD_SHARED_LIBS)
