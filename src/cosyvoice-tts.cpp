@@ -195,7 +195,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 	ggml_tensor* prompt_feat = ggml_new_tensor_2d(ctx0.get(), GGML_TYPE_F32, prompt->prompt_speech_feat.shape[1], prompt->prompt_speech_feat.shape[0]);
 	ggml_tensor* embedding = ggml_new_tensor_2d(ctx0.get(), GGML_TYPE_F32, prompt->flow_embedding.shape[1], prompt->flow_embedding.shape[0]);
 
-	ggml_cgraph* gf = ggml_new_graph(ctx0.get());
+	ggml_cgraph* gf = ggml_new_graph_custom(ctx0.get(), GGML_DEFAULT_GRAPH_SIZE * 3 / 2, false);
 	auto [mu, spks, conds, cut_len] = flow.build_cgraph_encode(ctx0.get(), token, prompt_token, prompt_feat, embedding, op_caps);
 	auto ditctx = flow.decoder.prepare_context(ctx1.get(), mu, spks, conds);
 	do

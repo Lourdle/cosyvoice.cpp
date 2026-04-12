@@ -31,7 +31,7 @@ void cosyvoice_init_default_context_params(cosyvoice_context_params_t* params)
 cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_t& params)
 	: backend(backend), params(params), cpu_backend(backend),
 	ctx(ggml_init(ggml_init_params{ .mem_size = ggml_graph_overhead() * GGML_DEFAULT_GRAPH_SIZE, .no_alloc = true })),
-	ctx0(ggml_init(ggml_init_params{ .mem_size = ggml_graph_overhead() * GGML_DEFAULT_GRAPH_SIZE, .no_alloc = true })),
+	ctx0(ggml_init(ggml_init_params{ .mem_size = ggml_graph_overhead() * (GGML_DEFAULT_GRAPH_SIZE + (params.flow_use_flash_attn ? 0 : GGML_DEFAULT_GRAPH_SIZE / 2)), .no_alloc = true })),
 	gf(nullptr), llm_input(nullptr), llm_probs(nullptr), position_ids(nullptr), causal_mask(nullptr), kv_cache(nullptr),
 	status(GGML_STATUS_SUCCESS), prompt_crc32(0), rand_noise_len(0)
 {
@@ -169,8 +169,8 @@ void cosyvoice_model_3::get_memory_usage(cosyvoice_memory_usage_t* usage)
 	usage->cpu_buffers = ggml_backend_sched_get_buffer_size(sched.get(), cpu_backend.get());
 	usage->offloaded_kv_cache = kv_cache->get_offloaded_cache_size();
 	usage->random_noise = sizeof(float) * rand_noise_len;
-	usage->kv_cache = ggml_backend_buffer_get_size(kv_buffer.get());
-	usage->token2wav = ggml_backend_buffer_get_size(token2wav_buffer.get());
+	usage->kv_cache = kv_buffer.get() ? ggml_backend_buffer_get_size(kv_buffer.get()) : 0;
+	usage->token2wav = token2wav_buffer.get() ? ggml_backend_buffer_get_size(token2wav_buffer.get()) : 0;
 }
 
 void cosyvoice_model_3::reset_shared_buffer(ggml_backend_buffer* new_buffer)
