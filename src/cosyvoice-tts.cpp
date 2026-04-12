@@ -127,30 +127,39 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
 			if (llm_is_stop_token(token_id) && n <= min_len)
 			{
 				// Before min_len, suppress stop tokens by zeroing their
-				// probability in the nucleus set and re-normalizing.
-				auto* np = reinterpret_cast<cosyvoice_llm_token_prob_t*>(nucleus_probs.get() + 1);
-				int nk = *reinterpret_cast<int*>(nucleus_probs.get());
-				float sum = 0.f;
-				for (int i = 0; i < nk; ++i)
+				// probability in the nucleus set and re-sampling.
+				// Retry up to 3 times with fresh decodes to escape stop-token traps.
+				bool escaped = false;
+				for (int retry = 0; retry < 3 && !escaped; ++retry)
 				{
-					if (llm_is_stop_token(np[i].token_id))
-						np[i].prob = 0.f;
-					else
-						sum += np[i].prob;
-				}
-				if (sum > 0.f)
-				{
+					auto* np = reinterpret_cast<cosyvoice_llm_token_prob_t*>(nucleus_probs.get() + 1);
+					int nk = *reinterpret_cast<int*>(nucleus_probs.get());
+					float sum = 0.f;
 					for (int i = 0; i < nk; ++i)
-						np[i].prob /= sum;
-					token_id = llm_sample_token();
+					{
+						if (llm_is_stop_token(np[i].token_id))
+							np[i].prob = 0.f;
+						else
+							sum += np[i].prob;
+					}
+					if (sum > 0.f)
+					{
+						for (int i = 0; i < nk; ++i)
+							np[i].prob /= sum;
+						token_id = llm_sample_token();
+						if (!llm_is_stop_token(token_id))
+							escaped = true;
+					}
+					else
+						break; // All candidates are stop tokens
 				}
-				// If all candidates are stop tokens, accept the original
-				// stop token and let the outer loop break naturally.
-				if (llm_is_stop_token(token_id))
+				if (!escaped)
 					break;
 			}
 			else if (llm_is_stop_token(token_id))
+			{
 				break;
+			}
 			llm_accept_token(token_id);
 			cur = speech_emb + token_id * speech_row_size;
 		}
