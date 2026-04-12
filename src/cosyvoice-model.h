@@ -73,7 +73,7 @@ struct cosyvoice_model : virtual cosyvoice_model_context
 	std::mt19937 sampler_rng, noise_rng;
 
 	std::vector<int> tokens;
-	std::unique_ptr<int> full_position_ids;
+	std::unique_ptr<int[]> full_position_ids;
 	std::unique_ptr<ggml_fp16_t[]> causal_mask_buffer;
 
 	cosyvoice_llm_kv_cache* kv_cache;
@@ -91,7 +91,7 @@ struct cosyvoice_model : virtual cosyvoice_model_context
 
 	uint32_t rand_noise_len;
 	std::unique_ptr<float[]> rand_noise;
-	std::unique_ptr<char> batch_buffer;
+	std::unique_ptr<char[]> batch_buffer;
 	std::unique_ptr<float[]> nucleus_probs;
 	std::unique_ptr<float[]> probs;
 	std::unique_ptr<char[]> instruction_prefix;
