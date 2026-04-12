@@ -652,9 +652,13 @@ matrix cosyvoice_frontend_context::extract_spk_embedding(float* speech, uint32_t
 
     matrix spectrum(frames.shape[0], padded_win_size / 2 + 1);
     auto buffer = std::make_unique<float[]>(padded_win_size);
+    auto fft_input = std::make_unique<float[]>(padded_win_size);
     for (uint32_t i = 0; i != frames.shape[0]; ++i)
     {
-        fft(frames.data + i * frames.stride, buffer.get(), *fft_ctx_spk);
+        // Zero-pad frame (win_size=400) to padded_win_size (512) for FFT
+        memcpy(fft_input.get(), frames.data + i * frames.stride, win_size * sizeof(float));
+        memset(fft_input.get() + win_size, 0, (padded_win_size - win_size) * sizeof(float));
+        fft(fft_input.get(), buffer.get(), *fft_ctx_spk);
         uint32_t j = 0;
         for (; j + 7 < padded_win_size / 2 + 1; j += 8)
         {
