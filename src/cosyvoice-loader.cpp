@@ -472,6 +472,7 @@ void cosyvoice_model_3::load(gguf_loader& loader)
 		{
 			ggml_backend_tensor_alloc(buffer.get(), tensor, buffer_base);
 			set_tensor(tensor, data, size);
+			ggml_backend_synchronize(backend.get());
 		});
 
 	causal_mask_buffer.reset(new ggml_fp16_t[(this->params.n_max_seq - 1) * this->params.n_batch]);
