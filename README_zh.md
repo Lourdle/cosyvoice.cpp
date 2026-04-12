@@ -29,6 +29,7 @@
 - [模型转 GGUF](#模型转-gguf)
 - [量化工具（`tools/quantize`）](#量化工具toolsquantize)
 - [CLI 工具（`tools/cli`）](#cli-工具toolscli)
+- [CLI 快速索引](#cli-快速索引)
 - [已知问题](#已知问题)
 - [故障排查](#故障排查)
 - [第三方许可说明](#第三方许可说明)
@@ -326,9 +327,25 @@ cosyvoice-cli \
   - 常规构建：输出格式由文件扩展名决定。
   - `COSYVOICE_NO_AUDIO=ON`：输出始终为 WAV。
 - `--speed, -s <value>`：语速倍率，默认 `1.0`，必须大于 `0`。
+- `--seed <value>`：采样与内部噪声生成的随机种子，必须是无符号 32 位整数；默认随机。
 - `--max-llm-len <value>`：LLM 最大输入 token 数（`n_max_seq`），默认 `2048`，必须为正整数。
+- `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>`：LLM KV cache 类型，默认 `q8_0`。
 - `--mode <zero-shot|instruct|cross-lingual>`：TTS 模式。默认按 `--instruction` 自动判定。
 - `--instruction, -i <text>`：instruct 模式指令文本。
+
+采样覆盖参数：
+- `--temperature <value>`：采样温度，必须 `> 0`。
+- `--top-k <value>`：top-k 采样大小，必须 `>= 0`。
+- `--top-p <value>`：top-p 采样阈值，必须在 `[0, 1]`。
+- `--win-size <value>`：重复惩罚窗口大小，必须 `> 0`。
+- `--tau-r <value>`：重复惩罚系数，必须 `>= 0`。
+- `--min-token-text-ratio <value>`：最小 token/text 比率，必须 `>= 0`。
+- `--max-token-text-ratio <value>`：最大 token/text 比率，必须 `>= 0`，且在与 `--min-token-text-ratio` 同时设置时不能更小。
+
+日志参数：
+- `--verbose, -v`：显示完整运行信息（上下文、高级采样、内存、完整耗时）。
+- `--quiet, -q`：抑制非错误日志输出。
+- `--quiet` 与 `--verbose` 不能同时使用。
 
 前端参数（仅在启用前端构建时可用，即 `COSYVOICE_NO_FRONTEND=OFF`）：
 - `--frontend-only`：仅运行前端，保存 `prompt_speech` 后退出。
@@ -353,6 +370,56 @@ cosyvoice-cli \
 - `--disable-text-normalization`：关闭分词前 ICU 文本规范化。
 - 该选项仅在启用 ICU 时可用（`COSYVOICE_NO_ICU=OFF`）。
 
+运行日志：
+- 模型加载前会先打印基础请求信息（模型路径、模式、提示源、输出路径、语速、seed 来源）。
+- 模型加载阶段会显示转圈动画（`| / - \\`）。
+- 默认输出为简洁分区样式。
+- `--verbose` 显示完整运行细节（含上下文/内存明细与完整阶段耗时）。
+- `--quiet` 不显示运行信息和耗时（错误信息仍会输出）。
+- 采样参数会在同一行显示来源，例如：`temperature : 1.0000 (model default)`。
+- `--verbose` 下内存显示的是生成后值，并附带相对生成前快照的增量（delta）。
+
+必填与可选：
+- 常规 TTS 必填：`--model`、`--text`、`--output`，以及一个提示源（`--prompt-speech` 或前端输入）。
+- `--frontend-only` 必填：`--speech-tokenizer`、`--campplus`、音频输入、`--prompt-speech-output`。
+- 可选参数默认值来自 CLI 或模型元数据：
+  - CLI 默认：`--speed=1.0`、`--max-llm-len=2048`、`--llm-kv-cache-type=q8_0`、`--mode=auto`。
+  - 采样默认（`temperature/top_k/top_p/win_size/tau_r/token-text ratio`）来自模型配置，未传参数时不变。
+
+## CLI 快速索引
+
+### 不同场景的必填参数
+
+| 场景 | 必填 |
+|---|---|
+| 使用已有 prompt_speech 做 TTS | `--model`、`--prompt-speech`、`--text`、`--output` |
+| 前端 + TTS 一体流程 | `--model`、`--speech-tokenizer`、`--campplus`、`--prompt-audio`（或 `--prompt-audio-16k` + `--prompt-audio-24k`）、`--text`、`--output` |
+| 仅前端 | `--frontend-only`、`--speech-tokenizer`、`--campplus`、音频输入、`--prompt-speech-output` |
+
+### 默认值速查
+
+| 选项 | 默认值 | 来源 |
+|---|---|---|
+| `--mode` | `auto` | CLI |
+| `--speed` | `1.0` | CLI |
+| `--max-llm-len` | `2048` | CLI |
+| `--llm-kv-cache-type` | `q8_0` | CLI |
+| `--seed` | 随机 | 运行时 |
+| `temperature/top_k/top_p/win_size/tau_r/min/max_token_text_ratio` | 模型元数据 | 模型 |
+
+### 常用命令模板
+
+```bash
+# 复用 prompt_speech
+cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --text "hello" --output out.wav
+
+# 前端 + TTS 一条命令
+cosyvoice-cli --model model.gguf --speech-tokenizer speech_tokenizer.onnx --campplus campplus.onnx --prompt-audio ref.wav --prompt-text "参考文本" --text "目标文本" --output out.wav
+
+# 仅前端（预先生成 prompt_speech）
+cosyvoice-cli --frontend-only --speech-tokenizer speech_tokenizer.onnx --campplus campplus.onnx --prompt-audio ref.wav --prompt-text "参考文本" --prompt-speech-output prompt_speech.gguf
+```
+
 ### 参数校验与模式行为
 
 - `--frontend-only` 必需：`--speech-tokenizer`、`--campplus`、音频输入、`--prompt-speech-output`。
@@ -367,6 +434,8 @@ cosyvoice-cli \
   - `zero-shot` 且提供 `--instruction`：给出警告并忽略 `--instruction`。
   - 传入未知 mode：给出警告并自动判定模式。
 - 若未启用前端（`COSYVOICE_NO_FRONTEND=ON`），则必须使用 `--prompt-speech`。
+- 在 `--frontend-only` 模式下，`--seed` 会被接受但忽略（会打印警告）。
+- 在 `--frontend-only` 模式下，采样覆盖参数会被接受但忽略（会打印警告）。
 
 ## 已知问题
 当前生成稳定性与后端关系较大。
@@ -375,7 +444,14 @@ cosyvoice-cli \
 - **Windows + CUDA（Toolkit 12.9，Ada Lovelace）：**
   - Debug 构建相对更稳定。
   - Release 构建不稳定：有概率正常，也有概率出现噪音。
-  - 问题位置尚未定位（疑似在 `ggml-base` 或 `cosyvoice` 库路径）。
+  - 本地已确认的可行绕过方式：
+    - 只要把 `cosyvoice.dll` 或 `ggml-base.dll` 任意一个换成 Debug 构建，噪音问题即可消失。
+    - 最小改动方案（仅改 `cosyvoice` 工程）：
+      1. 在 Visual Studio 打开 `cosyvoice` 项目属性。
+      2. 进入 `C/C++` -> `代码生成` -> `运行库`。
+      3. 改为 `多线程调试 DLL (/MDd)` 或 `多线程调试 (/MTd)`。
+      4. 其他设置保持不变。
+    - 仅这一项运行库修改即可解决 Windows CUDA Release 噪音问题。
 - **WSL2 Ubuntu + CUDA（Toolkit 12.4 / 13.0）：**
   - 在测试中无论 Debug/Release 均为噪音。
 - **CPU / Vulkan：**
@@ -390,6 +466,9 @@ cosyvoice-cli \
 - ICU/ONNX Runtime 检测失败：可安装系统包（适用平台），或将预编译文件放到 `<build_dir>/_deps/icu` 与 `<build_dir>/_deps/onnxruntime`。
 - Windows 运行时缺库：检查 `build/bin` 下是否存在构建后复制的依赖 DLL。
 - 音频出现噪音：请先对照“已知问题”中的后端/构建测试结论。
+- Windows CUDA Release 噪音临时解决方案：
+  - 可将 `cosyvoice` 的运行库改为调试运行库（`/MDd` 或 `/MTd`），其余设置不变。
+  - 或者直接使用 Debug 版本的 `cosyvoice.dll` 或 `ggml-base.dll`（二者任意一个即可）。
 
 ## 欢迎贡献
 欢迎提交 Issue 和 Pull Request，尤其是：

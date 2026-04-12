@@ -29,6 +29,7 @@ This project provides:
 - [Model Conversion to GGUF](#model-conversion-to-gguf)
 - [Quantization Tool (`tools/quantize`)](#quantization-tool-toolsquantize)
 - [CLI Tool (`tools/cli`)](#cli-tool-toolscli)
+- [CLI Quick Reference](#cli-quick-reference)
 - [Known Issues](#known-issues)
 - [Troubleshooting](#troubleshooting)
 - [Third-Party Notices](#third-party-notices)
@@ -326,9 +327,25 @@ Core options:
   - Normal build: format is inferred from file extension.
   - `COSYVOICE_NO_AUDIO=ON`: output is always WAV.
 - `--speed, -s <value>`: Speech speed multiplier. Default: `1.0`. Must be `> 0`.
+- `--seed <value>`: Random seed for sampling and internal noise generation. Must be an unsigned 32-bit integer. Default: random.
 - `--max-llm-len <value>`: Maximum input token count for LLM (`n_max_seq`). Default: `2048`. Must be a positive integer.
+- `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>`: LLM KV cache type. Default: `q8_0`.
 - `--mode <zero-shot|instruct|cross-lingual>`: TTS mode. Default: auto-detect from `--instruction`.
 - `--instruction, -i <text>`: Instruction text for instruct mode.
+
+Sampling override options:
+- `--temperature <value>`: Sampling temperature, must be `> 0`.
+- `--top-k <value>`: Top-k sampling size, must be `>= 0`.
+- `--top-p <value>`: Top-p sampling threshold, must be in `[0, 1]`.
+- `--win-size <value>`: Repetition window size, must be `> 0`.
+- `--tau-r <value>`: Repetition penalty coefficient, must be `>= 0`.
+- `--min-token-text-ratio <value>`: Minimum generated token/text ratio, must be `>= 0`.
+- `--max-token-text-ratio <value>`: Maximum generated token/text ratio, must be `>= 0` and not less than `--min-token-text-ratio` when both are set.
+
+Log options:
+- `--verbose, -v`: Show detailed runtime sections (context, advanced sampling, memory, full timings).
+- `--quiet, -q`: Suppress non-error logs.
+- `--quiet` and `--verbose` cannot be used together.
 
 Frontend options (available when frontend is compiled, i.e. `COSYVOICE_NO_FRONTEND=OFF`):
 - `--frontend-only`: Run frontend only, save `prompt_speech`, then exit.
@@ -353,6 +370,56 @@ Text normalization:
 - `--disable-text-normalization`: Disable ICU text normalization before tokenization.
 - This option exists only when ICU is enabled (`COSYVOICE_NO_ICU=OFF`).
 
+Runtime logs:
+- Basic request info (model path, mode, prompt source, output, speed, seed source) is shown before model loading.
+- During model loading, a spinner (`| / - \\`) is shown in the console.
+- Default output is concise and formatted with sections.
+- `--verbose` shows full runtime details, including context/memory breakdown and full timing stages.
+- `--quiet` suppresses runtime info and timings (errors still print).
+- Sampling lines include source directly inline, e.g. `temperature : 1.0000 (model default)`.
+- Memory in `--verbose` shows post-generation values with deltas against pre-generation snapshot.
+
+Required vs optional:
+- Required for normal TTS: `--model`, `--text`, `--output`, and one prompt source (`--prompt-speech` OR frontend inputs).
+- Required for `--frontend-only`: `--speech-tokenizer`, `--campplus`, audio input, `--prompt-speech-output`.
+- Optional parameters use defaults from CLI or model metadata:
+  - CLI defaults: `--speed=1.0`, `--max-llm-len=2048`, `--llm-kv-cache-type=q8_0`, `--mode=auto`.
+  - Sampling defaults (`temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, token/text ratios) come from model config unless overridden by CLI.
+
+## CLI Quick Reference
+
+### Required arguments by scenario
+
+| Scenario | Required |
+|---|---|
+| TTS with existing prompt_speech | `--model`, `--prompt-speech`, `--text`, `--output` |
+| End-to-end frontend + TTS | `--model`, `--speech-tokenizer`, `--campplus`, `--prompt-audio` (or `--prompt-audio-16k` + `--prompt-audio-24k`), `--text`, `--output` |
+| Frontend-only | `--frontend-only`, `--speech-tokenizer`, `--campplus`, audio input, `--prompt-speech-output` |
+
+### Defaults at a glance
+
+| Option | Default | Source |
+|---|---|---|
+| `--mode` | `auto` | CLI |
+| `--speed` | `1.0` | CLI |
+| `--max-llm-len` | `2048` | CLI |
+| `--llm-kv-cache-type` | `q8_0` | CLI |
+| `--seed` | random | runtime |
+| `temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, `min/max_token_text_ratio` | model metadata | model |
+
+### Typical command templates
+
+```bash
+# Reuse prompt_speech
+cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --text "hello" --output out.wav
+
+# Frontend + TTS in one command
+cosyvoice-cli --model model.gguf --speech-tokenizer speech_tokenizer.onnx --campplus campplus.onnx --prompt-audio ref.wav --prompt-text "ref text" --text "target" --output out.wav
+
+# Frontend-only (prepare prompt_speech for later reuse)
+cosyvoice-cli --frontend-only --speech-tokenizer speech_tokenizer.onnx --campplus campplus.onnx --prompt-audio ref.wav --prompt-text "ref text" --prompt-speech-output prompt_speech.gguf
+```
+
 ### Validation and Mode Behavior
 
 - `--frontend-only` requires: `--speech-tokenizer`, `--campplus`, audio input, and `--prompt-speech-output`.
@@ -367,6 +434,8 @@ Text normalization:
   - `zero-shot` with `--instruction`: warning, and `--instruction` is ignored.
   - unrecognized mode value: warning, then auto-detect.
 - If frontend is not available (`COSYVOICE_NO_FRONTEND=ON`), `--prompt-speech` is mandatory.
+- In `--frontend-only` mode, `--seed` is accepted but ignored (warning will be printed).
+- In `--frontend-only` mode, sampling override options are accepted but ignored (warning will be printed).
 
 ## Known Issues
 Current generation stability is backend-dependent.
@@ -375,7 +444,14 @@ Tested observations:
 - **Windows + CUDA (Toolkit 12.9, Ada Lovelace):**
   - Debug builds are more stable.
   - Release builds are unstable: they can generate normal audio in some runs, but can also produce noisy output.
-  - The fault location is not yet identified (suspected area includes `ggml-base` or the `cosyvoice` library path).
+  - Practical workaround confirmed in local tests:
+    - If **either** `cosyvoice.dll` **or** `ggml-base.dll` is switched to Debug build, noisy output disappears.
+    - Minimal change path in Visual Studio (for `cosyvoice` project only):
+      1. Open project properties for `cosyvoice`.
+      2. Go to `C/C++` -> `Code Generation` -> `Runtime Library`.
+      3. Change to `Multi-threaded Debug DLL (/MDd)` or `Multi-threaded Debug (/MTd)`.
+      4. Keep all other settings unchanged.
+    - This runtime-library adjustment alone can resolve the Windows CUDA Release noise issue.
 - **WSL2 Ubuntu + CUDA (Toolkit 12.4 / 13.0):**
   - Produced noisy output in tests (both Debug and Release).
 - **CPU / Vulkan backends:**
@@ -390,6 +466,9 @@ Additional note:
 - ICU/ONNX Runtime detection issues: either install system packages (where applicable) or place prebuilt files into `<build_dir>/_deps/icu` and `<build_dir>/_deps/onnxruntime`.
 - Executable starts but misses runtime libraries on Windows: ensure post-build copied DLLs exist next to binaries in `build/bin`.
 - Audio output is noisy on some backend/build combinations: check the Known Issues section for currently observed behavior.
+- Windows CUDA Release noisy output workaround:
+  - Try building `cosyvoice` with debug runtime library (`/MDd` or `/MTd`) while keeping other settings unchanged.
+  - Alternatively, use a Debug build of either `cosyvoice.dll` or `ggml-base.dll`.
 
 ## Contributing
 Contributions are welcome.
