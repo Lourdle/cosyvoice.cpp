@@ -30,8 +30,6 @@ struct cosyvoice_model : virtual cosyvoice_model_context
 	ggml_status get_last_status();
 	virtual void empty_buffer_cache();
 
-	uint32_t get_sample_rate();
-
 	void set_prompt(
 		cosyvoice_prompt_t         prompt,
 		cosyvoice_inference_mode_t mode,
@@ -83,7 +81,6 @@ struct cosyvoice_model : virtual cosyvoice_model_context
 
 	cosyvoice_context_params_t params;
 	cosyvoice_generation_config_t config;
-	uint32_t sample_rate;
 	ggml_backend_op_capabilities op_caps;
 
 	ggml_status status;
@@ -112,6 +109,8 @@ struct cosyvoice_model_3 : cosyvoice_model
 	bool llm_prefill(ggml_type type, const void* data, uint32_t seq_len);
 
 	bool llm_is_stop_token(int token_id);
+
+	uint32_t get_sample_rate();
 
 	const ggml_tensor* get_word_token_embed_weight();
 	const ggml_tensor* get_speech_token_embed_weight();

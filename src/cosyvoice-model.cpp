@@ -188,15 +188,6 @@ cosyvoice_model_3::cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_con
 	ctx1(ggml_init(ggml_init_params{ .mem_size = ggml_tensor_overhead() * 4, .no_alloc = true }))
 {}
 
-static void allocate_tensors(ggml_backend_buffer_t buffer, char* buffer_base, std::initializer_list<ggml_tensor*> tensors)
-{
-	for (auto tensor : tensors)
-	{
-		ggml_backend_tensor_alloc(buffer, tensor, buffer_base);
-		buffer_base += ggml_nbytes(tensor);
-	}
-}
-
 void CausalHiFTGenerator::set_rand_ini(const float* data) const
 {
 	ggml_backend_tensor_set(m_source.l_sin_gen.rand_ini, data, 0, (nfft / 2 + 1) * sizeof(float));
@@ -227,9 +218,9 @@ void cosyvoice_model_3::set_hift_rand_ini(const float* data)
 	hift.set_rand_ini(data);
 }
 
-uint32_t cosyvoice_model::get_sample_rate()
+uint32_t cosyvoice_model_3::get_sample_rate()
 {
-	return sample_rate;
+	return hift.sampling_rate;
 }
 
 void cosyvoice_model::get_generation_config(cosyvoice_generation_config_t* config)

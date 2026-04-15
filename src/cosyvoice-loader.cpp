@@ -208,8 +208,8 @@ void CausalHiFTGenerator::OnLoad(const gguf_loader& loader, const std::string& p
 	conv_pre.causal_type = CausalConv1d::causal_type_t::right;
 
 	int num_kernels;
+	loader.get_metadata("sample_rate", reinterpret_cast<uint32_t&>(sampling_rate));
 	LOAD_METADATA(num_kernels);
-	LOAD_METADATA(sampling_rate);
 	LOAD_METADATA(nb_harmonics);
 	LOAD_METADATA(nsf_alpha);
 	LOAD_METADATA(nsf_voiced_threshold);
@@ -503,8 +503,6 @@ void cosyvoice_model_3::load(gguf_loader& loader)
 	LOAD_METADATA_NOPREFIX(sampling.top_p);
 	LOAD_METADATA_NOPREFIX(sampling.win_size);
 	LOAD_METADATA_NOPREFIX(sampling.tau_r);
-
-	LOAD_METADATA_NOPREFIX(sample_rate);
 
 	nucleus_probs.reset(new float[sampling.top_k * 2 + 1]);
 	probs.reset(new float[llm.llm_decoder.weight->ne[1]]);
