@@ -87,9 +87,13 @@ static icu::UnicodeString replace_with_matcher(
 
 static void normalize_fullwidth_digits(icu::UnicodeString& text)
 {
-    for (auto& c : std::wstring_view(text))
+    for (int32_t i = 0; i < text.length(); )
+    {
+        UChar32 c = text.char32At(i);
         if (c >= 0xFF10 && c <= 0xFF19)
-            const_cast<std::remove_const_t<std::remove_reference_t<decltype(c)>>&>(c) -= 0xFF10 + '0';
+            text.replace(i, U16_LENGTH(c), icu::UnicodeString(static_cast<UChar32>(c - 0xFF10 + '0')));
+        i += U16_LENGTH(c);
+    }
 }
 #endif
 
