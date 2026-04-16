@@ -102,9 +102,6 @@ void cosyvoice_log_callback_default(ggml_log_level level, const char* text, void
 #endif
 }
 
-#ifndef GGML_SHARED
-static
-#endif
 cosyvoice_context_t cosyvoice_load_from_file_ext(
     const char* filename,
     const cosyvoice_context_params_t* params,
@@ -115,7 +112,13 @@ cosyvoice_context_t cosyvoice_load_from_file_ext(
     gguf_loader loader(filename);
     if (!loader) return nullptr;
 
-    auto ctx = new cosyvoice_context_3(*params, backend ? backend : ggml_backend_init_best());
+    auto ctx = new cosyvoice_context_3(*params,
+#ifndef GGML_SHARED
+        ggml_backend_init_best()
+#else
+        backend ? backend : ggml_backend_init_best()
+#endif
+    );
     ctx->cosyvoice_model_3::load(loader);
     ctx->cosyvoice_tokenizer::load(loader);
 

@@ -80,9 +80,13 @@ COSYVOICE_API void cosyvoice_log_callback_default(enum ggml_log_level level, con
 // Context Loading and Status
 // ----------------------------------------------------------------------------
 
-#ifdef GGML_SHARED
 /**
  * @brief Load a model context with explicit backend, threading, and context parameters.
+ * @note If GGML is built as shared (`GGML_SHARED` enabled), `backend == NULL` selects the default backend.
+ * @note If GGML is built as shared and `backend != NULL`, backend ownership is transferred to the created context
+ *       and released by `cosyvoice_free()`.
+ * @note If GGML is built statically (`GGML_SHARED` disabled), `backend` is ignored.
+ * @note Set `n_threads` to 0 to use hardware concurrency when available.
  */
 COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_ext(
     const char*                       filename,
@@ -91,7 +95,6 @@ COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_ext(
     uint32_t                          n_threads,
     uint32_t                          reserved
 );
-#endif
 
 /**
  * @brief Get the status code of the last backend operation.
