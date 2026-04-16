@@ -8,10 +8,12 @@
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
-#else
+#elif defined(__aarch64__) || defined(_M_ARM64)
 #define SIMDE_ENABLE_NATIVE_ALIASES
 #include <simde/x86/avx2.h>
 #include <simde/x86/fma.h>
+#else
+#error "src/cosyvoice-llm.cpp requires x86_64 SIMD intrinsics or SIMDe on ARM64; unsupported architecture"
 #endif
 
 static void build_causal_mask(ggml_fp16_t* mask, uint32_t n_batch, uint32_t seq_len)
