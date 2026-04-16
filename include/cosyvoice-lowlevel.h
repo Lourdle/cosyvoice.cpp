@@ -2,7 +2,7 @@
 #define COSYVOICE_LOWLEVEL_H
 
 #ifndef COSYVOICE_H
-	#error "This header is not meant to be included directly. Please include cosyvoice.h before including this header."
+    #error "This header is not meant to be included directly. Please include cosyvoice.h before including this header."
 #endif
 
 #include <ggml.h>
@@ -24,11 +24,11 @@ typedef struct cosyvoice_tokenizer_context*   cosyvoice_tokenizer_context_t;   /
  */
 typedef enum cosyvoice_inference_mode
 {
-	COSYVOICE_INFERENCE_MODE_NULL = -1,      ///< Do nothing. Useful when duplicating a prompt without modifying it.
-	COSYVOICE_INFERENCE_MODE_ZERO_SHOT,      ///< Generate speech from the input text without any additional context.
-	COSYVOICE_INFERENCE_MODE_INSTRUCT,       ///< Generate speech from the input text and follow the prompt instruction text as closely as possible.
-	COSYVOICE_INFERENCE_MODE_CROSS_LINGUAL,  ///< Generate speech from the input text and ignore the prompt instruction text.
-	COSYVOICE_INFERENCE_MODE_COUNT           ///< Sentinel value.
+    COSYVOICE_INFERENCE_MODE_NULL = -1,      ///< Do nothing. Useful when duplicating a prompt without modifying it.
+    COSYVOICE_INFERENCE_MODE_ZERO_SHOT,      ///< Generate speech from the input text without any additional context.
+    COSYVOICE_INFERENCE_MODE_INSTRUCT,       ///< Generate speech from the input text and follow the prompt instruction text as closely as possible.
+    COSYVOICE_INFERENCE_MODE_CROSS_LINGUAL,  ///< Generate speech from the input text and ignore the prompt instruction text.
+    COSYVOICE_INFERENCE_MODE_COUNT           ///< Sentinel value.
 } cosyvoice_inference_mode_t;
 
 /**
@@ -36,10 +36,10 @@ typedef enum cosyvoice_inference_mode
  */
 typedef enum cosyvoice_noise_callback_stage
 {
-	COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_FLOW, ///< Called before Flow runs. `noise` is null and the callback should return a buffer of `length` samples.
-	COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_FLOW,  ///< Called after Flow finishes. `noise` is the buffer returned at `BEFORE_FLOW` and the callback return value is ignored.
-	COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_HIFT, ///< Called before HiFT runs. `noise` is null and the callback should return a buffer of `length` samples.
-	COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_HIFT   ///< Called after HiFT finishes. `noise` is the buffer returned at `BEFORE_HIFT` and the callback return value is ignored.
+    COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_FLOW, ///< Called before Flow runs. `noise` is null and the callback should return a buffer of `length` samples.
+    COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_FLOW,  ///< Called after Flow finishes. `noise` is the buffer returned at `BEFORE_FLOW` and the callback return value is ignored.
+    COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_HIFT, ///< Called before HiFT runs. `noise` is null and the callback should return a buffer of `length` samples.
+    COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_HIFT   ///< Called after HiFT finishes. `noise` is the buffer returned at `BEFORE_HIFT` and the callback return value is ignored.
 } cosyvoice_noise_callback_stage_t;
 
 // ----------------------------------------------------------------------------
@@ -58,10 +58,10 @@ typedef enum cosyvoice_noise_callback_stage
  *         The return value is ignored for `COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_*` calls.
  */
 typedef float* (*cosyvoice_noise_callback_t)(
-	cosyvoice_noise_callback_stage_t stage,
-	uint32_t                         length,
-	float*                           noise,
-	void*                            ctx
+    cosyvoice_noise_callback_stage_t stage,
+    uint32_t                         length,
+    float*                           noise,
+    void*                            ctx
 );
 
 // ----------------------------------------------------------------------------
@@ -85,11 +85,11 @@ COSYVOICE_API void cosyvoice_log_callback_default(enum ggml_log_level level, con
  * @brief Load a model context with explicit backend, threading, and context parameters.
  */
 COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_ext(
-	const char*                       filename,
-	const cosyvoice_context_params_t* params,
-	ggml_backend_t                    backend,
-	uint32_t                          n_threads,
-	uint32_t                          reserved
+    const char*                       filename,
+    const cosyvoice_context_params_t* params,
+    ggml_backend_t                    backend,
+    uint32_t                          n_threads,
+    uint32_t                          reserved
 );
 #endif
 
@@ -121,10 +121,10 @@ COSYVOICE_API const ggml_tensor* cosyvoice_get_speech_token_embed_weight(cosyvoi
  * @note This does not compute the logits of the next token.
  */
 COSYVOICE_API bool cosyvoice_llm_prefill(
-	cosyvoice_context_t ctx,
-	enum ggml_type      type,
-	const void*         data,
-	uint32_t            n_tokens
+    cosyvoice_context_t ctx,
+    enum ggml_type      type,
+    const void*         data,
+    uint32_t            n_tokens
 );
 
 /**
@@ -132,10 +132,16 @@ COSYVOICE_API bool cosyvoice_llm_prefill(
  * @note Logits are stored internally. Use the sampler API to sample the next token.
  */
 COSYVOICE_API bool cosyvoice_llm_decode(
-	cosyvoice_context_t ctx,
-	enum ggml_type      type,
-	const void*         data
+    cosyvoice_context_t ctx,
+    enum ggml_type      type,
+    const void*         data
 );
+
+/**
+ * @brief Prepare the current LLM probabilities for sampling.
+ * @param allow_stop_tokens If false, stop tokens are masked to zero probability.
+ */
+COSYVOICE_API void cosyvoice_llm_prepare_probs(cosyvoice_context_t ctx, bool allow_stop_tokens);
 
 /**
  * @brief Get the current length of the KV cache (tokens fed into the LLM).
@@ -191,34 +197,34 @@ COSYVOICE_API const int* cosyvoice_llm_get_accepted_tokens(cosyvoice_context_t c
  * @note Generated speech tokens are stored internally and can be queried with the accepted-token APIs.
  */
 COSYVOICE_API bool cosyvoice_llm_job(
-	cosyvoice_context_t ctx,
-	const int*          text,
-	uint32_t            text_len,
-	cosyvoice_prompt_t  prompt
+    cosyvoice_context_t ctx,
+    const int*          text,
+    uint32_t            text_len,
+    cosyvoice_prompt_t  prompt
 );
 
 /**
  * @brief Convert generated speech tokens to waveform data.
  */
 COSYVOICE_API bool cosyvoice_token2wav(
-	cosyvoice_context_t            ctx,
-	const int*                     token_ids,
-	uint32_t                       n_tokens,
-	float                          speed,
-	cosyvoice_prompt_t             prompt,
-	cosyvoice_generated_speech_ptr generated_speech
+    cosyvoice_context_t            ctx,
+    const int*                     token_ids,
+    uint32_t                       n_tokens,
+    float                          speed,
+    cosyvoice_prompt_t             prompt,
+    cosyvoice_generated_speech_ptr generated_speech
 );
 
 /**
  * @brief Run the full TTS pipeline from input tokens to waveform output.
  */
 COSYVOICE_API bool cosyvoice_tts(
-	cosyvoice_context_t            ctx,
-	const int*                     text,
-	uint32_t                       text_len,
-	float                          speed,
-	cosyvoice_prompt_t             prompt,
-	cosyvoice_generated_speech_ptr result
+    cosyvoice_context_t            ctx,
+    const int*                     text,
+    uint32_t                       text_len,
+    float                          speed,
+    cosyvoice_prompt_t             prompt,
+    cosyvoice_generated_speech_ptr result
 );
 
 // ----------------------------------------------------------------------------
@@ -265,10 +271,10 @@ COSYVOICE_API uint32_t                        cosyvoice_tokenization_result_get_
  * @return Number of tokens written to `result`.
  */
 COSYVOICE_API uint32_t cosyvoice_tokenize(
-	cosyvoice_tokenizer_context_t   ctx,
-	const char*                     text,
-	cosyvoice_tokenization_result_t result,
-	bool                            parse_special
+    cosyvoice_tokenizer_context_t   ctx,
+    const char*                     text,
+    cosyvoice_tokenization_result_t result,
+    bool                            parse_special
 );
 
 /**
@@ -276,11 +282,11 @@ COSYVOICE_API uint32_t cosyvoice_tokenize(
  * @return Number of tokens written to `result`.
  */
 COSYVOICE_API uint32_t cosyvoice_tokenize_ext(
-	cosyvoice_tokenizer_context_t   ctx,
-	const char*                     text,
-	uint32_t                        text_len,
-	cosyvoice_tokenization_result_t result,
-	bool                            parse_special
+    cosyvoice_tokenizer_context_t   ctx,
+    const char*                     text,
+    uint32_t                        text_len,
+    cosyvoice_tokenization_result_t result,
+    bool                            parse_special
 );
 
 // ----------------------------------------------------------------------------
@@ -334,16 +340,16 @@ COSYVOICE_API const char* cosyvoice_get_instruction_prefix(cosyvoice_context_t c
  * @note When `inplace` is true, the input prompt is updated in place and may be reused directly.
  */
 COSYVOICE_API cosyvoice_prompt_t cosyvoice_prompt_set(
-	cosyvoice_context_t        ctx,
-	cosyvoice_prompt_t         prompt,
-	cosyvoice_inference_mode_t mode,
-	const char*                instruction,
+    cosyvoice_context_t        ctx,
+    cosyvoice_prompt_t         prompt,
+    cosyvoice_inference_mode_t mode,
+    const char*                instruction,
 #ifdef __cplusplus
-	uint32_t                   instruction_length = 0xFFFFFFFFU,
-	bool                       inplace = true
+    uint32_t                   instruction_length = 0xFFFFFFFFU,
+    bool                       inplace = true
 #else
-	uint32_t                   instruction_length,
-	bool                       inplace
+    uint32_t                   instruction_length,
+    bool                       inplace
 #endif
 );
 
@@ -354,12 +360,12 @@ COSYVOICE_API cosyvoice_prompt_t cosyvoice_prompt_set(
  * @note If `inplace` is false, the original prompt is not freed.
  */
 COSYVOICE_API cosyvoice_prompt_t cosyvoice_prompt_set_ext(
-	cosyvoice_context_t        ctx,
-	cosyvoice_prompt_t         prompt,
-	cosyvoice_inference_mode_t mode,
-	const int*                 instruction,
-	uint32_t                   instruction_length,
-	bool                       inplace
+    cosyvoice_context_t        ctx,
+    cosyvoice_prompt_t         prompt,
+    cosyvoice_inference_mode_t mode,
+    const int*                 instruction,
+    uint32_t                   instruction_length,
+    bool                       inplace
 );
 
 #ifdef __cplusplus
