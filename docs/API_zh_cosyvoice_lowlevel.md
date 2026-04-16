@@ -150,9 +150,9 @@ COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_ext(
 
 - `filename`：模型文件路径。
 - `params`：上下文参数。
-- `backend`：后端句柄。
-- `n_threads`：线程数。
-- `reserved`：保留参数。
+- `backend`：可选后端句柄。
+- `n_threads`：CPU 线程数；传 `0` 时在可用情况下使用硬件并发数。
+- `reserved`：保留参数，传 `0`。
 
 ### 返回值
 
@@ -160,7 +160,10 @@ COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_ext(
 
 ### 备注
 
-仅在启用 `GGML_SHARED` 时可用。
+- 该接口在 GGML 动态库与静态库构建下都可用。
+- 在 GGML 动态库构建下，传入的 `backend` 所有权会转移给创建出的上下文，并在 `cosyvoice_free()` 时自动释放。
+- 当 GGML 以静态库构建（`GGML_SHARED` 关闭）时，`backend` 参数会被忽略。
+- 当 GGML 以动态库构建（`GGML_SHARED` 开启）时，`backend == NULL` 表示自动选择后端；否则使用传入后端。
 
 ## cosyvoice_get_last_status
 
@@ -279,6 +282,35 @@ COSYVOICE_API bool cosyvoice_llm_decode(
 ### 返回值
 
 成功返回 `true`，失败返回 `false`。
+
+### 备注
+
+该函数只推进解码状态。在调用 `cosyvoice_llm_sample_token()` 前，需要先调用 `cosyvoice_llm_prepare_probs()`。
+
+## cosyvoice_llm_prepare_probs
+
+### 语法
+
+```c
+COSYVOICE_API void cosyvoice_llm_prepare_probs(cosyvoice_context_t ctx, bool allow_stop_tokens);
+```
+
+### 说明
+
+基于最近一次解码结果准备采样概率。
+
+### 参数
+
+- `ctx`：模型上下文。
+- `allow_stop_tokens`：为 `false` 时，将 stop token 的概率置为 0。
+
+### 返回值
+
+无返回值。
+
+### 备注
+
+每次 `cosyvoice_llm_decode()` 成功后，都应在 `cosyvoice_llm_sample_token()` 前调用本函数。
 
 ## cosyvoice_llm_get_kv_cache_len
 

@@ -4,7 +4,7 @@ Language: [中文](README_zh.md)
 
 > Unofficial project notice: this repository is **not** affiliated with, endorsed by, or maintained by the official CosyVoice team. It is a community-maintained C++/GGML port created by an independent developer.
 
-> **Current status notice:** Audio generation is currently unstable on multiple tested backend/build combinations and may produce noisy output. Please review [Known Issues](#known-issues) before production use.
+> **Current status notice:** CUDA stability issues are resolved in current tests, and both Windows and Linux CUDA runs can generate normal audio. CPU and Vulkan backends are still not running normally. Please review [Known Issues](#known-issues) before production use.
 
 C++/GGML port of the Python CosyVoice inference pipeline released by the original CosyVoice project, currently focused on **CosyVoice3**.
 
@@ -329,6 +329,7 @@ Core options:
 - `--speed, -s <value>`: Speech speed multiplier. Default: `1.0`. Must be `> 0`.
 - `--seed <value>`: Random seed for sampling and internal noise generation. Must be an unsigned 32-bit integer. Default: random.
 - `--max-llm-len <value>`: Maximum input token count for LLM (`n_max_seq`). Default: `2048`. Must be a positive integer.
+- `--threads, -j <value>`: CPU thread count for model inference. Must be an unsigned 32-bit integer. Default: `0` (use current hardware concurrency).
 - `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>`: LLM KV cache type. Default: `q8_0`.
 - `--mode <zero-shot|instruct|cross-lingual>`: TTS mode. Default: auto-detect from `--instruction`.
 - `--instruction, -i <text>`: Instruction text for instruct mode.
@@ -371,7 +372,7 @@ Text normalization:
 - This option exists only when ICU is enabled (`COSYVOICE_NO_ICU=OFF`).
 
 Runtime logs:
-- Basic request info (model path, mode, prompt source, output, speed, seed source) is shown before model loading.
+- Basic request info (model path, mode, prompt source, output, speed, resolved CPU thread count, seed source) is shown before model loading.
 - During model loading, a spinner (`| / - \\`) is shown in the console.
 - Default output is concise and formatted with sections.
 - `--verbose` shows full runtime details, including context/memory breakdown and full timing stages.
@@ -383,7 +384,7 @@ Required vs optional:
 - Required for normal TTS: `--model`, `--text`, `--output`, and one prompt source (`--prompt-speech` OR frontend inputs).
 - Required for `--frontend-only`: `--speech-tokenizer`, `--campplus`, audio input, `--prompt-speech-output`.
 - Optional parameters use defaults from CLI or model metadata:
-  - CLI defaults: `--speed=1.0`, `--max-llm-len=2048`, `--llm-kv-cache-type=q8_0`, `--mode=auto`.
+  - CLI defaults: `--speed=1.0`, `--max-llm-len=2048`, `--threads=0` (hardware concurrency), `--llm-kv-cache-type=q8_0`, `--mode=auto`.
   - Sampling defaults (`temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, token/text ratios) come from model config unless overridden by CLI.
 
 ## CLI Quick Reference
@@ -403,6 +404,7 @@ Required vs optional:
 | `--mode` | `auto` | CLI |
 | `--speed` | `1.0` | CLI |
 | `--max-llm-len` | `2048` | CLI |
+| `--threads` | `0` (hardware concurrency) | CLI |
 | `--llm-kv-cache-type` | `q8_0` | CLI |
 | `--seed` | random | runtime |
 | `temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, `min/max_token_text_ratio` | model metadata | model |
@@ -435,27 +437,18 @@ cosyvoice-cli --frontend-only --speech-tokenizer speech_tokenizer.onnx --campplu
   - unrecognized mode value: warning, then auto-detect.
 - If frontend is not available (`COSYVOICE_NO_FRONTEND=ON`), `--prompt-speech` is mandatory.
 - In `--frontend-only` mode, `--seed` is accepted but ignored (warning will be printed).
+- In `--frontend-only` mode, `--threads` is accepted but ignored (warning will be printed).
 - In `--frontend-only` mode, sampling override options are accepted but ignored (warning will be printed).
 
 ## Known Issues
 Current generation stability is backend-dependent.
 
 Tested observations:
-- **Windows + CUDA (Toolkit 12.9, Ada Lovelace):**
-  - Debug builds are more stable.
-  - Release builds are unstable: they can generate normal audio in some runs, but can also produce noisy output.
-  - Practical workaround confirmed in local tests:
-    - If **either** `cosyvoice.dll` **or** `ggml-base.dll` is switched to Debug build, noisy output disappears.
-    - Minimal change path in Visual Studio (for `cosyvoice` project only):
-      1. Open project properties for `cosyvoice`.
-      2. Go to `C/C++` -> `Code Generation` -> `Runtime Library`.
-      3. Change to `Multi-threaded Debug DLL (/MDd)` or `Multi-threaded Debug (/MTd)`.
-      4. Keep all other settings unchanged.
-    - This runtime-library adjustment alone can resolve the Windows CUDA Release noise issue.
-- **WSL2 Ubuntu + CUDA (Toolkit 12.4 / 13.0):**
-  - Produced noisy output in tests (both Debug and Release).
+- **CUDA backend (Windows + Linux):**
+  - CUDA stability issues are resolved in current tests.
+  - Windows CUDA and Linux CUDA runs are both normal.
 - **CPU / Vulkan backends:**
-  - Produced noisy output in tests.
+  - Still cannot run normally in current tests (for example noisy/incorrect output).
 
 Additional note:
 - Tests were performed on Ada Lovelace GPUs only.
@@ -465,10 +458,7 @@ Additional note:
 - CMake cannot find GGML: set `-DGGML_SOURCE_DIR=...` or keep default `vendor/ggml` and ensure Git is available for auto-clone.
 - ICU/ONNX Runtime detection issues: either install system packages (where applicable) or place prebuilt files into `<build_dir>/_deps/icu` and `<build_dir>/_deps/onnxruntime`.
 - Executable starts but misses runtime libraries on Windows: ensure post-build copied DLLs exist next to binaries in `build/bin`.
-- Audio output is noisy on some backend/build combinations: check the Known Issues section for currently observed behavior.
-- Windows CUDA Release noisy output workaround:
-  - Try building `cosyvoice` with debug runtime library (`/MDd` or `/MTd`) while keeping other settings unchanged.
-  - Alternatively, use a Debug build of either `cosyvoice.dll` or `ggml-base.dll`.
+- CPU/Vulkan output is noisy or incorrect: this is currently a known issue; use CUDA backend when possible.
 
 ## Contributing
 Contributions are welcome.

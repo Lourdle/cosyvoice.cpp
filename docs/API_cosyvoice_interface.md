@@ -23,6 +23,7 @@ struct cosyvoice_model_context
 
     virtual bool llm_prefill(ggml_type type, const void* data, uint32_t seq_len) = 0;
     virtual bool llm_decode(ggml_type type, const void* data) = 0;
+    virtual void llm_prepare_probs(bool allow_stop_tokens) = 0;
 
     virtual const ggml_tensor* get_word_token_embed_weight() = 0;
     virtual const ggml_tensor* get_speech_token_embed_weight() = 0;
@@ -301,6 +302,30 @@ Runs one LLM decode step.
 ### Returns
 
 `true` on success; otherwise `false`.
+
+### Remarks
+
+This method only advances decode state. Call `llm_prepare_probs()` before sampling.
+
+## cosyvoice_model_context::llm_prepare_probs
+
+### Syntax
+
+```cpp
+virtual void llm_prepare_probs(bool allow_stop_tokens) = 0;
+```
+
+### Description
+
+Prepares probabilities from the latest decode output for token sampling.
+
+### Parameters
+
+- `allow_stop_tokens`: If `false`, stop tokens are masked to zero probability.
+
+### Returns
+
+No return value.
 
 ## cosyvoice_model_context::get_word_token_embed_weight
 

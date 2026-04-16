@@ -23,6 +23,7 @@ struct cosyvoice_model_context
 
     virtual bool llm_prefill(ggml_type type, const void* data, uint32_t seq_len) = 0;
     virtual bool llm_decode(ggml_type type, const void* data) = 0;
+    virtual void llm_prepare_probs(bool allow_stop_tokens) = 0;
 
     virtual const ggml_tensor* get_word_token_embed_weight() = 0;
     virtual const ggml_tensor* get_speech_token_embed_weight() = 0;
@@ -313,6 +314,30 @@ virtual bool llm_decode(ggml_type type, const void* data) = 0;
 ### 返回值
 
 成功返回 `true`，失败返回 `false`。
+
+### 备注
+
+该方法只推进解码状态，采样前需要调用 `llm_prepare_probs()`。
+
+## cosyvoice_model_context::llm_prepare_probs
+
+### 语法
+
+```cpp
+virtual void llm_prepare_probs(bool allow_stop_tokens) = 0;
+```
+
+### 说明
+
+基于最近一次解码结果准备用于采样的概率分布。
+
+### 参数
+
+- `allow_stop_tokens`：为 `false` 时，将 stop token 的概率置为 0。
+
+### 返回值
+
+无返回值。
 
 ## cosyvoice_model_context::get_word_token_embed_weight
 

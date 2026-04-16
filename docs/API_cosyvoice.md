@@ -403,6 +403,8 @@ Loaded context handle on success; `NULL` on failure.
 
 Uses default backend and thread settings.
 
+Equivalent to calling `cosyvoice_load_from_file_ext(filename, &params, NULL, 0, 0)` with default-initialized `params`.
+
 ## cosyvoice_load_from_file_with_params
 
 ### Syntax
@@ -426,6 +428,10 @@ Loads a model context from file with explicit context parameters.
 ### Returns
 
 Loaded context handle on success; `NULL` on failure.
+
+### Remarks
+
+Equivalent to calling `cosyvoice_load_from_file_ext(filename, params, NULL, 0, 0)`.
 
 ## cosyvoice_free
 

@@ -150,9 +150,9 @@ Loads model context with explicit backend and threading parameters.
 
 - `filename`: Model path.
 - `params`: Context parameters.
-- `backend`: Backend handle.
-- `n_threads`: Thread count.
-- `reserved`: Reserved field.
+- `backend`: Optional backend handle.
+- `n_threads`: CPU thread count; set `0` to use hardware concurrency when available.
+- `reserved`: Reserved field. Pass `0`.
 
 ### Returns
 
@@ -160,7 +160,10 @@ Context handle on success; `NULL` on failure.
 
 ### Remarks
 
-Available only when `GGML_SHARED` is enabled.
+- This API is available in both shared and static GGML builds.
+- In shared GGML builds, backend ownership is transferred to the created context and released by `cosyvoice_free()`.
+- If GGML is built statically (`GGML_SHARED` disabled), `backend` is ignored.
+- If GGML is built as shared (`GGML_SHARED` enabled), `backend == NULL` means auto-select backend; otherwise the provided backend is used.
 
 ## cosyvoice_get_last_status
 
@@ -279,6 +282,35 @@ Runs one decode step and updates internal logits.
 ### Returns
 
 `true` on success; otherwise `false`.
+
+### Remarks
+
+This function only advances decode state. Call `cosyvoice_llm_prepare_probs()` before `cosyvoice_llm_sample_token()`.
+
+## cosyvoice_llm_prepare_probs
+
+### Syntax
+
+```c
+COSYVOICE_API void cosyvoice_llm_prepare_probs(cosyvoice_context_t ctx, bool allow_stop_tokens);
+```
+
+### Description
+
+Prepares sampling probabilities from the latest decode output.
+
+### Parameters
+
+- `ctx`: Context handle.
+- `allow_stop_tokens`: If `false`, stop tokens are masked to zero probability.
+
+### Returns
+
+No return value.
+
+### Remarks
+
+Call this after each successful `cosyvoice_llm_decode()` and before `cosyvoice_llm_sample_token()`.
 
 ## cosyvoice_llm_get_kv_cache_len
 

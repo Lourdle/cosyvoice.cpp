@@ -415,6 +415,8 @@ COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file(const char* filename)
 
 使用默认后端和默认线程设置加载模型。
 
+等价于使用默认初始化后的 `params` 调用 `cosyvoice_load_from_file_ext(filename, &params, NULL, 0, 0)`。
+
 ## cosyvoice_load_from_file_with_params
 
 ### 语法
@@ -438,6 +440,10 @@ COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_with_params(
 ### 返回值
 
 成功返回上下文句柄，失败返回 `NULL`。
+
+### 备注
+
+等价于调用 `cosyvoice_load_from_file_ext(filename, params, NULL, 0, 0)`。
 
 ## cosyvoice_free
 

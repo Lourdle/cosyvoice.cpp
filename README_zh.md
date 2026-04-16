@@ -4,7 +4,7 @@
 
 > 非官方说明：本仓库**与 CosyVoice 官方团队无隶属关系**，也未获得官方背书或维护。本项目是社区开发者发起和维护的 C++/GGML 移植实现。
 
-> **当前状态提示：** 目前在多种已测试的后端/构建组合下，音频生成仍存在稳定性问题，可能出现噪音。用于生产前请先阅读[已知问题](#已知问题)。
+> **当前状态提示：** 当前测试中 CUDA 稳定性问题已解决，Windows/Linux 下 CUDA 均可正常生成音频；CPU 和 Vulkan 仍无法正常运行。用于生产前请先阅读[已知问题](#已知问题)。
 
 本项目将原始 CosyVoice 项目发布的 Python 推理流程迁移到 C++/GGML，目前主要支持 **CosyVoice3**。
 
@@ -329,6 +329,7 @@ cosyvoice-cli \
 - `--speed, -s <value>`：语速倍率，默认 `1.0`，必须大于 `0`。
 - `--seed <value>`：采样与内部噪声生成的随机种子，必须是无符号 32 位整数；默认随机。
 - `--max-llm-len <value>`：LLM 最大输入 token 数（`n_max_seq`），默认 `2048`，必须为正整数。
+- `--threads, -j <value>`：模型推理使用的 CPU 线程数，必须是无符号 32 位整数；默认 `0`（使用当前硬件并发数）。
 - `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>`：LLM KV cache 类型，默认 `q8_0`。
 - `--mode <zero-shot|instruct|cross-lingual>`：TTS 模式。默认按 `--instruction` 自动判定。
 - `--instruction, -i <text>`：instruct 模式指令文本。
@@ -371,7 +372,7 @@ cosyvoice-cli \
 - 该选项仅在启用 ICU 时可用（`COSYVOICE_NO_ICU=OFF`）。
 
 运行日志：
-- 模型加载前会先打印基础请求信息（模型路径、模式、提示源、输出路径、语速、seed 来源）。
+- 模型加载前会先打印基础请求信息（模型路径、模式、提示源、输出路径、语速、解析后的 CPU 线程数、seed 来源）。
 - 模型加载阶段会显示转圈动画（`| / - \\`）。
 - 默认输出为简洁分区样式。
 - `--verbose` 显示完整运行细节（含上下文/内存明细与完整阶段耗时）。
@@ -383,7 +384,7 @@ cosyvoice-cli \
 - 常规 TTS 必填：`--model`、`--text`、`--output`，以及一个提示源（`--prompt-speech` 或前端输入）。
 - `--frontend-only` 必填：`--speech-tokenizer`、`--campplus`、音频输入、`--prompt-speech-output`。
 - 可选参数默认值来自 CLI 或模型元数据：
-  - CLI 默认：`--speed=1.0`、`--max-llm-len=2048`、`--llm-kv-cache-type=q8_0`、`--mode=auto`。
+  - CLI 默认：`--speed=1.0`、`--max-llm-len=2048`、`--threads=0`（硬件并发数）、`--llm-kv-cache-type=q8_0`、`--mode=auto`。
   - 采样默认（`temperature/top_k/top_p/win_size/tau_r/token-text ratio`）来自模型配置，未传参数时不变。
 
 ## CLI 快速索引
@@ -403,6 +404,7 @@ cosyvoice-cli \
 | `--mode` | `auto` | CLI |
 | `--speed` | `1.0` | CLI |
 | `--max-llm-len` | `2048` | CLI |
+| `--threads` | `0`（硬件并发数） | CLI |
 | `--llm-kv-cache-type` | `q8_0` | CLI |
 | `--seed` | 随机 | 运行时 |
 | `temperature/top_k/top_p/win_size/tau_r/min/max_token_text_ratio` | 模型元数据 | 模型 |
@@ -435,27 +437,18 @@ cosyvoice-cli --frontend-only --speech-tokenizer speech_tokenizer.onnx --campplu
   - 传入未知 mode：给出警告并自动判定模式。
 - 若未启用前端（`COSYVOICE_NO_FRONTEND=ON`），则必须使用 `--prompt-speech`。
 - 在 `--frontend-only` 模式下，`--seed` 会被接受但忽略（会打印警告）。
+- 在 `--frontend-only` 模式下，`--threads` 会被接受但忽略（会打印警告）。
 - 在 `--frontend-only` 模式下，采样覆盖参数会被接受但忽略（会打印警告）。
 
 ## 已知问题
 当前生成稳定性与后端关系较大。
 
 已测试现象：
-- **Windows + CUDA（Toolkit 12.9，Ada Lovelace）：**
-  - Debug 构建相对更稳定。
-  - Release 构建不稳定：有概率正常，也有概率出现噪音。
-  - 本地已确认的可行绕过方式：
-    - 只要把 `cosyvoice.dll` 或 `ggml-base.dll` 任意一个换成 Debug 构建，噪音问题即可消失。
-    - 最小改动方案（仅改 `cosyvoice` 工程）：
-      1. 在 Visual Studio 打开 `cosyvoice` 项目属性。
-      2. 进入 `C/C++` -> `代码生成` -> `运行库`。
-      3. 改为 `多线程调试 DLL (/MDd)` 或 `多线程调试 (/MTd)`。
-      4. 其他设置保持不变。
-    - 仅这一项运行库修改即可解决 Windows CUDA Release 噪音问题。
-- **WSL2 Ubuntu + CUDA（Toolkit 12.4 / 13.0）：**
-  - 在测试中无论 Debug/Release 均为噪音。
+- **CUDA 后端（Windows + Linux）：**
+  - 当前测试中 CUDA 稳定性问题已解决。
+  - Windows CUDA 与 Linux CUDA 均可正常运行。
 - **CPU / Vulkan：**
-  - 在测试中均为噪音。
+  - 当前测试中仍无法正常运行（例如噪音/输出异常）。
 
 补充说明：
 - 目前仅在 Ada Lovelace 架构显卡上做过验证。
@@ -465,10 +458,7 @@ cosyvoice-cli --frontend-only --speech-tokenizer speech_tokenizer.onnx --campplu
 - CMake 找不到 GGML：设置 `-DGGML_SOURCE_DIR=...`，或使用默认 `vendor/ggml` 并确保本机可用 Git（用于自动克隆）。
 - ICU/ONNX Runtime 检测失败：可安装系统包（适用平台），或将预编译文件放到 `<build_dir>/_deps/icu` 与 `<build_dir>/_deps/onnxruntime`。
 - Windows 运行时缺库：检查 `build/bin` 下是否存在构建后复制的依赖 DLL。
-- 音频出现噪音：请先对照“已知问题”中的后端/构建测试结论。
-- Windows CUDA Release 噪音临时解决方案：
-  - 可将 `cosyvoice` 的运行库改为调试运行库（`/MDd` 或 `/MTd`），其余设置不变。
-  - 或者直接使用 Debug 版本的 `cosyvoice.dll` 或 `ggml-base.dll`（二者任意一个即可）。
+- CPU/Vulkan 输出异常或有噪音：当前属于已知问题，建议优先使用 CUDA 后端。
 
 ## 欢迎贡献
 欢迎提交 Issue 和 Pull Request，尤其是：
