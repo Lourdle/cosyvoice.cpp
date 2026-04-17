@@ -46,6 +46,7 @@ This project provides:
 
 ## Third-Party Notices
 - See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for bundled dependency license details.
+- FFT implementation (`src/fft.cpp`) references/adapts KissFFT (BSD-3-Clause) with project-specific SIMD optimizations; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 - Tokenizer implementation is adapted from llama.cpp (MIT).
 
 ## Licensing

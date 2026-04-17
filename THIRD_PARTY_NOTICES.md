@@ -1,6 +1,7 @@
 # Third-Party Notices
 
-This project bundles third-party components under `vendor/`.
+This project includes bundled third-party components under `vendor/` and also
+contains code adapted/referenced from external open-source projects.
 
 ## miniaudio
 
@@ -21,6 +22,15 @@ This project bundles third-party components under `vendor/`.
 PCRE2 documents that `deps/sljit` carries its own license when present.
 If your local PCRE2 source includes that directory, ensure the corresponding
 license file is retained and distributed.
+
+## KissFFT (FFT reference/adaptation)
+
+- Upstream: https://github.com/mborgerding/kissfft
+- Local usage: `src/fft.cpp`, `src/fft.h`
+- Usage in this project: FFT core logic references/adapts the KissFFT mixed-radix design; SIMD optimization/integration is implemented in this project.
+- Upstream copyright: Copyright (c) 2003-2010 Mark Borgerding
+- License: BSD-3-Clause
+- License text location: https://github.com/mborgerding/kissfft/blob/master/COPYING
 
 ## llama.cpp (tokenizer implementation reference)
 

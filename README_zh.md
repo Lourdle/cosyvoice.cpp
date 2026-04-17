@@ -46,6 +46,7 @@
 
 ## 第三方许可说明
 - 已打包依赖的许可证信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+- FFT 实现（`src/fft.cpp`）参考/改造自 KissFFT（BSD-3-Clause），并加入了项目内 SIMD 优化；详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 - tokenizer 实现基于 llama.cpp（MIT）改造。
 
 ## 许可证说明
