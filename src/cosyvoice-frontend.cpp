@@ -107,9 +107,9 @@ cosyvoice_frontend_context_t cosyvoice_frontend_load_from_files(const char* spee
     };
 
     file_descriptor st_fd(speech_tokenizer);
-	if (st_fd < 0) return nullptr;
+    if (st_fd < 0) return nullptr;
     file_descriptor cp_fd(campplus);
-	if (cp_fd < 0) return nullptr;
+    if (cp_fd < 0) return nullptr;
 
     struct stat cur_stat;
     if (fstat(st_fd, &cur_stat) != 0) return nullptr;
@@ -593,10 +593,12 @@ matrix cosyvoice_frontend_context::extract_spk_embedding(float* speech, uint32_t
         __m128 sums = _mm_add_ps(sum128, shuf);
         shuf = _mm_movehl_ps(shuf, sums);
         sums = _mm_add_ss(sums, shuf);
-        float mean = _mm_cvtss_f32(sums) / win_size;
+        float sum = _mm_cvtss_f32(sums);
 
         for (; j != win_size; ++j)
-            mean += speech_frame[j];
+            sum += speech_frame[j];
+
+        float mean = sum / win_size;
 
         __m256 vmean = _mm256_set1_ps(mean);
         auto frame_dataptr = frames.data + i * frames.stride;
@@ -627,7 +629,7 @@ matrix cosyvoice_frontend_context::extract_spk_embedding(float* speech, uint32_t
 
     uint32_t numal = frames.shape[0] * frames.shape[1];
     uint32_t i = 0;
-    for (__m256 preemph = _mm256_set1_ps(0.97f); i +7< numal; i += 8)
+    for (__m256 preemph = _mm256_set1_ps(0.97f); i + 7 < numal; i += 8)
     {
         __m256 vframes = _mm256_loadu_ps(frames.data + i);
         __m256 vprev = _mm256_loadu_ps(prev.data + i);
@@ -652,12 +654,12 @@ matrix cosyvoice_frontend_context::extract_spk_embedding(float* speech, uint32_t
 
     matrix spectrum(frames.shape[0], padded_win_size / 2 + 1);
     auto buffer = std::make_unique<float[]>(padded_win_size);
+    // Zero-pad frame (win_size=400) to padded_win_size (512) for FFT
     auto fft_input = std::make_unique<float[]>(padded_win_size);
+    memset(fft_input.get() + win_size, 0, (padded_win_size - win_size) * sizeof(float));
     for (uint32_t i = 0; i != frames.shape[0]; ++i)
     {
-        // Zero-pad frame (win_size=400) to padded_win_size (512) for FFT
         memcpy(fft_input.get(), frames.data + i * frames.stride, win_size * sizeof(float));
-        memset(fft_input.get() + win_size, 0, (padded_win_size - win_size) * sizeof(float));
         fft(fft_input.get(), buffer.get(), *fft_ctx_spk);
         uint32_t j = 0;
         for (; j + 7 < padded_win_size / 2 + 1; j += 8)
@@ -709,7 +711,7 @@ matrix cosyvoice_frontend_context::extract_spk_embedding(float* speech, uint32_t
 
             float sum = _mm_cvtss_f32(sums);
             for (; k != spectrum.shape[1]; ++k)
-                sum += spectrum_dataptr[k] * spectrum_dataptr[k];
+                sum += spectrum_dataptr[k] * mel_basis_spk_dataptr[k];
             feat(j, i) = std::log(std::max(FLT_EPSILON, sum));
         }
     }
