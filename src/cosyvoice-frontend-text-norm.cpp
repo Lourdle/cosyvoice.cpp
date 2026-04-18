@@ -163,9 +163,10 @@ bool cosyvoice_frontend_util_text_normalize(std::string& text, const char* orig_
     icu::Locale loc = is_valid_locale(locale) ? icu::Locale(locale) : detect_locale(norm);
 
     auto finalize = [&]() {
+        text.clear();
         norm.toUTF8String(text);
         return true;
-        };
+    };
     icu::RuleBasedNumberFormat spellout(icu::URBNF_SPELLOUT, loc, status);
     if (U_FAILURE(status)) return finalize();
 
