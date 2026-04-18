@@ -244,6 +244,7 @@ struct CausalMaskedDiffWithDiT : Module
 
 struct CausalConv1dBase : Conv1d
 {
+	virtual ~CausalConv1dBase() = default;
 	virtual ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x) const = 0;
 };
 

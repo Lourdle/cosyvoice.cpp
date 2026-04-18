@@ -161,21 +161,10 @@ static void set_graph_backend(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml_
 
     for (int i = 0; i != nodes; ++i) {
         auto node = ggml_graph_node(gf, i);
-        if (node->op == GGML_OP_CUSTOM)
-        {
-            do {
-                ggml_backend_sched_set_tensor_backend(sched, node, cpu_backend);
-                if (++i == nodes) return;
-                node = ggml_graph_node(gf, i);
-            } while ((node->op == GGML_OP_VIEW || node->op == GGML_OP_PERMUTE));
-
-            goto set_main_backend;
-        }
+        if (cpu_backend && !ggml_backend_supports_op(backend, node))
+            ggml_backend_sched_set_tensor_backend(sched, node, cpu_backend);
         else
-        {
-        set_main_backend:
             ggml_backend_sched_set_tensor_backend(sched, node, backend);
-        }
     }
 }
 
@@ -223,7 +212,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 
     auto feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 1, op_caps, cut_len);
     ggml_build_forward_expand(gf, feat);
-    set_graph_backend(gf, sched.get(), backend.get(), nullptr);
+    set_graph_backend(gf, sched.get(), backend.get(), cpu_backend.get());
     ggml_backend_sched_synchronize(sched.get());
     ggml_backend_sched_alloc_graph(sched.get(), gf);
 
@@ -256,7 +245,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
     feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 1, op_caps, cut_len, &t_leaf);
 
     ggml_build_forward_expand(gf, feat);
-    set_graph_backend(gf, sched.get(), backend.get(), nullptr);
+    set_graph_backend(gf, sched.get(), backend.get(), cpu_backend.get());
 
     ggml_backend_sched_alloc_graph(sched.get(), gf);
     status = ggml_backend_sched_graph_compute(sched.get(), gf);
@@ -285,7 +274,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
     feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, static_cast<int>(flow.decoder.t_span.size() - 1), op_caps, cut_len, nullptr);
 
     ggml_build_forward_expand(gf, feat);
-    set_graph_backend(gf, sched.get(), backend.get(), nullptr);
+    set_graph_backend(gf, sched.get(), backend.get(), cpu_backend.get());
 
     ggml_backend_sched_alloc_graph(sched.get(), gf);
     status = ggml_backend_sched_graph_compute(sched.get(), gf);
