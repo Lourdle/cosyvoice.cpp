@@ -13,6 +13,7 @@ This repository ships independent engineering work and does not contain official
 This project provides:
 - A core C/C++ inference library (`cosyvoice`)
 - A CLI synthesis tool (`cosyvoice-cli`)
+- An OpenAI Speech-compatible API server (`cosyvoice-server`)
 - A GGUF quantization tool (`quantize`)
 
 ## Contents
@@ -27,9 +28,7 @@ This project provides:
 - [GGML Backend/Build Options](#ggml-backendbuild-options)
 - [Using Custom Dependencies](#using-custom-dependencies)
 - [Model Conversion to GGUF](#model-conversion-to-gguf)
-- [Quantization Tool (`tools/quantize`)](#quantization-tool-toolsquantize)
-- [CLI Tool (`tools/cli`)](#cli-tool-toolscli)
-- [CLI Quick Reference](#cli-quick-reference)
+- [Tooling Guide](#tooling-guide)
 - [Known Issues](#known-issues)
 - [Troubleshooting](#troubleshooting)
 - [Third-Party Notices](#third-party-notices)
@@ -38,6 +37,7 @@ This project provides:
 
 ## Documentation
 - API index: [docs/API.md](docs/API.md)
+- Tooling guide: [docs/TOOLS.md](docs/TOOLS.md)
 
 ## AI Usage Disclosure
 - Most project code is written by the author.
@@ -62,7 +62,7 @@ This project provides:
 1. Convert upstream CosyVoice model weights to GGUF (via this repository's `convert_model_to_gguf.py`).
 2. Configure and build this project.
 3. (Optional) Quantize the GGUF model with `quantize`.
-4. Run `cosyvoice-cli` for synthesis.
+4. Run `cosyvoice-cli` for file-based synthesis, or run `cosyvoice-server` for OpenAI Speech-compatible HTTP API.
 
 ## Inference Pipeline
 This project supports two equivalent inference paths:
@@ -258,188 +258,14 @@ After conversion:
 1. Verify the generated `.gguf` file.
 2. (Optional) Quantize it with this repository's `quantize` tool.
 
-## Quantization Tool (`tools/quantize`)
-Executable name: `quantize`
+## Tooling Guide
+This repository includes three user-facing tools:
+- `cosyvoice-cli`: local file-based TTS generation (supports prompt_speech reuse and frontend + TTS flow).
+- `cosyvoice-server`: OpenAI Speech-compatible HTTP API server for service-style integration.
+- `quantize`: GGUF quantization utility to convert model files to smaller/faster formats.
 
-Basic usage:
-```bash
-quantize -f input.gguf -o output-q4k.gguf -t Q4_K
-```
-
-Show help:
-```bash
-quantize --help
-```
-
-Supported quantization types:
-- `F16`, `Q8_0`, `Q5_0`, `Q5_1`, `Q4_0`, `Q4_1`
-- `Q6_K`, `Q5_K`, `Q4_K`, `Q3_K`, `Q2_K`
-- `COPY`
-
-Custom metadata strings are supported with repeated `-c/--custom-string`.
-
-## CLI Tool (`tools/cli`)
-Executable name: `cosyvoice-cli`
-
-Show help:
-```bash
-cosyvoice-cli --help
-```
-
-### A) TTS from an existing prompt_speech file
-```bash
-cosyvoice-cli \
-  --model model.gguf \
-  --prompt-speech prompt_speech.gguf \
-  --text "Hello from CosyVoice" \
-  --output out.wav
-```
-
-### B) End-to-end frontend + TTS (extract prompt_speech on the fly)
-```bash
-cosyvoice-cli \
-  --model model.gguf \
-  --speech-tokenizer speech_tokenizer.onnx \
-  --campplus campplus.onnx \
-  --prompt-audio ref.wav \
-  --prompt-text "reference transcript" \
-  --text "target text" \
-  --output out.wav
-```
-
-### C) Frontend-only mode (generate prompt_speech and exit)
-```bash
-cosyvoice-cli \
-  --frontend-only \
-  --speech-tokenizer speech_tokenizer.onnx \
-  --campplus campplus.onnx \
-  --prompt-audio ref.wav \
-  --prompt-text "reference transcript" \
-  --prompt-speech-output prompt_speech.gguf
-```
-
-### Option Reference
-
-Core options:
-- `--help, -h`: Show help message and exit.
-- `--model, -m <file>`: CosyVoice model file (`.gguf`) used for TTS.
-- `--text, -t <text>`: Text to synthesize.
-- `--output, -o <file>`: Output audio path.
-  - Normal build: format is inferred from file extension.
-  - `COSYVOICE_NO_AUDIO=ON`: output is always WAV.
-- `--speed, -s <value>`: Speech speed multiplier. Default: `1.0`. Must be `> 0`.
-- `--seed <value>`: Random seed for sampling and internal noise generation. Must be an unsigned 32-bit integer. Default: random.
-- `--max-llm-len <value>`: Maximum input token count for LLM (`n_max_seq`). Default: `2048`. Must be a positive integer.
-- `--threads, -j <value>`: CPU thread count for model inference. Must be an unsigned 32-bit integer. Default: `0` (use current hardware concurrency).
-- `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>`: LLM KV cache type. Default: `q8_0`.
-- `--mode <zero-shot|instruct|cross-lingual>`: TTS mode. Default: auto-detect from `--instruction`.
-- `--instruction, -i <text>`: Instruction text for instruct mode.
-
-Sampling override options:
-- `--temperature <value>`: Sampling temperature, must be `> 0`.
-- `--top-k <value>`: Top-k sampling size, must be `>= 0`.
-- `--top-p <value>`: Top-p sampling threshold, must be in `[0, 1]`.
-- `--win-size <value>`: Repetition window size, must be `> 0`.
-- `--tau-r <value>`: Repetition penalty coefficient, must be `>= 0`.
-- `--min-token-text-ratio <value>`: Minimum generated token/text ratio, must be `>= 0`.
-- `--max-token-text-ratio <value>`: Maximum generated token/text ratio, must be `>= 0` and not less than `--min-token-text-ratio` when both are set.
-
-Log options:
-- `--verbose, -v`: Show detailed runtime sections (context, advanced sampling, memory, full timings).
-- `--quiet, -q`: Suppress non-error logs.
-- `--quiet` and `--verbose` cannot be used together.
-
-Frontend options (available when frontend is compiled, i.e. `COSYVOICE_NO_FRONTEND=OFF`):
-- `--frontend-only`: Run frontend only, save `prompt_speech`, then exit.
-- `--speech-tokenizer <file>`: Frontend speech tokenizer ONNX file.
-- `--campplus <file>`: Frontend campplus ONNX file.
-- `--prompt-audio <file>`: Reference audio file for frontend.
-  - If built with `COSYVOICE_NO_AUDIO=ON`, use:
-    - `--prompt-audio-16k <16k_pcm_file>`: 16 kHz float PCM file.
-    - `--prompt-audio-24k <24k_pcm_file>`: 24 kHz float PCM file.
-- `--prompt-text <text>`: Transcript of the reference audio.
-- `--prompt-speech-output <file>`: Save generated `prompt_speech` to file.
-
-Prompt source options:
-- `--prompt-speech <file>`: Use a saved `prompt_speech` file.
-- Choose exactly one source:
-  - a saved `--prompt-speech`, or
-  - frontend inputs (`--speech-tokenizer`, `--campplus`, audio input, optional/required `--prompt-text` depending on mode).
-- Using `--prompt-speech` and frontend inputs together is rejected.
-- Typical reuse workflow: generate and save `prompt_speech.gguf` with `--frontend-only`, then run future synthesis with `--prompt-speech` directly.
-
-Text normalization:
-- `--disable-text-normalization`: Disable ICU text normalization before tokenization.
-- This option exists only when ICU is enabled (`COSYVOICE_NO_ICU=OFF`).
-
-Runtime logs:
-- Basic request info (model path, mode, prompt source, output, speed, resolved CPU thread count, seed source) is shown before model loading.
-- During model loading, a spinner (`| / - \\`) is shown in the console.
-- Default output is concise and formatted with sections.
-- `--verbose` shows full runtime details, including context/memory breakdown and full timing stages.
-- `--quiet` suppresses runtime info and timings (errors still print).
-- Sampling lines include source directly inline, e.g. `temperature : 1.0000 (model default)`.
-- Memory in `--verbose` shows post-generation values with deltas against pre-generation snapshot.
-
-Required vs optional:
-- Required for normal TTS: `--model`, `--text`, `--output`, and one prompt source (`--prompt-speech` OR frontend inputs).
-- Required for `--frontend-only`: `--speech-tokenizer`, `--campplus`, audio input, `--prompt-speech-output`.
-- Optional parameters use defaults from CLI or model metadata:
-  - CLI defaults: `--speed=1.0`, `--max-llm-len=2048`, `--threads=0` (hardware concurrency), `--llm-kv-cache-type=q8_0`, `--mode=auto`.
-  - Sampling defaults (`temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, token/text ratios) come from model config unless overridden by CLI.
-
-## CLI Quick Reference
-
-### Required arguments by scenario
-
-| Scenario | Required |
-|---|---|
-| TTS with existing prompt_speech | `--model`, `--prompt-speech`, `--text`, `--output` |
-| End-to-end frontend + TTS | `--model`, `--speech-tokenizer`, `--campplus`, `--prompt-audio` (or `--prompt-audio-16k` + `--prompt-audio-24k`), `--text`, `--output` |
-| Frontend-only | `--frontend-only`, `--speech-tokenizer`, `--campplus`, audio input, `--prompt-speech-output` |
-
-### Defaults at a glance
-
-| Option | Default | Source |
-|---|---|---|
-| `--mode` | `auto` | CLI |
-| `--speed` | `1.0` | CLI |
-| `--max-llm-len` | `2048` | CLI |
-| `--threads` | `0` (hardware concurrency) | CLI |
-| `--llm-kv-cache-type` | `q8_0` | CLI |
-| `--seed` | random | runtime |
-| `temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, `min/max_token_text_ratio` | model metadata | model |
-
-### Typical command templates
-
-```bash
-# Reuse prompt_speech
-cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --text "hello" --output out.wav
-
-# Frontend + TTS in one command
-cosyvoice-cli --model model.gguf --speech-tokenizer speech_tokenizer.onnx --campplus campplus.onnx --prompt-audio ref.wav --prompt-text "ref text" --text "target" --output out.wav
-
-# Frontend-only (prepare prompt_speech for later reuse)
-cosyvoice-cli --frontend-only --speech-tokenizer speech_tokenizer.onnx --campplus campplus.onnx --prompt-audio ref.wav --prompt-text "ref text" --prompt-speech-output prompt_speech.gguf
-```
-
-### Validation and Mode Behavior
-
-- `--frontend-only` requires: `--speech-tokenizer`, `--campplus`, audio input, and `--prompt-speech-output`.
-- Normal TTS requires: `--model`, `--text`, `--output`, and one prompt source.
-- If `--prompt-speech` is not provided:
-  - frontend inputs are required;
-  - `--prompt-text` is required in `zero-shot` mode;
-  - `--prompt-text` is ignored in `instruct` and `cross-lingual` modes.
-- `--mode` behavior:
-  - `auto`: resolves to `instruct` when `--instruction` is provided, otherwise `zero-shot`.
-  - `instruct` without `--instruction`: warning, then fallback to `zero-shot`.
-  - `zero-shot` with `--instruction`: warning, and `--instruction` is ignored.
-  - unrecognized mode value: warning, then auto-detect.
-- If frontend is not available (`COSYVOICE_NO_FRONTEND=ON`), `--prompt-speech` is mandatory.
-- In `--frontend-only` mode, `--seed` is accepted but ignored (warning will be printed).
-- In `--frontend-only` mode, `--threads` is accepted but ignored (warning will be printed).
-- In `--frontend-only` mode, sampling override options are accepted but ignored (warning will be printed).
+Full commands, options, and examples are documented in:
+- [docs/TOOLS.md](docs/TOOLS.md)
 
 ## Known Issues
 Current generation stability is backend-dependent.
