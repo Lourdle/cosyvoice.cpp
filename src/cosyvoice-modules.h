@@ -51,7 +51,7 @@ struct BasicModule : Module
 
 struct Conv1d : BasicModule
 {
-	ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, int s, int p, int d, int g, ggml_backend_op_capabilities capabilities) const;
+	ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, int s, int p, int d, int g, ggml_backend_op_capabilities capabilities, ggml_tensor* weight_override = nullptr) const;
 };
 
 struct Linear : BasicModule

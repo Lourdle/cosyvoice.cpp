@@ -67,6 +67,15 @@ static ggml_tensor* concat_tensors(ggml_context* ctx, ggml_tensor** tensors, siz
 			return res;
 		}
 	
+	// Use native ggml_concat chain for F32 tensors (avoids view+cpy allocator bug)
+	if (tensors[0]->type == GGML_TYPE_F32)
+	{
+		auto result = tensors[0];
+		for (size_t i = 1; i < chunks; ++i)
+			result = ggml_concat(ctx, result, tensors[i], dim);
+		return result;
+	}
+
 	auto type = tensors[0]->type;
 	int64_t ne[GGML_MAX_DIMS];
 	memcpy(ne, tensors[0]->ne, sizeof(ne));
@@ -131,40 +140,43 @@ static ggml_tensor* mish(ggml_context* ctx, ggml_tensor* x)
 	return out;
 }
 
-ggml_tensor* Conv1d::build_cgraph(ggml_context* ctx, ggml_tensor* x, int s, int p, int d, int g, ggml_backend_op_capabilities capabilities) const
+ggml_tensor* Conv1d::build_cgraph(ggml_context* ctx, ggml_tensor* x, int s, int p, int d, int g, ggml_backend_op_capabilities capabilities, ggml_tensor* weight_override) const
 {
 	GGML_ASSERT(g >= 1);
 	GGML_ASSERT(x->ne[3] == 1 && weight->ne[3] == 1);
 
 	ggml_tensor* im2col;
-	ggml_tensor* weight = this->weight;
+	ggml_tensor* weight = weight_override ? weight_override : this->weight;
 	if (g != 1)
 	{
 		GGML_ASSERT(weight->ne[2] % g == 0 && weight->ne[1] * g == x->ne[1]);
 
 		auto xs = reinterpret_cast<ggml_tensor**>(alloca(sizeof(ggml_tensor*) * g));
 		auto ws = reinterpret_cast<ggml_tensor**>(alloca(sizeof(ggml_tensor*) * g));
+		if (weight->type == GGML_TYPE_F16)
+			weight = ggml_cast(ctx, weight, GGML_TYPE_F32);
 		split_tensor(ctx, x, 1, xs, g);
 		split_tensor(ctx, weight, 2, ws, g);
+
 		for (int i = 0; i != g; i++)
 			xs[i] = unsqueeze(ctx,
 				ggml_im2col(ctx,
 					ws[i],
 					ggml_cont(ctx, xs[i]),
 					s, 0, p, 0, d, 0,
-					false, weight->type),
+					false, GGML_TYPE_F32),
 				2);
-		im2col = concat_tensors(ctx, xs, g, 2, capabilities);
+		// concat_tensors returns a view node; mark as output to prevent the allocator
+		// from reusing its backing buffer before ggml_cont materializes it.
+		auto concat_result = concat_tensors(ctx, xs, g, 2, capabilities);
+		ggml_set_output(concat_result);
+		im2col = ggml_cont(ctx, concat_result);
 	}
 	else
 	{
 		im2col = ggml_im2col(ctx, weight, x, s, 0, p, 0, d, 0, false, weight->type);
 		if (im2col->ne[1] > 0xFFFF)
 		{
-			// Split the im2col output along the output-width dimension.
-			// Keep the op as GGML_OP_IM2COL until graph allocation, then switch to
-			// GGML_OP_NONE. This avoids a GGML allocation-size bug that can reserve
-			// much more memory than necessary.
 			constexpr int chunk_max_size = 65528;
 			auto prev_chunk = im2col;
 			memset(im2col->op_params, 0, sizeof(im2col->op_params));
@@ -173,7 +185,6 @@ ggml_tensor* Conv1d::build_cgraph(ggml_context* ctx, ggml_tensor* x, int s, int 
 			for (int64_t start = 0; start < im2col->ne[1]; start += chunk_max_size)
 			{
 				auto end = std::min(im2col->ne[1], start + chunk_max_size);
-				auto chunk_ow = end - start;
 
 				auto logical_start = start * s - p;
 				auto logical_end = (end - 1) * s - p + d * (weight->ne[0] - 1) + 1;
@@ -212,13 +223,7 @@ ggml_tensor* Conv1d::build_cgraph(ggml_context* ctx, ggml_tensor* x, int s, int 
 
 	weight = ggml_reshape_3d(ctx, weight, weight->ne[0] * weight->ne[1], weight->ne[2] / g, g);
 	if (x->ne[2] != 1)
-		if (weight->type == GGML_TYPE_F16 && !capabilities.repeat_f16)
-		{
-			weight->ne[3] = x->ne[2];
-			weight->nb[3] = 0;
-		}
-		else
-			weight = ggml_repeat_4d(ctx, weight, weight->ne[0], weight->ne[1], g, x->ne[2]);
+		weight = ggml_repeat_4d(ctx, weight, weight->ne[0], weight->ne[1], g, x->ne[2]);
 
 	ggml_tensor* result = ggml_mul_mat(ctx, im2col, weight);
 	result = ggml_reshape_3d(ctx, result, im2col->ne[1], this->weight->ne[2], x->ne[2]);
@@ -254,19 +259,34 @@ ggml_tensor* CausalConvPositionEmbedding::build_cgraph(ggml_context* ctx, ggml_t
 {
 	x = ggml_permute(ctx, x, 1, 0, 2, 3);
 	x = ggml_cont(ctx, x);
+
+	// Pre-cast conv2 weight to F32 before conv1 to prevent allocator buffer conflicts
+	// between the two grouped conv's internal ggml_cast nodes.
+	auto conv2_weight_f32 = (conv2.weight->type == GGML_TYPE_F16)
+		? ggml_cast(ctx, conv2.weight, GGML_TYPE_F32) : conv2.weight;
+	ggml_set_output(conv2_weight_f32);
+
 	x = ggml_pad_ext(ctx, x, static_cast<int>(conv1.weight->ne[0] - 1), 0, 0, 0, 0, 0, 0, 0);
+	ggml_set_output(x);
 	x = conv1.build_cgraph(ctx, x, 1, 0, 1, 16, capabilities);
+	ggml_set_output(x);
 	x = mish(ctx, x);
+	ggml_set_output(x);
 	x = ggml_pad_ext(ctx, x, static_cast<int>(conv2.weight->ne[0] - 1), 0, 0, 0, 0, 0, 0, 0);
-	x = conv2.build_cgraph(ctx, x, 1, 0, 1, 16, capabilities);
+	ggml_set_output(x);
+	x = conv2.build_cgraph(ctx, x, 1, 0, 1, 16, capabilities, conv2_weight_f32);
+	ggml_set_output(x);
 	x = mish(ctx, x);
+	ggml_set_output(x);
 	return ggml_permute(ctx, x, 1, 0, 2, 3);
 }
 
 ggml_tensor* InputEmbedding::build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* cond, ggml_tensor* text_embed, ggml_tensor* spks, ggml_backend_op_capabilities capabilities) const
 {
 	spks = ggml_repeat(ctx, spks, x);
-	x = concat_tensors(ctx, std::array{ x, cond, text_embed, spks }, 0);
+	x = ggml_concat(ctx, x, cond, 0);
+	x = ggml_concat(ctx, x, text_embed, 0);
+	x = ggml_concat(ctx, x, spks, 0);
 	x = proj.build_cgraph(ctx, x);
 	x = ggml_add(ctx,
 		ggml_cont(ctx,
@@ -302,12 +322,16 @@ std::array<ggml_tensor*, 5> AdaLayerNormZero::build_cgraph(ggml_context* ctx, gg
 
 	scale_msa = ggml_scale_bias(ctx, ggml_cont(ctx, scale_msa), 1.f, 1.f);
 	scale_msa = unsqueeze(ctx, scale_msa, 1);
+	shift_msa = ggml_cont(ctx, shift_msa);
 	shift_msa = unsqueeze(ctx, shift_msa, 1);
 
 	x = norm.build_cgraph(ctx, x);
 	x = ggml_mul(ctx, x, scale_msa);
 	x = ggml_add(ctx, x, shift_msa);
 
+	gate_msa = ggml_cont(ctx, gate_msa);
+	shift_mlp = ggml_cont(ctx, shift_mlp);
+	gate_mlp = ggml_cont(ctx, gate_mlp);
 	return { x, gate_msa, shift_mlp, scale_mlp, gate_mlp };
 }
 
@@ -329,15 +353,14 @@ ggml_tensor* Attention::build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_ten
 	}
 	auto query = to_q.build_cgraph(ctx, x);
 
-	// Follow the original DiT implementation and apply RoPE before reshaping and
-	// permuting. The ggml RoPE op does not support 4D tensors yet, so reshape to
-	// 3D with an explicit single-head dimension first.
-	query = ggml_reshape_3d(ctx, query, query->ne[0], 1, seq_len * batch_size);
-	key = ggml_reshape_3d(ctx, key, key->ne[0], 1, full_seq_len * batch_size);
+	// Apply RoPE to each head independently. Reshape to [head_dim, heads, seq*batch]
+	// so ggml_rope rotates all head_dim elements per head (pos indexed by ne[2]).
+	const auto head_dim = static_cast<int>(key->ne[0] / heads);
+	query = ggml_reshape_3d(ctx, query, head_dim, heads, seq_len * batch_size);
+	key = ggml_reshape_3d(ctx, key, head_dim, heads, full_seq_len * batch_size);
 	position_ids = ggml_reshape_1d(ctx, position_ids, seq_len * batch_size);
 	full_position_ids = ggml_reshape_1d(ctx, full_position_ids, full_seq_len * batch_size);
 
-	const auto head_dim = static_cast<int>(key->ne[0] / heads);
 	query = ggml_rope(ctx, query, position_ids, head_dim, GGML_ROPE_TYPE_NORMAL);
 	key = ggml_rope(ctx, key, full_position_ids, head_dim, GGML_ROPE_TYPE_NORMAL);
 
@@ -379,7 +402,7 @@ ggml_tensor* Attention::build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_ten
 ggml_tensor* FeedForward::build_cgraph(ggml_context* ctx, ggml_tensor* x) const
 {
 	x = ff_0_0.build_cgraph(ctx, x);
-	x = ggml_gelu(ctx, x);
+	x = ggml_gelu_erf(ctx, x);  // Use exact erf-based GELU to match PyTorch (tanh approx diverges over 22 DiT blocks)
 	x = ff_2.build_cgraph(ctx, x);
 	return x;
 }
@@ -387,13 +410,16 @@ ggml_tensor* FeedForward::build_cgraph(ggml_context* ctx, ggml_tensor* x) const
 ggml_tensor* DiTBlock::build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* time_emb, ggml_tensor* position_ids, int64_t cut_len) const
 {
 	auto [norm, gate_msa, shift_mlp, scale_mlp, gate_mlp] = attn_norm.build_cgraph(ctx, x, time_emb);
+	ggml_set_output(norm);
 
 	auto attn_output = attn.build_cgraph(ctx, norm, position_ids, cut_len);
+	ggml_set_output(attn_output);
 	gate_msa = unsqueeze(ctx, gate_msa, 1);
 	attn_output = ggml_mul(ctx, attn_output, gate_msa);
 	if (cut_len > 0)
 		x = ggml_view_3d(ctx, x, x->ne[0], x->ne[1] - cut_len, x->ne[2], x->nb[1], x->nb[2], x->nb[1] * cut_len);
 	x = ggml_add(ctx, x, attn_output);
+	ggml_set_output(x);
 
 	auto ff_norm = this->ff_norm.build_cgraph(ctx, x);
 	scale_mlp = ggml_scale_bias(ctx, ggml_cont(ctx, scale_mlp), 1.f, 1.f);
@@ -401,6 +427,7 @@ ggml_tensor* DiTBlock::build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tens
 	ff_norm = ggml_add(ctx, ff_norm, unsqueeze(ctx, shift_mlp, 1));
 
 	auto ff_output = ff.build_cgraph(ctx, ff_norm);
+	ggml_set_output(ff_output);
 	ff_output = ggml_mul(ctx, ff_output, unsqueeze(ctx, gate_mlp, 1));
 	x = ggml_add(ctx, x, ff_output);
 	return x;
@@ -425,20 +452,27 @@ ggml_tensor* DiT::build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* m
 
 	t = time_embed.build_cgraph(ctx, t);
 	x = input_embed.build_cgraph(ctx, x, cond, mu, spks, capabilities);
+	ggml_set_output(x);
 
 	auto position_ids = ggml_arange(ctx, 0.f, static_cast<float>(x->ne[1]), 1.f);
 	position_ids = ggml_repeat_4d(ctx, position_ids, position_ids->ne[0], x->ne[2], 1, 1);
 	position_ids = ggml_cast(ctx, position_ids, GGML_TYPE_I32);
 
 	for (const auto& block : std::span(transformer_blocks.cbegin(), transformer_blocks.size() - 1))
+	{
 		x = block.build_cgraph(ctx, x, t, position_ids, 0);
+		ggml_set_output(x);
+	}
 	// Apply `cut_len` only on the final block.
 	x = transformer_blocks.back().build_cgraph(ctx, x, t, position_ids, cut_len);
+	ggml_set_output(x);
 
 	x = norm_out.build_cgraph(ctx, x, t);
 
 	auto output = proj_out.build_cgraph(ctx, x);
 	output = ggml_permute(ctx, output, 1, 0, 2, 3);
+	output = ggml_cont(ctx, output);  // Materialize permuted layout so split_tensor strides are correct
+	ggml_set_output(output);
 	return output;
 }
 
@@ -496,6 +530,8 @@ ggml_tensor* CausalConditionalCFM::build_cgraph_one_step(ggml_context* ctx, cons
 
 	dphi_dt = ggml_cont(ctx, dphi_dt);
 	cfg_dphi_dt = ggml_cont(ctx, cfg_dphi_dt);
+	ggml_set_output(dphi_dt);
+	ggml_set_output(cfg_dphi_dt);
 	cfg_dphi_dt = ggml_scale(ctx, cfg_dphi_dt, inference_cfg_rate);
 	dphi_dt = ggml_scale(ctx, dphi_dt, 1.f + inference_cfg_rate);
 	dphi_dt = ggml_sub(ctx,
@@ -542,10 +578,19 @@ CausalMaskedDiffWithDiT::EncodeResult CausalMaskedDiffWithDiT::build_cgraph_enco
 	h = unsqueeze(ctx, h, 1);
 	h = ggml_repeat_4d(ctx, h, h->ne[0], token_mel_ratio, h->ne[2], h->ne[3]);
 	h = ggml_reshape_3d(ctx, h, h->ne[0], h->ne[1] * h->ne[2], h->ne[3]);
+	h = ggml_cont(ctx, h);  // force copy — prevent scheduler from aliasing via view chain
 
 	const auto mel_len1 = prompt_feat->ne[1];
 	const auto mel_len2 = h->ne[1] - mel_len1;
 	auto conds = ggml_pad(ctx, prompt_feat, 0, static_cast<int>(mel_len2), 0, 0);
+
+	// Mark encoder outputs to prevent ggml_backend_sched from aliasing
+	// their buffers with downstream ODE step computations.
+	// Without this, the scheduler reuses these buffers, corrupting the
+	// encoder output on CPU (see test_ode_loop_mechanics [sched_buffer_alias]).
+	ggml_set_output(h);
+	ggml_set_output(embedding);
+	ggml_set_output(conds);
 
 	return EncodeResult{
 		.mu = h,
@@ -709,6 +754,7 @@ std::array<ggml_tensor*, 2> CausalHiFTGenerator::build_cgraph(ggml_context* ctx,
 
 		auto s_stft = ggml_stft(ctx, s, window, hop_len, true, fctx.get());
 		s_stft = ggml_cont(ctx, s_stft);
+		ggml_set_output(s_stft);  // prevent scheduler from reusing s_stft buffer across iterations
 		s_stft = ggml_reshape_2d(ctx, s_stft, s_stft->ne[0], s_stft->ne[1] * 2);
 
 		const auto num_upsamples = ups.size();

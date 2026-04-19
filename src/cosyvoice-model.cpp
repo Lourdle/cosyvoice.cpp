@@ -135,7 +135,7 @@ void cosyvoice_model::empty_buffer_cache()
         backends,
         nullptr,
         backend == cpu_backend ? 1 : 2,
-        GGML_DEFAULT_GRAPH_SIZE,
+        GGML_DEFAULT_GRAPH_SIZE * 2,
         true,
         true
     ));
@@ -209,7 +209,7 @@ cosyvoice_model_3::cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_con
 
 void CausalHiFTGenerator::set_rand_ini(const float* data) const
 {
-    ggml_backend_tensor_set(m_source.l_sin_gen.rand_ini, data, 0, (nfft / 2 + 1) * sizeof(float));
+    ggml_backend_tensor_set(m_source.l_sin_gen.rand_ini, data, 0, (nb_harmonics + 1) * sizeof(float));
 }
 
 bool cosyvoice_model_3::llm_is_stop_token(int token_id)
@@ -229,7 +229,7 @@ const ggml_tensor* cosyvoice_model_3::get_speech_token_embed_weight()
 
 uint32_t cosyvoice_model_3::get_hift_rand_ini_len()
 {
-    return hift.nfft / 2 + 1;
+    return hift.nb_harmonics + 1;
 }
 
 void cosyvoice_model_3::set_hift_rand_ini(const float* data)
