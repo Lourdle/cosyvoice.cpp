@@ -220,7 +220,7 @@ static void print_usage(const tchar* argv0)
 #ifdef COSYVOICE_NO_AUDIO
     printf("  --output, -o <file>                         Output audio file path (WAV).\n");
 #else
-    printf("  --output, -o <file>                         Output audio file path (format by extension).\n");
+    printf("  --output, -o <file>                         Output audio file path (.wav).\n");
 #endif
     printf("  --mode <zero-shot|instruct|cross-lingual>   TTS mode. Default: auto-detect by --instruction.\n");
     printf("  --speed, -s <value>                         Speech speed. Default: 1.0.\n");
