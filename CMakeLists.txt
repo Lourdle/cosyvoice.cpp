@@ -174,6 +174,14 @@ target_link_libraries(cosyvoice PRIVATE ${COSYVOICE_LINK_LIBS})
 add_subdirectory(tools)
 
 # -----------------------------------------------------------------------------
+# Tests
+# -----------------------------------------------------------------------------
+option(COSYVOICE_BUILD_TESTS "Build tests" OFF)
+if(COSYVOICE_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
+
+# -----------------------------------------------------------------------------
 # Post-Build & Installation Rules
 # -----------------------------------------------------------------------------
 include(cmake/Install.cmake)

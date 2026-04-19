@@ -72,8 +72,11 @@ packages/
 # OS-specific files
 .DS_Store
 Thumbs.db
+# Claude Code
+.claude/
 # Build directories
 build/
+build-*/
 out/
 bin/
 

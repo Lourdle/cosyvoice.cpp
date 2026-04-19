@@ -20,6 +20,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <random>
 #include <string>
 #include <thread>
 #include <format>
@@ -70,7 +71,89 @@ struct cli_options
     float min_token_text_ratio = 0.0f;
     bool has_max_token_text_ratio = false;
     float max_token_text_ratio = 0.0f;
+    std::string token_file;
+    std::string noise_file;
+    std::string hift_noise_file;
 };
+
+// -- binary file loaders for --token-file / --noise-file -------------------
+
+static std::vector<int32_t> load_int32_file(const std::string& path)
+{
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return {};
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    std::vector<int32_t> buf(size / sizeof(int32_t));
+    if (!buf.empty())
+        fread(buf.data(), sizeof(int32_t), buf.size(), f);
+    fclose(f);
+    return buf;
+}
+
+static std::vector<float> load_float_file(const std::string& path)
+{
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return {};
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    std::vector<float> buf(size / sizeof(float));
+    if (!buf.empty())
+        fread(buf.data(), sizeof(float), buf.size(), f);
+    fclose(f);
+    return buf;
+}
+
+struct noise_file_ctx
+{
+    std::vector<float> flow_noise;
+    std::vector<float> hift_noise;
+    std::vector<float> rng_fallback;
+    uint32_t seed = 0;
+};
+
+static float* noise_file_callback(
+    cosyvoice_noise_callback_stage_t stage,
+    uint32_t                         length,
+    float*                           /*noise*/,
+    void*                            ctx)
+{
+    auto* nf = static_cast<noise_file_ctx*>(ctx);
+    if (stage == COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_FLOW)
+    {
+        if (nf->flow_noise.size() >= length)
+            return nf->flow_noise.data();
+        fprintf(stderr, "Warning: flow noise file has %zu floats but %u requested\n",
+                nf->flow_noise.size(), length);
+        return nf->flow_noise.data();
+    }
+    if (stage == COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_HIFT)
+    {
+        if (!nf->hift_noise.empty())
+        {
+            if (nf->hift_noise.size() >= length)
+                return nf->hift_noise.data();
+            fprintf(stderr, "Warning: hift noise file has %zu floats but %u requested\n",
+                    nf->hift_noise.size(), length);
+            return nf->hift_noise.data();
+        }
+        // Fallback: generate RNG noise for HiFT
+        if (nf->rng_fallback.size() < length)
+        {
+            nf->rng_fallback.resize(length);
+            std::mt19937 rng(nf->seed);
+            std::normal_distribution<float> dist(0.0f, 1.0f);
+            for (auto& v : nf->rng_fallback)
+                v = dist(rng);
+        }
+        return nf->rng_fallback.data();
+    }
+    return nullptr;
+}
+
+// --------------------------------------------------------------------------
 
 enum class cli_log_level
 {
@@ -548,9 +631,9 @@ static bool validate_options(cli_options& options)
         print_error_log("Error: --model is required for TTS.\n");
         ok = false;
     }
-    if (options.text.empty())
+    if (options.text.empty() && options.token_file.empty())
     {
-        print_error_log("Error: --text is required for TTS.\n");
+        print_error_log("Error: --text or --token-file is required for TTS.\n");
         ok = false;
     }
     if (options.output.empty())
@@ -847,6 +930,12 @@ int main(int argc, char** argv)
         }
         else if (tchar_casecmp(arg, COSYVOICE_TEXT("--seed")) == 0)
             options.seed = tchar_to_utf8(get_arg_value());
+        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--token-file")) == 0)
+            options.token_file = tchar_to_utf8(get_arg_value());
+        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--noise-file")) == 0)
+            options.noise_file = tchar_to_utf8(get_arg_value());
+        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--hift-noise-file")) == 0)
+            options.hift_noise_file = tchar_to_utf8(get_arg_value());
         else if (tchar_casecmp(arg, COSYVOICE_TEXT("--temperature")) == 0)
         {
             auto value = tchar_to_utf8(get_arg_value());
@@ -949,8 +1038,8 @@ int main(int argc, char** argv)
 
 #ifndef COSYVOICE_NO_FRONTEND
     if (!options.frontend_only)
-        print_preload_run_info(options, log_level);
 #endif
+        print_preload_run_info(options, log_level);
 
     auto stage_start = std::chrono::steady_clock::now();
     cosyvoice_init_backend();
@@ -1175,7 +1264,44 @@ int main(int argc, char** argv)
     cosyvoice_generated_speech result = {};
     stage_start = std::chrono::steady_clock::now();
     bool ok = false;
-    if (options.mode == "cross-lingual")
+    noise_file_ctx noise_ctx;
+    if (!options.token_file.empty())
+    {
+        // --token-file mode: skip LLM, inject tokens directly into token2wav
+        auto tokens = load_int32_file(options.token_file);
+        if (tokens.empty())
+        {
+            print_error_log("Error: failed to load token file \"%s\".\n", options.token_file.c_str());
+            return 1;
+        }
+        if (log_level != cli_log_level::quiet)
+            printf("  Token file: %zu tokens from %s\n", tokens.size(), options.token_file.c_str());
+
+        if (!options.noise_file.empty())
+        {
+            noise_ctx.flow_noise = load_float_file(options.noise_file);
+            if (noise_ctx.flow_noise.empty())
+            {
+                print_error_log("Error: failed to load noise file \"%s\".\n", options.noise_file.c_str());
+                return 1;
+            }
+            if (!options.hift_noise_file.empty())
+                noise_ctx.hift_noise = load_float_file(options.hift_noise_file);
+            if (!options.seed.empty())
+                noise_ctx.seed = stoul(options.seed);
+            if (log_level != cli_log_level::quiet)
+            {
+                printf("  Flow noise: %zu floats from %s\n", noise_ctx.flow_noise.size(), options.noise_file.c_str());
+                if (!noise_ctx.hift_noise.empty())
+                    printf("  HiFT noise: %zu floats from %s\n", noise_ctx.hift_noise.size(), options.hift_noise_file.c_str());
+            }
+            cosyvoice_set_noise_callback(ctx.get(), noise_file_callback, &noise_ctx);
+        }
+
+        ok = cosyvoice_token2wav(ctx.get(), tokens.data(), (uint32_t)tokens.size(),
+                                 options.speed, prompt.get(), &result);
+    }
+    else if (options.mode == "cross-lingual")
         ok = cosyvoice_tts_cross_lingual(tts_ctx.get(), options.text.c_str(), options.speed, &result);
     else if (options.mode == "zero-shot")
         ok = cosyvoice_tts_zero_shot(tts_ctx.get(), options.text.c_str(), options.speed, &result);
