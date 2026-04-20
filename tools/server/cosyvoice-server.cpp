@@ -25,14 +25,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-#include <filesystem>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <random>
 #include <string>
-#include <system_error>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -112,11 +110,17 @@ struct cosyvoice_context_deleter { void operator()(cosyvoice_context_t ctx) cons
 struct cosyvoice_prompt_speech_deleter { void operator()(cosyvoice_prompt_speech_t prompt_speech) const noexcept { cosyvoice_prompt_speech_free(prompt_speech); } };
 struct cosyvoice_prompt_deleter { void operator()(cosyvoice_prompt_t prompt) const noexcept { cosyvoice_prompt_free(prompt); } };
 struct cosyvoice_tts_context_deleter { void operator()(cosyvoice_tts_context_t ctx) const noexcept { cosyvoice_tts_context_free(ctx); } };
+#ifndef COSYVOICE_NO_AUDIO
+struct cosyvoice_audio_encoder_deleter { void operator()(cosyvoice_audio_encoder_t encoder) const noexcept { cosyvoice_audio_encoder_destroy(encoder); } };
+#endif
 
 using cosyvoice_context_handle = std::unique_ptr<cosyvoice_context, cosyvoice_context_deleter>;
 using cosyvoice_prompt_speech_handle = std::unique_ptr<cosyvoice_prompt_speech, cosyvoice_prompt_speech_deleter>;
 using cosyvoice_prompt_handle = std::unique_ptr<cosyvoice_prompt, cosyvoice_prompt_deleter>;
 using cosyvoice_tts_context_handle = std::unique_ptr<cosyvoice_tts_context, cosyvoice_tts_context_deleter>;
+#ifndef COSYVOICE_NO_AUDIO
+using cosyvoice_audio_encoder_handle = std::unique_ptr<cosyvoice_audio_encoder, cosyvoice_audio_encoder_deleter>;
+#endif
 
 struct voice_runtime
 {
@@ -134,8 +138,10 @@ struct server_runtime
     cosyvoice_context_handle model_context;
     uint32_t sample_rate = 0;
     cosyvoice_generation_config_t default_generation_config = {};
-    bool mp3_encoder_available = false;
-    bool flac_encoder_available = false;
+
+#ifndef COSYVOICE_NO_AUDIO
+    cosyvoice_audio_encoder_handle audio_encoder;
+#endif
 
     std::unordered_map<std::string, voice_runtime> voices;
     std::vector<std::string> voice_names;
@@ -198,7 +204,6 @@ struct request_log_context
     std::chrono::steady_clock::time_point start;
 };
 
-static std::atomic<uint64_t> g_temp_id = 0;
 static std::atomic<uint64_t> g_request_id = 0;
 
 static std::string get_local_timestamp_ms()
@@ -284,16 +289,6 @@ static std::string trim_copy(const std::string& value)
     while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1])))
         --end;
     return value.substr(start, end - start);
-}
-
-static std::string path_to_utf8_string(const std::filesystem::path& path)
-{
-#ifdef _WIN32
-    const auto path_u8 = path.u8string();
-    return std::string(reinterpret_cast<const char*>(path_u8.data()), path_u8.size());
-#else
-    return path.string();
-#endif
 }
 
 static bool parse_uint32_arg(const std::string& value, uint32_t* result)
@@ -487,8 +482,8 @@ static void print_usage(const tchar* argv0)
     printf("  Optional standard: instructions, speed, response_format\n");
     printf("  Optional extensions: seed, temperature, top_k, top_p, win_size, tau_r,\n");
     printf("                      min_token_text_ratio, max_token_text_ratio\n");
-    printf("  response_format supports: mp3, wav, flac, pcm\n");
-    printf("  response_format aac/opus returns OpenAI-style 400 error in this build.\n");
+    printf("  response_format standard values: mp3, opus, aac, flac, wav, pcm\n");
+    printf("  Unsupported formats return OpenAI-style 400 error in this build/runtime.\n");
 }
 
 static bool validate_options(server_options& options)
@@ -598,42 +593,6 @@ static bool validate_options(server_options& options)
     return true;
 }
 
-static bool load_file_to_memory(const std::string& path, std::string* bytes)
-{
-    auto f = open_ifstream_utf8(path.c_str(), std::ios::binary);
-    if (!f)
-        return false;
-
-    f.seekg(0, std::ios::end);
-    const auto end = f.tellg();
-    if (end == std::streampos(-1) || end < 0)
-        return false;
-
-    const auto size = static_cast<size_t>(end);
-    bytes->resize(size);
-    f.seekg(0, std::ios::beg);
-    if (size == 0)
-        return true;
-
-    f.read(bytes->data(), static_cast<std::streamsize>(size));
-    return static_cast<size_t>(f.gcount()) == size;
-}
-
-static std::string make_temp_audio_path(const char* ext)
-{
-    const auto ticks = static_cast<unsigned long long>(
-        std::chrono::high_resolution_clock::now().time_since_epoch().count());
-    const auto id = static_cast<unsigned long long>(++g_temp_id);
-    std::string filename = "cosyvoice-server-tmp-";
-    filename += std::to_string(ticks);
-    filename += "-";
-    filename += std::to_string(id);
-    filename += ext;
-
-    const auto path = std::filesystem::current_path() / filename;
-    return path_to_utf8_string(path);
-}
-
 static inline int16_t float_to_pcm16(float value)
 {
     if (value > 1.0f)
@@ -734,42 +693,84 @@ static bool build_wav_bytes(const float* data, uint32_t length, uint32_t sample_
     return true;
 }
 
-#ifndef COSYVOICE_NO_AUDIO
-static bool build_compressed_bytes(const float* data, uint32_t length, uint32_t sample_rate, const char* extension, std::string* output, std::string* error)
-{
-    const auto temp_path = make_temp_audio_path(extension);
-    if (!cosyvoice_audio_save_to_file(temp_path.c_str(), data, length, sample_rate))
-    {
-        *error = std::string("Failed to encode audio file: ") + temp_path;
-        std::error_code ec;
-        std::filesystem::remove(temp_path, ec);
-        return false;
-    }
-
-    if (!load_file_to_memory(temp_path, output))
-    {
-        *error = std::string("Failed to read encoded audio file: ") + temp_path;
-        std::error_code ec;
-        std::filesystem::remove(temp_path, ec);
-        return false;
-    }
-
-    std::error_code ec;
-    std::filesystem::remove(temp_path, ec);
-    return true;
-}
-#endif
-
 static response_audio_format parse_response_format(const std::string& value)
 {
     const auto lowered = to_lower(value);
     if (lowered == "mp3") return response_audio_format::mp3;
-    if (lowered == "wav") return response_audio_format::wav;
-    if (lowered == "flac") return response_audio_format::flac;
-    if (lowered == "pcm") return response_audio_format::pcm;
-    if (lowered == "aac") return response_audio_format::aac;
     if (lowered == "opus") return response_audio_format::opus;
+    if (lowered == "aac") return response_audio_format::aac;
+    if (lowered == "flac") return response_audio_format::flac;
+    if (lowered == "wav") return response_audio_format::wav;
+    if (lowered == "pcm") return response_audio_format::pcm;
     return response_audio_format::unknown;
+}
+
+static const char* response_format_to_string(response_audio_format format)
+{
+    switch (format)
+    {
+    case response_audio_format::mp3:
+        return "mp3";
+    case response_audio_format::opus:
+        return "opus";
+    case response_audio_format::aac:
+        return "aac";
+    case response_audio_format::flac:
+        return "flac";
+    case response_audio_format::wav:
+        return "wav";
+    case response_audio_format::pcm:
+        return "pcm";
+    default:
+        return "unknown";
+    }
+}
+
+static bool is_response_format_supported(const server_runtime& runtime, response_audio_format format)
+{
+    switch (format)
+    {
+    case response_audio_format::pcm:
+        return true;
+    case response_audio_format::wav:
+#ifndef COSYVOICE_NO_AUDIO
+        return static_cast<bool>(runtime.audio_encoder);
+#else
+        return true;
+#endif
+    case response_audio_format::mp3:
+    case response_audio_format::opus:
+    case response_audio_format::aac:
+    case response_audio_format::flac:
+    default:
+        return false;
+    }
+}
+
+static std::string supported_response_formats_to_string(const server_runtime& runtime)
+{
+    constexpr response_audio_format kStandardFormats[] = {
+        response_audio_format::mp3,
+        response_audio_format::opus,
+        response_audio_format::aac,
+        response_audio_format::flac,
+        response_audio_format::wav,
+        response_audio_format::pcm
+    };
+
+    std::string result;
+    for (auto format : kStandardFormats)
+    {
+        if (!is_response_format_supported(runtime, format))
+            continue;
+        if (!result.empty())
+            result += ", ";
+        result += response_format_to_string(format);
+    }
+
+    if (result.empty())
+        return "(none)";
+    return result;
 }
 
 static const char* response_format_to_content_type(response_audio_format format)
@@ -778,6 +779,10 @@ static const char* response_format_to_content_type(response_audio_format format)
     {
     case response_audio_format::mp3:
         return "audio/mpeg";
+    case response_audio_format::opus:
+        return "audio/opus";
+    case response_audio_format::aac:
+        return "audio/aac";
     case response_audio_format::wav:
         return "audio/wav";
     case response_audio_format::flac:
@@ -789,28 +794,54 @@ static const char* response_format_to_content_type(response_audio_format format)
     }
 }
 
-static bool build_audio_payload(response_audio_format format, const cosyvoice_generated_speech& generated, uint32_t sample_rate, std::string* payload, std::string* error)
+#ifndef COSYVOICE_NO_AUDIO
+static bool build_wav_bytes_with_audio_encoder(cosyvoice_audio_encoder_t encoder, const float* data, uint32_t length, std::string* output, std::string* error)
+{
+    if (!encoder)
+    {
+        *error = "WAV encoder is unavailable in this runtime environment.";
+        return false;
+    }
+
+    if (!data || length == 0)
+    {
+        *error = "Generated audio buffer is empty.";
+        return false;
+    }
+
+    if (!cosyvoice_audio_encoder_wav_encode(encoder, data, length))
+    {
+        *error = "Failed to encode WAV payload with cosyvoice_audio_encoder.";
+        return false;
+    }
+
+    const uint8_t* encoded = nullptr;
+    uint32_t encoded_length = 0;
+    cosyvoice_audio_encoder_get_encoded_data(encoder, &encoded, &encoded_length);
+
+    if (!encoded || encoded_length == 0)
+    {
+        *error = "Encoded WAV payload is empty.";
+        return false;
+    }
+
+    output->assign(reinterpret_cast<const char*>(encoded), static_cast<size_t>(encoded_length));
+    return true;
+}
+#endif
+
+static bool build_audio_payload(response_audio_format format, const cosyvoice_generated_speech& generated, const server_runtime& runtime, std::string* payload, std::string* error)
 {
     switch (format)
     {
     case response_audio_format::wav:
-        return build_wav_bytes(generated.data, generated.length, sample_rate, payload, error);
+#ifndef COSYVOICE_NO_AUDIO
+        return build_wav_bytes_with_audio_encoder(runtime.audio_encoder.get(), generated.data, generated.length, payload, error);
+#else
+        return build_wav_bytes(generated.data, generated.length, runtime.sample_rate, payload, error);
+#endif
     case response_audio_format::pcm:
         return build_pcm16_bytes(generated.data, generated.length, payload, error);
-    case response_audio_format::mp3:
-#ifndef COSYVOICE_NO_AUDIO
-        return build_compressed_bytes(generated.data, generated.length, sample_rate, ".mp3", payload, error);
-#else
-        *error = "response_format \"mp3\" is unavailable in this build (COSYVOICE_NO_AUDIO=ON).";
-        return false;
-#endif
-    case response_audio_format::flac:
-#ifndef COSYVOICE_NO_AUDIO
-        return build_compressed_bytes(generated.data, generated.length, sample_rate, ".flac", payload, error);
-#else
-        *error = "response_format \"flac\" is unavailable in this build (COSYVOICE_NO_AUDIO=ON).";
-        return false;
-#endif
     default:
         *error = "Unsupported response format.";
         return false;
@@ -1279,22 +1310,6 @@ static void log_request_done(
     }
 }
 
-#ifndef COSYVOICE_NO_AUDIO
-static bool detect_encoder_availability(uint32_t sample_rate, bool* mp3_ok, bool* flac_ok)
-{
-    float probe[16] = {};
-    std::string error;
-    std::string payload;
-
-    payload.clear();
-    *mp3_ok = build_compressed_bytes(probe, 16, sample_rate, ".mp3", &payload, &error);
-
-    payload.clear();
-    *flac_ok = build_compressed_bytes(probe, 16, sample_rate, ".flac", &payload, &error);
-    return true;
-}
-#endif
-
 static bool initialize_runtime(const server_options& options, server_runtime* runtime)
 {
     runtime->options = options;
@@ -1356,7 +1371,7 @@ static bool initialize_runtime(const server_options& options, server_runtime* ru
     runtime->sample_rate = cosyvoice_get_sample_rate(runtime->model_context.get());
 
 #ifndef COSYVOICE_NO_AUDIO
-    detect_encoder_availability(runtime->sample_rate, &runtime->mp3_encoder_available, &runtime->flac_encoder_available);
+    runtime->audio_encoder.reset(cosyvoice_audio_encoder_create(runtime->sample_rate));
 #endif
 
     for (const auto& mapping : options.voice_prompts)
@@ -1764,7 +1779,7 @@ int main(int argc, char** argv)
         if (format == response_audio_format::unknown)
         {
             set_openai_error(res, 400,
-                "Unsupported response_format. Allowed values: mp3, wav, flac, pcm, aac, opus.",
+                "Unsupported response_format. Allowed standard values: mp3, opus, aac, flac, wav, pcm.",
                 "invalid_request_error",
                 "response_format",
                 "invalid_value");
@@ -1772,61 +1787,21 @@ int main(int argc, char** argv)
             return;
         }
 
-        if (format == response_audio_format::aac || format == response_audio_format::opus)
+        if (!is_response_format_supported(runtime, format))
         {
+            const auto supported_formats = supported_response_formats_to_string(runtime);
+            const auto requested_format = response_format_to_string(format);
             set_openai_error(
                 res,
                 400,
-                "response_format \"aac\" and \"opus\" are not supported in this build. Supported formats: mp3, wav, flac, pcm.",
+                std::string("response_format \"") + requested_format + "\" is not supported in this build/runtime. "
+                + "Supported formats: " + supported_formats + ".",
                 "invalid_request_error",
                 "response_format",
                 "unsupported_format");
             log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "response_format");
             return;
         }
-
-#ifdef COSYVOICE_NO_AUDIO
-        if (format == response_audio_format::mp3 || format == response_audio_format::flac)
-        {
-            set_openai_error(
-                res,
-                400,
-                "response_format \"mp3\" and \"flac\" are unavailable in this build (COSYVOICE_NO_AUDIO=ON).",
-                "invalid_request_error",
-                "response_format",
-                "unsupported_format");
-            log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "response_format");
-            return;
-        }
-#endif
-
-#ifndef COSYVOICE_NO_AUDIO
-        if (format == response_audio_format::mp3 && !runtime.mp3_encoder_available)
-        {
-            set_openai_error(
-                res,
-                400,
-                "response_format \"mp3\" is unavailable in this runtime environment.",
-                "invalid_request_error",
-                "response_format",
-                "unsupported_format");
-            log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "response_format");
-            return;
-        }
-
-        if (format == response_audio_format::flac && !runtime.flac_encoder_available)
-        {
-            set_openai_error(
-                res,
-                400,
-                "response_format \"flac\" is unavailable in this runtime environment.",
-                "invalid_request_error",
-                "response_format",
-                "unsupported_format");
-            log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "response_format");
-            return;
-        }
-#endif
 
         cosyvoice_generated_speech generated = {};
         std::string payload;
@@ -1856,7 +1831,7 @@ int main(int argc, char** argv)
                 return;
             }
 
-            if (!build_audio_payload(format, generated, runtime.sample_rate, &payload, &encoding_error))
+            if (!build_audio_payload(format, generated, runtime, &payload, &encoding_error))
             {
                 set_openai_error(res, 500, encoding_error, "server_error", nullptr, "audio_encode_failed");
                 log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "audio_encode_failed");
@@ -1900,8 +1875,7 @@ int main(int argc, char** argv)
     print_info_log(runtime.log_level, "  text_normalization : unavailable (COSYVOICE_NO_ICU)\n");
 #endif
 #ifndef COSYVOICE_NO_AUDIO
-    print_info_log(runtime.log_level, "  mp3_encoder        : %s\n", runtime.mp3_encoder_available ? "available" : "unavailable");
-    print_info_log(runtime.log_level, "  flac_encoder       : %s\n", runtime.flac_encoder_available ? "available" : "unavailable");
+    print_info_log(runtime.log_level, "  audio_encoder      : %s\n", runtime.audio_encoder ? "available" : "unavailable");
 #else
     print_info_log(runtime.log_level, "  audio_encoders     : unavailable (COSYVOICE_NO_AUDIO)\n");
 #endif
