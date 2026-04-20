@@ -14,8 +14,12 @@
 
 struct ggml_backend_op_capabilities
 {
-	bool concat_i32 : 1;
-	bool repeat_f16 : 1;
+	bool concat_i32    : 1;
+	bool repeat_f16    : 1;
+	bool pad           : 1;
+	bool pad_ext       : 1;
+	bool pad_reflect_1d: 1;
+	bool im2col        : 1;
 };
 
 struct cosyvoice_model;
