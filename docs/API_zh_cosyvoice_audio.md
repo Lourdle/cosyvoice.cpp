@@ -24,6 +24,143 @@
 
 控制音频工具函数的导入导出可见性。
 
+## cosyvoice_audio_encoder_t
+
+### 语法
+
+```c
+typedef struct cosyvoice_audio_encoder* cosyvoice_audio_encoder_t;
+```
+
+### 说明
+
+音频编码器的不透明句柄。
+
+## cosyvoice_audio_encoding_format_t
+
+### 语法
+
+```c
+typedef enum cosyvoice_audio_encoding_format
+{
+    COSYVOICE_AUDIO_ENCODING_FORMAT_WAV = 0,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_COUNT
+} cosyvoice_audio_encoding_format_t;
+```
+
+### 说明
+
+内存音频编码器支持的音频格式。
+
+## cosyvoice_audio_encoding_format_supported
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_audio_encoding_format_supported(cosyvoice_audio_encoding_format_t format);
+```
+
+### 说明
+
+检查指定格式是否被音频编码器支持。
+
+### 参数
+
+- `format`：待检查的格式。
+
+### 返回值
+
+支持返回 `true`，否则返回 `false`。
+
+## cosyvoice_audio_encoder_create
+
+### 语法
+
+```c
+COSYVOICE_API cosyvoice_audio_encoder_t cosyvoice_audio_encoder_create(uint32_t sample_rate);
+```
+
+### 说明
+
+创建一个内存音频编码器。
+
+### 参数
+
+- `sample_rate`：输入采样率（Hz）。
+
+### 返回值
+
+成功返回编码器句柄，否则返回 `NULL`。
+
+## cosyvoice_audio_encoder_destroy
+
+### 语法
+
+```c
+COSYVOICE_API void cosyvoice_audio_encoder_destroy(cosyvoice_audio_encoder_t encoder);
+```
+
+### 说明
+
+销毁由 `cosyvoice_audio_encoder_create` 创建的编码器。
+
+### 参数
+
+- `encoder`：编码器句柄，允许为 `NULL`。
+
+## cosyvoice_audio_encoder_encode
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_audio_encoder_encode(
+    cosyvoice_audio_encoder_t encoder,
+    const float* input,
+    uint32_t length,
+	cosyvoice_audio_encoding_format_t format
+);
+```
+
+### 说明
+
+将单声道浮点 PCM 编码为指定音频格式。
+
+### 参数
+
+- `encoder`：编码器句柄。
+- `input`：输入单声道浮点 PCM 缓冲区。
+- `length`：输入采样点数量。
+- `format`：目标音频格式。
+
+### 返回值
+
+成功返回 `true`，失败返回 `false`。
+
+## cosyvoice_audio_encoder_get_encoded_data
+
+### 语法
+
+```c
+COSYVOICE_API void cosyvoice_audio_encoder_get_encoded_data(cosyvoice_audio_encoder_t encoder,
+    const uint8_t** data,
+    uint32_t* length
+);
+```
+
+### 说明
+
+获取上一次成功编码得到的输出数据。
+
+### 参数
+
+- `encoder`：编码器句柄。
+- `data`：接收编码字节指针，归编码器所有。
+- `length`：接收编码后字节长度。
+
+### 备注
+
+返回的 `data` 指针在下一次编码调用之前，或者编码器销毁之前保持有效。
+
 ## cosyvoice_audio_load_from_file
 
 ### 语法
@@ -135,7 +272,7 @@ COSYVOICE_API bool cosyvoice_audio_save_to_file(
 
 ### 另请参阅
 
-- `cosyvoice_save_wav`
+- `cosyvoice_audio_encoder_encode`
 - `cosyvoice_audio_load_from_file`
 
 ## cosyvoice_audio_free

@@ -86,9 +86,10 @@ Speech request behavior (`POST /v1/audio/speech`):
 - Optional extension fields: `seed`, `temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, `min_token_text_ratio`, `max_token_text_ratio`.
 - Seed precedence: request `seed` extension > server `--seed` > random seed per request.
 - Mode selection is automatic: non-empty `instructions` -> instruct mode; otherwise zero-shot mode.
-- Supported `response_format`: `mp3`, `wav`, `flac`, `pcm`.
-- `mp3` / `flac` require encoder support in the current runtime environment; unavailable encoders return OpenAI-style `400` errors.
-- `aac` and `opus` return OpenAI-style `400` errors in this build.
+- Supported `response_format`: `mp3`, `opus`, `aac`, `flac`, `wav`, `pcm`.
+- `wav` is supported through the audio encoder in normal builds, and through an internal PCM16 WAV fallback when audio helpers are disabled.
+- `pcm` returns raw 16-bit little-endian mono PCM payload.
+- `mp3`, `opus`, `aac`, and `flac` return OpenAI-style `400` errors in this build/runtime.
 
 OpenAI Python client example:
 ```python

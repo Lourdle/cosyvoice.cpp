@@ -86,9 +86,10 @@ cosyvoice-server \
 - 扩展可选字段：`seed`、`temperature`、`top_k`、`top_p`、`win_size`、`tau_r`、`min_token_text_ratio`、`max_token_text_ratio`。
 - seed 优先级：请求扩展字段 `seed` > 服务端 `--seed` > 每次请求随机 seed。
 - 模式自动判定：`instructions` 非空时走 instruct；否则走 zero-shot。
-- 支持 `response_format`：`mp3`、`wav`、`flac`、`pcm`。
-- `mp3` / `flac` 依赖当前运行环境的编码器支持；若编码器不可用会返回 OpenAI 风格 `400` 错误。
-- `aac`、`opus` 在当前构建会返回 OpenAI 风格 `400` 错误。
+- 支持 `response_format`：`mp3`、`opus`、`aac`、`flac`、`wav`、`pcm`。
+- `wav` 在正常构建中通过音频编码器生成；当关闭音频辅助 API 时，会回退到内部 PCM16 WAV 实现。
+- `pcm` 返回原始 16 位小端单声道 PCM 负载。
+- `mp3`、`opus`、`aac`、`flac` 在当前构建/运行环境中会返回 OpenAI 风格 `400` 错误。
 
 OpenAI Python 客户端示例：
 ```python
