@@ -809,7 +809,7 @@ static bool build_wav_bytes_with_audio_encoder(cosyvoice_audio_encoder_t encoder
         return false;
     }
 
-    if (!cosyvoice_audio_encoder_wav_encode(encoder, data, length))
+    if (!cosyvoice_audio_encoder_encode(encoder, data, length, COSYVOICE_AUDIO_ENCODING_FORMAT_WAV))
     {
         *error = "Failed to encode WAV payload with cosyvoice_audio_encoder.";
         return false;

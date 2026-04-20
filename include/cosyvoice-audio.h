@@ -34,6 +34,22 @@ extern "C" {
 typedef struct cosyvoice_audio_encoder* cosyvoice_audio_encoder_t;
 
 /**
+ * @brief Supported in-memory audio encoding formats.
+ */
+typedef enum cosyvoice_audio_encoding_format
+{
+    COSYVOICE_AUDIO_ENCODING_FORMAT_WAV = 0,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_COUNT
+} cosyvoice_audio_encoding_format_t;
+
+/**
+ * @brief Check whether an audio encoding format is supported.
+ * @param format Format to test.
+ * @return True if the format is supported, otherwise false.
+ */
+COSYVOICE_API bool cosyvoice_audio_encoding_format_supported(cosyvoice_audio_encoding_format_t format);
+
+/**
  * @brief Create an in-memory audio encoder.
  * @param sample_rate Input sample rate in Hz.
  * @return Encoder handle on success; otherwise `NULL`.
@@ -47,16 +63,18 @@ COSYVOICE_API cosyvoice_audio_encoder_t cosyvoice_audio_encoder_create(uint32_t 
 COSYVOICE_API void cosyvoice_audio_encoder_destroy(cosyvoice_audio_encoder_t encoder);
 
 /**
- * @brief Encode mono float PCM to WAV (in memory).
+ * @brief Encode mono float PCM to a specific audio format.
  * @param encoder Encoder handle.
  * @param input Input mono float PCM buffer.
  * @param length Number of input samples.
+ * @param format Target audio format.
  * @return True on success, otherwise false.
  */
-COSYVOICE_API bool cosyvoice_audio_encoder_wav_encode(
+COSYVOICE_API bool cosyvoice_audio_encoder_encode(
     cosyvoice_audio_encoder_t encoder,
     const float* input,
-    uint32_t length
+    uint32_t length,
+	cosyvoice_audio_encoding_format_t format
 );
 
 /**
@@ -74,9 +92,9 @@ COSYVOICE_API void cosyvoice_audio_encoder_get_encoded_data(cosyvoice_audio_enco
 );
 
 /**
- * @brief Load an audio file from disk into memory.
+ * @brief Load an audio file from disk and decode it to mono float PCM.
  * @param filename Path to the input audio file.
- * @param data Receives the allocated mono PCM data.
+ * @param data Receives the allocated PCM buffer.
  * @param length Receives the number of samples.
  * @param sample_rate Receives the sample rate in Hz.
  * @return True on success, otherwise false.
@@ -89,8 +107,8 @@ COSYVOICE_API bool cosyvoice_audio_load_from_file(
 );
 
 /**
- * @brief Resample audio to the requested sample rate.
- * @param input Input mono PCM data.
+ * @brief Resample mono float PCM to the requested sample rate.
+ * @param input Input PCM buffer.
  * @param input_length Number of input samples.
  * @param input_sample_rate Input sample rate in Hz.
  * @param output Receives the allocated resampled data.
@@ -108,9 +126,9 @@ COSYVOICE_API bool cosyvoice_audio_resample(
 );
 
 /**
- * @brief Save mono PCM data to an audio file.
+ * @brief Save mono float PCM data to an audio file.
  * @param filename Path to the output file.
- * @param data Input mono PCM data.
+ * @param data Input PCM buffer.
  * @param length Number of samples.
  * @param sample_rate Output sample rate in Hz.
  * @return True on success, otherwise false.
@@ -123,8 +141,8 @@ COSYVOICE_API bool cosyvoice_audio_save_to_file(
 );
 
 /**
- * @brief Free audio data allocated by the audio helpers.
- * @param data Audio buffer returned by the audio API.
+ * @brief Free audio data allocated by the audio helper APIs.
+ * @param data Buffer returned by an audio helper.
  */
 COSYVOICE_API void cosyvoice_audio_free(float* data);
 

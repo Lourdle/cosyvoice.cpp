@@ -84,6 +84,17 @@ struct cosyvoice_audio_encoder
 };
 
 
+bool cosyvoice_audio_encoding_format_supported(cosyvoice_audio_encoding_format_t format)
+{
+    switch (format)
+    {
+    case COSYVOICE_AUDIO_ENCODING_FORMAT_WAV:
+        return true;
+    default:
+        return false;
+    }
+}
+
 cosyvoice_audio_encoder_t cosyvoice_audio_encoder_create(uint32_t sample_rate)
 {
     return new cosyvoice_audio_encoder(sample_rate);
@@ -92,6 +103,20 @@ cosyvoice_audio_encoder_t cosyvoice_audio_encoder_create(uint32_t sample_rate)
 void cosyvoice_audio_encoder_destroy(cosyvoice_audio_encoder_t encoder)
 {
     delete encoder;
+}
+
+bool cosyvoice_audio_encoder_encode(cosyvoice_audio_encoder_t encoder, const float* input, uint32_t length, cosyvoice_audio_encoding_format_t format)
+{
+    ma_encoding_format miniaudio_format;
+    switch (format)
+    {
+    case COSYVOICE_AUDIO_ENCODING_FORMAT_WAV:
+        miniaudio_format = ma_encoding_format_wav;
+        break;
+    default:
+        return false;
+    }
+    return encoder->encode(input, length, miniaudio_format);
 }
 
 bool cosyvoice_audio_encoder_wav_encode(cosyvoice_audio_encoder_t encoder, const float* input, uint32_t length)
