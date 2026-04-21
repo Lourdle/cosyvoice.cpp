@@ -9,8 +9,11 @@
 #endif
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cstdlib>
+#include <cstdio>
+#include <ctime>
 #include <limits>
 
 std::string to_lower(std::string value)
@@ -35,6 +38,27 @@ std::string tchar_to_utf8(const tchar* value)
 #else
     return value;
 #endif
+}
+
+std::string trim_copy(const std::string& value)
+{
+    size_t start = 0;
+    size_t end = value.size();
+    while (start < end && std::isspace(static_cast<unsigned char>(value[start])))
+        ++start;
+    while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1])))
+        --end;
+    return value.substr(start, end - start);
+}
+
+double elapsed_ms(std::chrono::steady_clock::time_point from, std::chrono::steady_clock::time_point to)
+{
+    return std::chrono::duration<double, std::milli>(to - from).count();
+}
+
+double bytes_to_mib(size_t bytes)
+{
+    return static_cast<double>(bytes) / (1024.0 * 1024.0);
 }
 
 int tchar_casecmp(const tchar* lhs, const tchar* rhs)
@@ -74,6 +98,37 @@ bool parse_int_arg(const std::string& value, int* result)
         return false;
     *result = static_cast<int>(parsed);
     return true;
+}
+
+bool parse_uint16_port(const std::string& value, uint16_t* result)
+{
+    uint32_t parsed = 0;
+    if (!parse_uint32_arg(value, &parsed) || parsed == 0 || parsed > 65535)
+        return false;
+    *result = static_cast<uint16_t>(parsed);
+    return true;
+}
+
+std::string get_local_timestamp_ms()
+{
+    const auto now = std::chrono::system_clock::now();
+    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()) % 1000;
+    const auto t = std::chrono::system_clock::to_time_t(now);
+
+    std::tm tm_local = {};
+#ifdef _WIN32
+    localtime_s(&tm_local, &t);
+#else
+    localtime_r(&t, &tm_local);
+#endif
+
+    char date_buf[32] = {};
+    strftime(date_buf, sizeof(date_buf), "%Y-%m-%d %H:%M:%S", &tm_local);
+
+    char final_buf[48] = {};
+    snprintf(final_buf, sizeof(final_buf), "%s.%03d", date_buf, static_cast<int>(millis.count()));
+    return final_buf;
 }
 
 #ifdef _WIN32

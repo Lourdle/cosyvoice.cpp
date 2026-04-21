@@ -2,9 +2,7 @@
     #define _CRT_SECURE_NO_WARNINGS
 #endif
 
-#include "cosyvoice.h"
-#include "cosyvoice-lowlevel.h"
-#include "tool_common.h"
+#include "tool_common_cosyvoice.h"
 
 #ifndef COSYVOICE_NO_AUDIO
     #include "cosyvoice-audio.h"
@@ -106,22 +104,6 @@ struct server_options
     bool quiet = false;
 };
 
-struct cosyvoice_context_deleter { void operator()(cosyvoice_context_t ctx) const noexcept { cosyvoice_free(ctx); } };
-struct cosyvoice_prompt_speech_deleter { void operator()(cosyvoice_prompt_speech_t prompt_speech) const noexcept { cosyvoice_prompt_speech_free(prompt_speech); } };
-struct cosyvoice_prompt_deleter { void operator()(cosyvoice_prompt_t prompt) const noexcept { cosyvoice_prompt_free(prompt); } };
-struct cosyvoice_tts_context_deleter { void operator()(cosyvoice_tts_context_t ctx) const noexcept { cosyvoice_tts_context_free(ctx); } };
-#ifndef COSYVOICE_NO_AUDIO
-struct cosyvoice_audio_encoder_deleter { void operator()(cosyvoice_audio_encoder_t encoder) const noexcept { cosyvoice_audio_encoder_destroy(encoder); } };
-#endif
-
-using cosyvoice_context_handle = std::unique_ptr<cosyvoice_context, cosyvoice_context_deleter>;
-using cosyvoice_prompt_speech_handle = std::unique_ptr<cosyvoice_prompt_speech, cosyvoice_prompt_speech_deleter>;
-using cosyvoice_prompt_handle = std::unique_ptr<cosyvoice_prompt, cosyvoice_prompt_deleter>;
-using cosyvoice_tts_context_handle = std::unique_ptr<cosyvoice_tts_context, cosyvoice_tts_context_deleter>;
-#ifndef COSYVOICE_NO_AUDIO
-using cosyvoice_audio_encoder_handle = std::unique_ptr<cosyvoice_audio_encoder, cosyvoice_audio_encoder_deleter>;
-#endif
-
 struct voice_runtime
 {
     std::string name;
@@ -206,28 +188,6 @@ struct request_log_context
 
 static std::atomic<uint64_t> g_request_id = 0;
 
-static std::string get_local_timestamp_ms()
-{
-    const auto now = std::chrono::system_clock::now();
-    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now.time_since_epoch()) % 1000;
-    const auto t = std::chrono::system_clock::to_time_t(now);
-
-    std::tm tm_local = {};
-#ifdef _WIN32
-    localtime_s(&tm_local, &t);
-#else
-    localtime_r(&t, &tm_local);
-#endif
-
-    char date_buf[32] = {};
-    strftime(date_buf, sizeof(date_buf), "%Y-%m-%d %H:%M:%S", &tm_local);
-
-    char final_buf[48] = {};
-    snprintf(final_buf, sizeof(final_buf), "%s.%03d", date_buf, static_cast<int>(millis.count()));
-    return final_buf;
-}
-
 static bool log_level_enabled(server_log_level current, server_log_level required)
 {
     return static_cast<int>(current) >= static_cast<int>(required);
@@ -272,77 +232,6 @@ static void print_info_log(server_log_level level, const char* format, ...)
     va_start(args, format);
     vprintf(format, args);
     va_end(args);
-}
-
-static std::string trim_copy(const std::string& value)
-{
-    size_t start = 0;
-    size_t end = value.size();
-    while (start < end && std::isspace(static_cast<unsigned char>(value[start])))
-        ++start;
-    while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1])))
-        --end;
-    return value.substr(start, end - start);
-}
-
-static bool parse_uint16_port(const std::string& value, uint16_t* result)
-{
-    uint32_t parsed = 0;
-    if (!parse_uint32_arg(value, &parsed) || parsed == 0 || parsed > 65535)
-        return false;
-    *result = static_cast<uint16_t>(parsed);
-    return true;
-}
-
-static bool parse_llm_kv_cache_type_arg(const std::string& value, cosyvoice_llm_kv_cache_type_t* result)
-{
-    const auto lowered = to_lower(value);
-    if (lowered == "f32")
-        *result = COSYVOICE_LLM_KV_CACHE_TYPE_F32;
-    else if (lowered == "f16")
-        *result = COSYVOICE_LLM_KV_CACHE_TYPE_F16;
-    else if (lowered == "q8_0")
-        *result = COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0;
-    else if (lowered == "q5_1")
-        *result = COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1;
-    else if (lowered == "q5_0")
-        *result = COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0;
-    else if (lowered == "q4_1")
-        *result = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1;
-    else if (lowered == "q4_0")
-        *result = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0;
-    else
-        return false;
-    return true;
-}
-
-static bool parse_inference_buffer_policy_arg(const std::string& value, cosyvoice_inference_buffer_policy_t* result)
-{
-    const auto lowered = to_lower(value);
-    if (lowered == "shared")
-        *result = COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED;
-    else if (lowered == "balanced")
-        *result = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
-    else if (lowered == "dedicated")
-        *result = COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED;
-    else
-        return false;
-    return true;
-}
-
-static const char* inference_buffer_policy_to_string(cosyvoice_inference_buffer_policy_t policy)
-{
-    switch (policy)
-    {
-    case COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED:
-        return "shared";
-    case COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED:
-        return "balanced";
-    case COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED:
-        return "dedicated";
-    default:
-        return "unknown";
-    }
 }
 
 static bool parse_voice_prompt_mapping(const std::string& value, voice_prompt_option* mapping)

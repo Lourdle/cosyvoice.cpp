@@ -2,20 +2,11 @@
     #define _CRT_SECURE_NO_WARNINGS
 #endif
 
-#include "cosyvoice.h"
-#include "cosyvoice-lowlevel.h"
-#include "tool_common.h"
+#include "tool_common_cosyvoice.h"
 
-#ifndef COSYVOICE_NO_AUDIO
-    #include "cosyvoice-audio.h"
-#else
+#ifdef COSYVOICE_NO_AUDIO
     #define cosyvoice_audio_save_to_file cosyvoice_save_wav
 #endif
-
-#ifndef COSYVOICE_NO_FRONTEND
-    #include "cosyvoice-frontend.h"
-#endif
-
 
 #include <ggml-backend.h>
 
@@ -95,50 +86,6 @@ static constexpr const char* ANSI_YELLOW = "\033[93m";
 static constexpr const char* ANSI_BOLD_CYAN = "\033[1;36m";
 static constexpr const char* ANSI_BOLD_BLUE = "\033[1;34m";
 static constexpr const char* ANSI_DIM = "\033[2m";
-
-struct cosyvoice_context_deleter { void operator()(cosyvoice_context_t ctx) const noexcept { cosyvoice_free(ctx); } };
-#ifndef COSYVOICE_NO_FRONTEND
-struct cosyvoice_frontend_deleter { void operator()(cosyvoice_frontend_context_t ctx) const noexcept { cosyvoice_frontend_free(ctx); } };
-#endif
-struct cosyvoice_prompt_speech_deleter { void operator()(cosyvoice_prompt_speech_t prompt_speech) const noexcept { cosyvoice_prompt_speech_free(prompt_speech); } };
-struct cosyvoice_prompt_deleter { void operator()(cosyvoice_prompt_t prompt) const noexcept { cosyvoice_prompt_free(prompt); } };
-struct cosyvoice_tts_context_deleter { void operator()(cosyvoice_tts_context_t ctx) const noexcept { cosyvoice_tts_context_free(ctx); } };
-#ifndef COSYVOICE_NO_AUDIO
-struct audio_buffer_deleter { void operator()(float* data) const noexcept { cosyvoice_audio_free(data); } };
-#endif
-
-using cosyvoice_context_handle = std::unique_ptr<cosyvoice_context, cosyvoice_context_deleter>;
-#ifndef COSYVOICE_NO_FRONTEND
-using cosyvoice_frontend_handle = std::unique_ptr<cosyvoice_frontend_context, cosyvoice_frontend_deleter>;
-#endif
-using cosyvoice_prompt_speech_handle = std::unique_ptr<cosyvoice_prompt_speech, cosyvoice_prompt_speech_deleter>;
-using cosyvoice_prompt_handle = std::unique_ptr<cosyvoice_prompt, cosyvoice_prompt_deleter>;
-using cosyvoice_tts_context_handle = std::unique_ptr<cosyvoice_tts_context, cosyvoice_tts_context_deleter>;
-#ifndef COSYVOICE_NO_AUDIO
-using audio_buffer_handle = std::unique_ptr<float, audio_buffer_deleter>;
-#endif
-
-static bool parse_llm_kv_cache_type_arg(const std::string& value, cosyvoice_llm_kv_cache_type_t* result)
-{
-    const auto lowered = to_lower(value);
-    if (lowered == "f32")
-        *result = COSYVOICE_LLM_KV_CACHE_TYPE_F32;
-    else if (lowered == "f16")
-        *result = COSYVOICE_LLM_KV_CACHE_TYPE_F16;
-    else if (lowered == "q8_0")
-        *result = COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0;
-    else if (lowered == "q5_1")
-        *result = COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1;
-    else if (lowered == "q5_0")
-        *result = COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0;
-    else if (lowered == "q4_1")
-        *result = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1;
-    else if (lowered == "q4_0")
-        *result = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0;
-    else
-        return false;
-    return true;
-}
 
 static bool has_generation_overrides(const cli_options& options)
 {
@@ -321,16 +268,6 @@ private:
     std::thread worker;
 };
 
-static double elapsed_ms(std::chrono::steady_clock::time_point from, std::chrono::steady_clock::time_point to)
-{
-    return std::chrono::duration<double, std::milli>(to - from).count();
-}
-
-static double bytes_to_mib(size_t bytes)
-{
-    return static_cast<double>(bytes) / (1024.0 * 1024.0);
-}
-
 static void print_section_title(const char* title)
 {
     printf("\n%s== %s ==%s\n", ANSI_BOLD_BLUE, title, ANSI_RESET);
@@ -380,29 +317,6 @@ static void print_kv_line_mib_delta(const char* key, size_t before, size_t after
 {
     const auto delta = static_cast<long long>(after) - static_cast<long long>(before);
     printf("  %s%-24s%s : %zu bytes (%.2f MiB), delta %+lld bytes\n", ANSI_DIM, key, ANSI_RESET, after, bytes_to_mib(after), delta);
-}
-
-static const char* llm_kv_cache_type_to_string(cosyvoice_llm_kv_cache_type_t type)
-{
-    switch (type)
-    {
-    case COSYVOICE_LLM_KV_CACHE_TYPE_F32:
-        return "f32";
-    case COSYVOICE_LLM_KV_CACHE_TYPE_F16:
-        return "f16";
-    case COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0:
-        return "q8_0";
-    case COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1:
-        return "q5_1";
-    case COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0:
-        return "q5_0";
-    case COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1:
-        return "q4_1";
-    case COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0:
-        return "q4_0";
-    default:
-        return "unknown";
-    }
 }
 
 static const char* enabled_to_string(bool enabled)
@@ -1027,11 +941,15 @@ int main(int argc, char** argv)
     g_quiet_logs = options.quiet;
     if (!validate_options(options))
         return 1;
+
     const auto log_level = get_log_level(options);
     cli_timing_info timing;
     const auto total_start = std::chrono::steady_clock::now();
+
+#ifndef COSYVOICE_NO_FRONTEND
     if (!options.frontend_only)
         print_preload_run_info(options, log_level);
+#endif
 
     auto stage_start = std::chrono::steady_clock::now();
     cosyvoice_init_backend();
