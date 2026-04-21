@@ -4,9 +4,8 @@ set(SERVER_SOURCES
 )
 
 add_executable(cosyvoice-server ${SERVER_SOURCES})
-target_link_libraries(cosyvoice-server PRIVATE cosyvoice common ggml)
+target_link_libraries(cosyvoice-server PRIVATE cosyvoice common ggml tools_common)
 target_include_directories(cosyvoice-server PRIVATE
-    "${CMAKE_SOURCE_DIR}/common"
     "${CMAKE_SOURCE_DIR}/vendor"
     "${CMAKE_SOURCE_DIR}/vendor/cpp-httplib"
     "${CMAKE_SOURCE_DIR}/vendor/nlohmann"

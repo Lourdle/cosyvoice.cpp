@@ -4,7 +4,7 @@
 
 #include "cosyvoice.h"
 #include "cosyvoice-lowlevel.h"
-#include "common.h"
+#include "tool_common.h"
 
 #ifndef COSYVOICE_NO_AUDIO
     #include "cosyvoice-audio.h"
@@ -274,12 +274,6 @@ static void print_info_log(server_log_level level, const char* format, ...)
     va_end(args);
 }
 
-static std::string to_lower(std::string value)
-{
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    return value;
-}
-
 static std::string trim_copy(const std::string& value)
 {
     size_t start = 0;
@@ -291,16 +285,6 @@ static std::string trim_copy(const std::string& value)
     return value.substr(start, end - start);
 }
 
-static bool parse_uint32_arg(const std::string& value, uint32_t* result)
-{
-    char* end = nullptr;
-    const unsigned long long parsed = strtoull(value.c_str(), &end, 10);
-    if (end == value.c_str() || !end || *end != '\0' || parsed > UINT32_MAX)
-        return false;
-    *result = static_cast<uint32_t>(parsed);
-    return true;
-}
-
 static bool parse_uint16_port(const std::string& value, uint16_t* result)
 {
     uint32_t parsed = 0;
@@ -310,29 +294,9 @@ static bool parse_uint16_port(const std::string& value, uint16_t* result)
     return true;
 }
 
-static bool parse_int_arg(const std::string& value, int* result)
-{
-    char* end = nullptr;
-    long long parsed = strtoll(value.c_str(), &end, 10);
-    if (end == value.c_str() || !end || *end != '\0')
-        return false;
-    if (parsed < static_cast<long long>(std::numeric_limits<int>::min())
-        || parsed > static_cast<long long>(std::numeric_limits<int>::max()))
-        return false;
-    *result = static_cast<int>(parsed);
-    return true;
-}
-
-static bool parse_float_arg(const std::string& value, float* result)
-{
-    char* end = nullptr;
-    *result = strtof(value.c_str(), &end);
-    return end != value.c_str() && end && *end == '\0';
-}
-
 static bool parse_llm_kv_cache_type_arg(const std::string& value, cosyvoice_llm_kv_cache_type_t* result)
 {
-    auto lowered = to_lower(value);
+    const auto lowered = to_lower(value);
     if (lowered == "f32")
         *result = COSYVOICE_LLM_KV_CACHE_TYPE_F32;
     else if (lowered == "f16")
@@ -354,7 +318,7 @@ static bool parse_llm_kv_cache_type_arg(const std::string& value, cosyvoice_llm_
 
 static bool parse_inference_buffer_policy_arg(const std::string& value, cosyvoice_inference_buffer_policy_t* result)
 {
-    auto lowered = to_lower(value);
+    const auto lowered = to_lower(value);
     if (lowered == "shared")
         *result = COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED;
     else if (lowered == "balanced")

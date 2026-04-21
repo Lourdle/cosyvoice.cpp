@@ -1,7 +1,7 @@
 file(GLOB CLI_SOURCES "*.cpp")
 add_executable(cosyvoice-cli ${CLI_SOURCES})
 target_link_libraries(cosyvoice-cli PRIVATE cosyvoice common ggml)
-target_include_directories(cosyvoice-cli PRIVATE "${CMAKE_SOURCE_DIR}/common")
+target_link_libraries(cosyvoice-cli PRIVATE tools_common)
 
 if(COSYVOICE_NO_AUDIO)
     target_compile_definitions(cosyvoice-cli PRIVATE COSYVOICE_NO_AUDIO)

@@ -1,7 +1,6 @@
 file(GLOB QUANTIZE_SOURCES "*.cpp")
 add_executable(quantize ${QUANTIZE_SOURCES})
-target_link_libraries(quantize PRIVATE ggml common)
-target_include_directories(quantize PRIVATE "${CMAKE_SOURCE_DIR}/common")
+target_link_libraries(quantize PRIVATE ggml common tools_common)
 
 if(WIN32)
     add_custom_command(TARGET quantize POST_BUILD

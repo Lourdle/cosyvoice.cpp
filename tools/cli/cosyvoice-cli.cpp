@@ -4,7 +4,7 @@
 
 #include "cosyvoice.h"
 #include "cosyvoice-lowlevel.h"
-#include "common.h"
+#include "tool_common.h"
 
 #ifndef COSYVOICE_NO_AUDIO
     #include "cosyvoice-audio.h"
@@ -118,44 +118,9 @@ using cosyvoice_tts_context_handle = std::unique_ptr<cosyvoice_tts_context, cosy
 using audio_buffer_handle = std::unique_ptr<float, audio_buffer_deleter>;
 #endif
 
-static std::string to_lower(std::string&& value)
-{
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    return value;
-}
-
-static bool parse_float_arg(const std::string& value, float* result)
-{
-    char* end = nullptr;
-    *result = strtof(value.c_str(), &end);
-    return end != value.c_str() && end && *end == '\0';
-}
-
-static bool parse_uint32_arg(const std::string& value, uint32_t* result)
-{
-    char* end = nullptr;
-    unsigned long long val = strtoull(value.c_str(), &end, 10);
-    if (end == value.c_str() || !end || *end != '\0' || val > UINT32_MAX)
-        return false;
-    *result = static_cast<uint32_t>(val);
-    return true;
-}
-
-static bool parse_int_arg(const std::string& value, int* result)
-{
-    char* end = nullptr;
-    long long val = strtoll(value.c_str(), &end, 10);
-    if (end == value.c_str() || !end || *end != '\0'
-        || val < static_cast<long long>(std::numeric_limits<int>::min())
-        || val > static_cast<long long>(std::numeric_limits<int>::max()))
-        return false;
-    *result = static_cast<int>(val);
-    return true;
-}
-
 static bool parse_llm_kv_cache_type_arg(const std::string& value, cosyvoice_llm_kv_cache_type_t* result)
 {
-    auto lowered = to_lower(std::string(value));
+    const auto lowered = to_lower(value);
     if (lowered == "f32")
         *result = COSYVOICE_LLM_KV_CACHE_TYPE_F32;
     else if (lowered == "f16")
