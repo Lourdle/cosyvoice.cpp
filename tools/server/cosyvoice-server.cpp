@@ -62,9 +62,10 @@ struct server_options
 {
     std::string model;
     std::string host = "127.0.0.1";
-    uint16_t port = 8080;
     std::string api_key;
     std::string served_model_name;
+    uint16_t port = 8080;
+    bool has_served_model_name = false;
     std::vector<voice_prompt_option> voice_prompts;
 
     std::string single_voice = "alloy";
@@ -439,9 +440,6 @@ static bool validate_options(server_options& options)
         print_error_log("Error: --max-token-text-ratio must be >= --min-token-text-ratio.\n");
         return false;
     }
-
-    if (options.served_model_name.empty())
-        options.served_model_name = derive_served_model_name(options.model);
 
     return true;
 }
@@ -1199,6 +1197,18 @@ static bool initialize_runtime(const server_options& options, server_runtime* ru
         return false;
     }
 
+    // If the user didn't explicitly provide a served_model_name, try to use
+    // the model's architecture reported by cosyvoice_get_architecture(). If
+    // that isn't available, fall back to deriving the name from the path.
+    if (!runtime->options.has_served_model_name)
+    {
+        const char* arch = cosyvoice_get_architecture(runtime->model_context.get());
+        if (arch && arch[0] != '\0')
+            runtime->options.served_model_name = arch;
+        else
+            runtime->options.served_model_name = derive_served_model_name(runtime->options.model);
+    }
+
     cosyvoice_get_generation_config(runtime->model_context.get(), &runtime->default_generation_config);
     if (options.has_temperature)
         runtime->default_generation_config.temperature = options.temperature;
@@ -1306,7 +1316,10 @@ int main(int argc, char** argv)
         else if (tchar_casecmp(arg, COSYVOICE_TEXT("--model")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-m")) == 0)
             options.model = tchar_to_utf8(get_arg_value());
         else if (tchar_casecmp(arg, COSYVOICE_TEXT("--served-model-name")) == 0)
+        {
             options.served_model_name = tchar_to_utf8(get_arg_value());
+            options.has_served_model_name = true;
+        }
         else if (tchar_casecmp(arg, COSYVOICE_TEXT("--host")) == 0)
             options.host = tchar_to_utf8(get_arg_value());
         else if (tchar_casecmp(arg, COSYVOICE_TEXT("--port")) == 0)
