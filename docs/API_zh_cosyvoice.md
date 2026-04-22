@@ -489,6 +489,26 @@ COSYVOICE_API void cosyvoice_get_context_params(
 
 无返回值。
 
+## cosyvoice_get_architecture
+
+### 语法
+
+```c
+COSYVOICE_API const char* cosyvoice_get_architecture(cosyvoice_context_t ctx);
+```
+
+### 说明
+
+获取已加载模型的架构标识。
+
+### 参数
+
+- `ctx`：模型上下文。
+
+### 返回值
+
+以 `\0` 结尾的 UTF-8 架构字符串，例如 `cosyvoice3-2512`。
+
 ## cosyvoice_get_generation_config
 
 ### 语法
