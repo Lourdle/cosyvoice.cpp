@@ -325,6 +325,11 @@ void cosyvoice_get_context_params(cosyvoice_context_t ctx, cosyvoice_context_par
     ctx->get_context_params(params);
 }
 
+const char* cosyvoice_get_architecture(cosyvoice_context_t ctx)
+{
+    return ctx->get_architecture();
+}
+
 void cosyvoice_set_sampler(cosyvoice_context_t ctx, cosyvoice_sampler_t sampler, void* sampler_ctx)
 {
     return ctx->set_sampler(sampler, sampler_ctx);

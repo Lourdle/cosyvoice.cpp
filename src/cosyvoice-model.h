@@ -41,6 +41,7 @@ struct cosyvoice_model : virtual cosyvoice_model_context
     bool set_generation_config(const cosyvoice_generation_config_t* config);
     const char* get_instruction_prefix();
     void get_context_params(cosyvoice_context_params_t* params);
+    const char* get_architecture();
 
     void get_sampler(cosyvoice_sampler_t* sampler, void** sampler_ctx);
     void set_sampler(cosyvoice_sampler_t sampler, void* sampler_ctx);
@@ -91,6 +92,7 @@ struct cosyvoice_model : virtual cosyvoice_model_context
     std::unique_ptr<char[]> batch_buffer;
     std::unique_ptr<float[]> nucleus_probs;
     std::unique_ptr<float[]> probs;
+    std::unique_ptr<char[]> architecture;
     std::unique_ptr<char[]> instruction_prefix;
     ggml_backend_buffer_ptr kv_buffer;
 };

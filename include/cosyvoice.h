@@ -3,14 +3,14 @@
 
 #ifndef COSYVOICE_API
     #ifdef COSYVOICE_STATIC
-		#define COSYVOICE_API
-	#else
-		#ifdef _WIN32
-			#define COSYVOICE_API __declspec(dllimport)
-		#else
-			#define COSYVOICE_API __attribute__((visibility("default")))
-		#endif
-	#endif
+        #define COSYVOICE_API
+    #else
+        #ifdef _WIN32
+            #define COSYVOICE_API __declspec(dllimport)
+        #else
+            #define COSYVOICE_API __attribute__((visibility("default")))
+        #endif
+    #endif
 #endif
 
 #include <stddef.h>
@@ -19,7 +19,7 @@
 #ifdef __cplusplus
 extern "C" {
 #else
-	#include <stdbool.h>
+    #include <stdbool.h>
 #endif
 
 // ----------------------------------------------------------------------------
@@ -31,14 +31,14 @@ extern "C" {
  */
 typedef enum cosyvoice_llm_kv_cache_type
 {
-	COSYVOICE_LLM_KV_CACHE_TYPE_F32,   ///< Store KV cache in 32-bit floating point format.
-	COSYVOICE_LLM_KV_CACHE_TYPE_F16,   ///< Store KV cache in 16-bit floating point format.
-	COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0,  ///< Store KV cache in GGML Q8_0 quantized format.
-	COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1,  ///< Store KV cache in GGML Q5_1 quantized format.
-	COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0,  ///< Store KV cache in GGML Q5_0 quantized format.
-	COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1,  ///< Store KV cache in GGML Q4_1 quantized format.
-	COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0,  ///< Store KV cache in GGML Q4_0 quantized format.
-	COSYVOICE_LLM_KV_CACHE_TYPE_COUNT  // Sentinel value.
+    COSYVOICE_LLM_KV_CACHE_TYPE_F32,   ///< Store KV cache in 32-bit floating point format.
+    COSYVOICE_LLM_KV_CACHE_TYPE_F16,   ///< Store KV cache in 16-bit floating point format.
+    COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0,  ///< Store KV cache in GGML Q8_0 quantized format.
+    COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1,  ///< Store KV cache in GGML Q5_1 quantized format.
+    COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0,  ///< Store KV cache in GGML Q5_0 quantized format.
+    COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1,  ///< Store KV cache in GGML Q4_1 quantized format.
+    COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0,  ///< Store KV cache in GGML Q4_0 quantized format.
+    COSYVOICE_LLM_KV_CACHE_TYPE_COUNT  // Sentinel value.
 } cosyvoice_llm_kv_cache_type_t;
 
 /**
@@ -46,10 +46,10 @@ typedef enum cosyvoice_llm_kv_cache_type
  */
 typedef enum cosyvoice_inference_buffer_policy
 {
-	COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED,    ///< Share buffers between the LLM KV cache and token2wav intermediates to minimize memory usage.
-	COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED,  ///< Share buffers, but keep reusable sequence segments in memory for faster restoration on the next run.
-	COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED, ///< Use separate buffers for the LLM KV cache and token2wav intermediates to prioritize speed.
-	COSYVOICE_INFERENCE_BUFFER_POLICY_COUNT      // Sentinel value.
+    COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED,    ///< Share buffers between the LLM KV cache and token2wav intermediates to minimize memory usage.
+    COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED,  ///< Share buffers, but keep reusable sequence segments in memory for faster restoration on the next run.
+    COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED, ///< Use separate buffers for the LLM KV cache and token2wav intermediates to prioritize speed.
+    COSYVOICE_INFERENCE_BUFFER_POLICY_COUNT      // Sentinel value.
 } cosyvoice_inference_buffer_policy_t;
 
 /**
@@ -57,9 +57,9 @@ typedef enum cosyvoice_inference_buffer_policy
  */
 typedef enum cosyvoice_builtin_sampler_rng_policy
 {
-	COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION,        ///< Reset the built-in sampler RNG to `seed` for each LLM session so identical sessions produce identical results.
-	COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_CONTINUE_ACROSS_SESSIONS, ///< Keep advancing the built-in sampler RNG across LLM sessions so identical sessions can produce different results.
-	COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_COUNT                     // Sentinel value.
+    COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION,        ///< Reset the built-in sampler RNG to `seed` for each LLM session so identical sessions produce identical results.
+    COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_CONTINUE_ACROSS_SESSIONS, ///< Keep advancing the built-in sampler RNG across LLM sessions so identical sessions can produce different results.
+    COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_COUNT                     // Sentinel value.
 } cosyvoice_builtin_sampler_rng_policy_t;
 
 // ----------------------------------------------------------------------------
@@ -71,10 +71,10 @@ typedef enum cosyvoice_builtin_sampler_rng_policy
  */
 typedef struct cosyvoice_sampling_params
 {
-	int   top_k;    ///< Limit sampling to the top-k candidate tokens.
-	float top_p;    ///< Keep the smallest token set whose cumulative probability reaches this threshold.
-	int   win_size; ///< Sliding-window size used by the repetition-aware sampler.
-	float tau_r;    ///< Repetition control coefficient used by the sampler.
+    int   top_k;    ///< Limit sampling to the top-k candidate tokens.
+    float top_p;    ///< Keep the smallest token set whose cumulative probability reaches this threshold.
+    int   win_size; ///< Sliding-window size used by the repetition-aware sampler.
+    float tau_r;    ///< Repetition control coefficient used by the sampler.
 } cosyvoice_sampling_params_t;
 
 /**
@@ -82,10 +82,10 @@ typedef struct cosyvoice_sampling_params
  */
 typedef struct cosyvoice_generation_config
 {
-	float                       temperature;          ///< Softmax temperature applied during token sampling.
-	cosyvoice_sampling_params_t sampling;             ///< Parameters for the built-in sampler.
-	float                       min_token_text_ratio; ///< Minimum allowed ratio of generated acoustic tokens to input text length.
-	float                       max_token_text_ratio; ///< Maximum allowed ratio of generated acoustic tokens to input text length.
+    float                       temperature;          ///< Softmax temperature applied during token sampling.
+    cosyvoice_sampling_params_t sampling;             ///< Parameters for the built-in sampler.
+    float                       min_token_text_ratio; ///< Minimum allowed ratio of generated acoustic tokens to input text length.
+    float                       max_token_text_ratio; ///< Maximum allowed ratio of generated acoustic tokens to input text length.
 } cosyvoice_generation_config_t;
 
 /**
@@ -93,8 +93,8 @@ typedef struct cosyvoice_generation_config
  */
 typedef struct cosyvoice_llm_token_prob
 {
-	int   token_id; ///< Token identifier in the model vocabulary.
-	float prob;     ///< Probability assigned to the token after filtering.
+    int   token_id; ///< Token identifier in the model vocabulary.
+    float prob;     ///< Probability assigned to the token after filtering.
 } cosyvoice_llm_token_prob_t;
 
 /**
@@ -102,8 +102,8 @@ typedef struct cosyvoice_llm_token_prob
  */
 typedef struct cosyvoice_generated_speech
 {
-	float*   data;   ///< Pointer to PCM samples in 32-bit floating point format.
-	uint32_t length; ///< Number of samples in `data`.
+    float*   data;   ///< Pointer to PCM samples in 32-bit floating point format.
+    uint32_t length; ///< Number of samples in `data`.
 } *cosyvoice_generated_speech_ptr;
 
 // ----------------------------------------------------------------------------
@@ -132,14 +132,14 @@ typedef struct cosyvoice_tts_context*   cosyvoice_tts_context_t;        // Handl
  * @return The selected token id.
  */
 typedef int (*cosyvoice_sampler_t)(
-	cosyvoice_llm_token_prob_t*        nucleus_probs,
-	int                                k,
-	float*                             probs,
-	uint32_t                           size,
-	const cosyvoice_sampling_params_t* sampling_params,
-	int*                               accepted_tokens,
-	uint32_t                           n_accepted_tokens,
-	void*                              sampler_ctx
+    cosyvoice_llm_token_prob_t*        nucleus_probs,
+    int                                k,
+    float*                             probs,
+    uint32_t                           size,
+    const cosyvoice_sampling_params_t* sampling_params,
+    int*                               accepted_tokens,
+    uint32_t                           n_accepted_tokens,
+    void*                              sampler_ctx
 );
 
 // ----------------------------------------------------------------------------
@@ -151,21 +151,21 @@ typedef int (*cosyvoice_sampler_t)(
  */
 typedef struct cosyvoice_context_params
 {
-	bool llm_use_flash_attn;  ///< Use flash attention if supported by the backend. Falls back to regular attention otherwise.
-	bool flow_use_flash_attn; ///< Use flash attention for the Flow module if supported.
+    bool llm_use_flash_attn;  ///< Use flash attention if supported by the backend. Falls back to regular attention otherwise.
+    bool flow_use_flash_attn; ///< Use flash attention for the Flow module if supported.
 
-	cosyvoice_llm_kv_cache_type_t       llm_kv_cache_type;           ///< The data type of the KV cache in the LLM module.
-	bool                                llm_allow_kv_cache_fallback; ///< If true, fall back to a Flash Attention-compatible KV cache type when the requested one is unsupported.
-	cosyvoice_inference_buffer_policy_t inference_buffer_policy;     ///< Controls how inference buffers are allocated and reused, which affects performance and memory usage.
+    cosyvoice_llm_kv_cache_type_t       llm_kv_cache_type;           ///< The data type of the KV cache in the LLM module.
+    bool                                llm_allow_kv_cache_fallback; ///< If true, fall back to a Flash Attention-compatible KV cache type when the requested one is unsupported.
+    cosyvoice_inference_buffer_policy_t inference_buffer_policy;     ///< Controls how inference buffers are allocated and reused, which affects performance and memory usage.
 
-	uint32_t n_batch;   ///< Batch size used by inference kernels.
-	uint32_t n_max_seq; ///< Maximum supported sequence length.
-	uint32_t seed;      ///< Seed used by the built-in sampler and noise generator RNG.
-	cosyvoice_builtin_sampler_rng_policy_t builtin_sampler_rng_policy; ///< Controls how the built-in sampler RNG evolves across LLM sessions. Ignored when `sampler` is not null.
+    uint32_t n_batch;   ///< Batch size used by inference kernels.
+    uint32_t n_max_seq; ///< Maximum supported sequence length.
+    uint32_t seed;      ///< Seed used by the built-in sampler and noise generator RNG.
+    cosyvoice_builtin_sampler_rng_policy_t builtin_sampler_rng_policy; ///< Controls how the built-in sampler RNG evolves across LLM sessions. Ignored when `sampler` is not null.
 
-	// Sampling overrides
-	cosyvoice_sampler_t sampler;     ///< Optional custom sampler. Pass null to use the built-in sampler.
-	void*               sampler_ctx; ///<User context for `sampler`. Ignored when using the built-in sampler.
+    // Sampling overrides
+    cosyvoice_sampler_t sampler;     ///< Optional custom sampler. Pass null to use the built-in sampler.
+    void*               sampler_ctx; ///<User context for `sampler`. Ignored when using the built-in sampler.
 } cosyvoice_context_params_t;
 
 // ----------------------------------------------------------------------------
@@ -202,8 +202,8 @@ COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file(const char* filename)
  * @brief Load a model context from a GGUF file using explicit context parameters.
  */
 COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_with_params(
-	const char*                       filename,
-	const cosyvoice_context_params_t* params
+    const char*                       filename,
+    const cosyvoice_context_params_t* params
 );
 
 /**
@@ -215,9 +215,14 @@ COSYVOICE_API void                cosyvoice_free(cosyvoice_context_t ctx);
  * @brief Retrieve the effective context parameters of a loaded model.
  */
 COSYVOICE_API void                cosyvoice_get_context_params(
-	cosyvoice_context_t         ctx,
-	cosyvoice_context_params_t* params
+    cosyvoice_context_t         ctx,
+    cosyvoice_context_params_t* params
 );
+
+/**
+ * @brief Retrieve the architecture of the loaded model.
+ */
+COSYVOICE_API const char*         cosyvoice_get_architecture(cosyvoice_context_t ctx);
 
 // ----------------------------------------------------------------------------
 // Generation Configuration API
@@ -227,8 +232,8 @@ COSYVOICE_API void                cosyvoice_get_context_params(
  * @brief Retrieve the current generation configuration.
  */
 COSYVOICE_API void     cosyvoice_get_generation_config(
-	cosyvoice_context_t            ctx,
-	cosyvoice_generation_config_t* config
+    cosyvoice_context_t            ctx,
+    cosyvoice_generation_config_t* config
 );
 
 /**
@@ -242,8 +247,8 @@ COSYVOICE_API uint32_t cosyvoice_get_sample_rate(cosyvoice_context_t ctx);
  * @return True if the configuration is valid, otherwise false.
  */
 COSYVOICE_API bool     cosyvoice_set_generation_config(
-	cosyvoice_context_t                  ctx,
-	const cosyvoice_generation_config_t* config
+    cosyvoice_context_t                  ctx,
+    const cosyvoice_generation_config_t* config
 );
 
 // ----------------------------------------------------------------------------
@@ -345,31 +350,31 @@ COSYVOICE_API bool cosyvoice_tts_context_get_text_normalization_enabled(cosyvoic
  * @brief Generate speech in zero-shot mode.
  */
 COSYVOICE_API bool cosyvoice_tts_zero_shot(
-	cosyvoice_tts_context_t        ctx,
-	const char*                    text,
-	float                          speed,
-	cosyvoice_generated_speech_ptr result
+    cosyvoice_tts_context_t        ctx,
+    const char*                    text,
+    float                          speed,
+    cosyvoice_generated_speech_ptr result
 );
 
 /**
  * @brief Generate speech in instruct mode with a custom instruction.
  */
 COSYVOICE_API bool cosyvoice_tts_instruct(
-	cosyvoice_tts_context_t        ctx,
-	const char*                    text,
-	const char*                    instruction,
-	float                          speed,
-	cosyvoice_generated_speech_ptr result
+    cosyvoice_tts_context_t        ctx,
+    const char*                    text,
+    const char*                    instruction,
+    float                          speed,
+    cosyvoice_generated_speech_ptr result
 );
 
 /**
  * @brief Generate speech in cross-lingual mode.
  */
 COSYVOICE_API bool cosyvoice_tts_cross_lingual(
-	cosyvoice_tts_context_t        ctx,
-	const char*                    text,
-	float                          speed,
-	cosyvoice_generated_speech_ptr result
+    cosyvoice_tts_context_t        ctx,
+    const char*                    text,
+    float                          speed,
+    cosyvoice_generated_speech_ptr result
 );
 
 // ----------------------------------------------------------------------------
@@ -393,13 +398,13 @@ COSYVOICE_API bool cosyvoice_save_wav(const char* filename, const float* data, u
  */
 typedef struct cosyvoice_memory_usage
 {
-	size_t parameters;         ///< Memory used for model parameters. On the main device.
-	size_t kv_cache;           ///< Memory used for KV cache. On the main device.
-	size_t token2wav;          ///< Memory used for token2wav intermediates. On the main device.
-	size_t buffers;            ///< Memory used for internal buffers. On the main device.
-	size_t cpu_buffers;        ///< Memory used for CPU buffers. On CPU.
-	size_t offloaded_kv_cache; ///< Memory offloaded for KV cache. On CPU.
-	size_t random_noise;       ///< Memory used for random noise buffers. On CPU.
+    size_t parameters;         ///< Memory used for model parameters. On the main device.
+    size_t kv_cache;           ///< Memory used for KV cache. On the main device.
+    size_t token2wav;          ///< Memory used for token2wav intermediates. On the main device.
+    size_t buffers;            ///< Memory used for internal buffers. On the main device.
+    size_t cpu_buffers;        ///< Memory used for CPU buffers. On CPU.
+    size_t offloaded_kv_cache; ///< Memory offloaded for KV cache. On CPU.
+    size_t random_noise;       ///< Memory used for random noise buffers. On CPU.
 } cosyvoice_memory_usage_t;
 
 /**

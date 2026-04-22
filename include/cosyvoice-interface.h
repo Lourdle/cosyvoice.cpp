@@ -23,6 +23,7 @@ struct cosyvoice_model_context
     virtual bool set_generation_config(const cosyvoice_generation_config_t* config) = 0; ///< Validate and apply a generation configuration.
     virtual void get_context_params(cosyvoice_context_params_t* params) = 0; ///< Copy the effective context parameters into `params`.
     virtual const char* get_instruction_prefix() = 0; ///< Get the instruction prefix expected by the current model.
+    virtual const char* get_architecture() = 0; ///< Get a string identifying the current model architecture, e.g. "cosyvoice3-2512".
 
     // Sampling Configuration
     virtual void get_sampler(cosyvoice_sampler_t* sampler, void** sampler_ctx) = 0; ///< Get the current sampler callback and user context.
@@ -55,7 +56,7 @@ struct cosyvoice_model_context
     // Inference
     virtual bool llm_job(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt) = 0; ///< Run low-level LLM inference for a prompt and tokenized text.
     virtual bool token2wav(
-        const int*                 token_ids,
+        const int* token_ids,
         uint32_t                   n_tokens,
         float                      speed,
         cosyvoice_prompt_t         prompt,
@@ -69,7 +70,7 @@ struct cosyvoice_model_context
     virtual void set_prompt(
         cosyvoice_prompt_t         prompt,
         cosyvoice_inference_mode_t mode,
-        const int*                 instruction,
+        const int* instruction,
         uint32_t                   instruction_length
     ) = 0;
 
