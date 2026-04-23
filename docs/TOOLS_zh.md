@@ -40,7 +40,7 @@ quantize --help
 
 核心启动参数：
 - `--model <file.gguf>`：必填模型文件。
-- `--served-model-name <name>`：API 对外模型名（请求中的 `model` 必须匹配）。
+- `--served-model-name <name>`：API 对外模型名（请求中的 `model` 必须匹配）。如果省略，服务器会优先使用 `cosyvoice_get_architecture()` 返回的模型架构名；如果没有可用架构名，则回退为由模型文件名推导的名称。
 - `--voice-prompt <voice=prompt_speech.gguf>`：将一个 `voice` 名映射到一个 `prompt_speech` 文件（可重复传入）。
 - `--host <host>`、`--port <port>`：监听地址，默认 `127.0.0.1:8080`。
 

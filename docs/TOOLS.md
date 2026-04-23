@@ -40,7 +40,7 @@ Authentication behavior:
 
 Core startup options:
 - `--model <file.gguf>`: required model file.
-- `--served-model-name <name>`: exposed model id used by API requests.
+- `--served-model-name <name>`: exposed model id used by API requests. If omitted, the server will use the model architecture from `cosyvoice_get_architecture()` when available, and fall back to a name derived from the model filename otherwise.
 - `--voice-prompt <voice=prompt_speech.gguf>`: map one `voice` name to one `prompt_speech` file (repeatable).
 - `--host <host>`, `--port <port>`: bind address. Defaults: `127.0.0.1:8080`.
 
