@@ -154,6 +154,8 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
     return true;
 }
 
+// Route CUSTOM ops (and their trailing VIEW/PERMUTE) to CPU, everything else to GPU.
+// Used for HiFT where only FFT/ISTFT custom ops need CPU — all other ops and weights stay on GPU.
 static void set_graph_backend(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml_backend_t backend, ggml_backend_t cpu_backend, int nodes = -1)
 {
     if (nodes < 0)
@@ -176,6 +178,46 @@ static void set_graph_backend(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml_
         set_main_backend:
             ggml_backend_sched_set_tensor_backend(sched, node, backend);
         }
+    }
+}
+
+// Route unsupported ops to CPU based on ggml_backend_supports_op.
+// Used for Flow where PAD/IM2COL may be unsupported on some backends (e.g., Metal pre-M5).
+// Virtual ops (VIEW, RESHAPE, PERMUTE, TRANSPOSE) follow their consumer's backend.
+static void set_graph_backend_per_op(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml_backend_t backend, ggml_backend_t cpu_backend, int nodes = -1)
+{
+    if (nodes < 0)
+        nodes = ggml_graph_n_nodes(gf);
+
+    auto is_virtual = [](ggml_op op) {
+        return op == GGML_OP_VIEW || op == GGML_OP_RESHAPE || op == GGML_OP_PERMUTE || op == GGML_OP_TRANSPOSE;
+    };
+
+    // Pass 1: assign non-virtual ops based on supports_op
+    for (int i = 0; i != nodes; ++i) {
+        auto node = ggml_graph_node(gf, i);
+        if (is_virtual(node->op))
+            continue;
+        if (cpu_backend && !ggml_backend_supports_op(backend, node))
+            ggml_backend_sched_set_tensor_backend(sched, node, cpu_backend);
+        else
+            ggml_backend_sched_set_tensor_backend(sched, node, backend);
+    }
+
+    // Pass 2: assign virtual ops to the same backend as their next non-virtual consumer
+    for (int i = nodes - 1; i >= 0; --i) {
+        auto node = ggml_graph_node(gf, i);
+        if (!is_virtual(node->op))
+            continue;
+        ggml_backend_t target = backend;
+        for (int j = i + 1; j < nodes; ++j) {
+            auto next = ggml_graph_node(gf, j);
+            if (!is_virtual(next->op)) {
+                target = ggml_backend_sched_get_tensor_backend(sched, next);
+                break;
+            }
+        }
+        ggml_backend_sched_set_tensor_backend(sched, node, target ? target : backend);
     }
 }
 
@@ -223,7 +265,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 
     auto feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 1, op_caps, cut_len);
     ggml_build_forward_expand(gf, feat);
-    set_graph_backend(gf, sched.get(), backend.get(), nullptr);
+    set_graph_backend_per_op(gf, sched.get(), backend.get(), cpu_backend.get());
     ggml_backend_sched_synchronize(sched.get());
     ggml_backend_sched_alloc_graph(sched.get(), gf);
 
@@ -256,7 +298,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
     feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 1, op_caps, cut_len, &t_leaf);
 
     ggml_build_forward_expand(gf, feat);
-    set_graph_backend(gf, sched.get(), backend.get(), nullptr);
+    set_graph_backend_per_op(gf, sched.get(), backend.get(), cpu_backend.get());
 
     ggml_backend_sched_alloc_graph(sched.get(), gf);
     status = ggml_backend_sched_graph_compute(sched.get(), gf);
@@ -285,7 +327,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
     feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, static_cast<int>(flow.decoder.t_span.size() - 1), op_caps, cut_len, nullptr);
 
     ggml_build_forward_expand(gf, feat);
-    set_graph_backend(gf, sched.get(), backend.get(), nullptr);
+    set_graph_backend_per_op(gf, sched.get(), backend.get(), cpu_backend.get());
 
     ggml_backend_sched_alloc_graph(sched.get(), gf);
     status = ggml_backend_sched_graph_compute(sched.get(), gf);

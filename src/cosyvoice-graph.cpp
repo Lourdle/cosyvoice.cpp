@@ -150,7 +150,7 @@ ggml_tensor* Conv1d::build_cgraph(ggml_context* ctx, ggml_tensor* x, int s, int 
 			xs[i] = unsqueeze(ctx,
 				ggml_im2col(ctx,
 					ws[i],
-					xs[i],
+					ggml_cont(ctx, xs[i]),
 					s, 0, p, 0, d, 0,
 					false, weight->type),
 				2);
