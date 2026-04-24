@@ -27,8 +27,7 @@
 struct cosyvoice_audio_encoder
 {
     cosyvoice_audio_encoder(uint32_t sample_rate) :
-        config(ma_encoder_config_init(ma_encoding_format_wav, ma_format_f32, 1, sample_rate)) {
-    }
+        config(ma_encoder_config_init(ma_encoding_format_wav, ma_format_f32, 1, sample_rate)) {}
 
     bool encode(const float* input, uint32_t length, ma_encoding_format format)
     {
@@ -107,6 +106,8 @@ void cosyvoice_audio_encoder_destroy(cosyvoice_audio_encoder_t encoder)
 
 bool cosyvoice_audio_encoder_encode(cosyvoice_audio_encoder_t encoder, const float* input, uint32_t length, cosyvoice_audio_encoding_format_t format)
 {
+    if (!encoder || !input) return false;
+
     ma_encoding_format miniaudio_format;
     switch (format)
     {
@@ -119,13 +120,15 @@ bool cosyvoice_audio_encoder_encode(cosyvoice_audio_encoder_t encoder, const flo
     return encoder->encode(input, length, miniaudio_format);
 }
 
-bool cosyvoice_audio_encoder_wav_encode(cosyvoice_audio_encoder_t encoder, const float* input, uint32_t length)
-{
-    return encoder->encode(input, length, ma_encoding_format_wav);
-}
-
 void cosyvoice_audio_encoder_get_encoded_data(cosyvoice_audio_encoder_t encoder, const uint8_t** data, uint32_t* length)
 {
+    if (!encoder || !data || !length)
+    {
+        if (data) *data = nullptr;
+        if (length) *length = 0;
+        return;
+    }
+
     *data = encoder->buffer.data();
     *length = static_cast<uint32_t>(encoder->buffer.size());
 }
