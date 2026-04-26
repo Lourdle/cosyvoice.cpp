@@ -137,12 +137,3 @@ void setup_console_utf8()
     SetConsoleOutputCP(CP_UTF8);
 }
 #endif
-
-std::ifstream open_ifstream_utf8(const char* path, std::ios::openmode mode)
-{
-#ifdef _WIN32
-    return std::ifstream(utf8_to_wstr(path).c_str(), mode);
-#else
-    return std::ifstream(path, mode);
-#endif
-}

@@ -23,6 +23,15 @@ std::wstring utf8_to_wstr(const char* utf8)
 }
 #endif
 
+std::ifstream open_ifstream_utf8(const char* path, std::ios::openmode mode)
+{
+#ifdef _WIN32
+    return std::ifstream(utf8_to_wstr(path).c_str(), mode);
+#else
+    return std::ifstream(path, mode);
+#endif
+}
+
 std::ofstream open_ofstream_utf8(const char* path, std::ios::openmode mode)
 {
 #ifdef _WIN32

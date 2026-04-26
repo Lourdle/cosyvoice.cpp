@@ -32,5 +32,3 @@ bool parse_int_arg(const std::string& value, int* result);
 bool parse_uint16_port(const std::string& value, uint16_t* result);
 
 std::string get_local_timestamp_ms();
-
-std::ifstream open_ifstream_utf8(const char* path, std::ios::openmode mode = std::ios::binary);
