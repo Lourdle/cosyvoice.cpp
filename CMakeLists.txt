@@ -89,7 +89,7 @@ target_link_libraries(cosyvoice PRIVATE common ${OBJECT_LIBS})
 
 target_include_directories(cosyvoice PUBLIC "include")
 target_include_directories(cosyvoice PRIVATE "vendor/miniaudio" "common")
-if(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG")
+if(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG" AND EXISTS "${FFMPEG_PREBUILT_DIR}/include")
     target_include_directories(cosyvoice PRIVATE "${FFMPEG_PREBUILT_DIR}/include")
 endif()
 
