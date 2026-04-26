@@ -135,6 +135,37 @@ Default values:
 - `ICU_PREBUILT_DIR=<build_dir>/_deps/icu`
 - `ORT_PREBUILT_DIR=<build_dir>/_deps/onnxruntime`
 
+## Audio backend & FFmpeg
+
+This project supports two audio backends for encoding/decoding helper APIs:
+
+- `MINIAUDIO` (default minimal): provides WAV I/O and basic PCM helpers.
+- `FFMPEG` (optional): enables encoding/decoding for additional formats (MP3/AAC/FLAC/M4A/OPUS) when the FFmpeg libraries and encoders are available at runtime.
+
+Control the audio backend via CMake: set `COSYVOICE_AUDIO_BACKEND` to `MINIAUDIO` or `FFMPEG`.
+
+Examples:
+```bash
+cmake -S . -B build -DCOSYVOICE_AUDIO_BACKEND=MINIAUDIO
+cmake -S . -B build -DCOSYVOICE_AUDIO_BACKEND=FFMPEG
+cmake -S . -B build -DCOSYVOICE_AUDIO_BACKEND=FFMPEG -DFFMPEG_PREBUILT_DIR=/path/to/ffmpeg
+```
+
+If you build with FFmpeg support, the public audio API keeps the same function names. Use `cosyvoice_audio_supported_encoding_formats()` to query the actual formats available in the linked FFmpeg runtime.
+
+FFmpeg usage notes:
+
+- On Windows the build scripts download prebuilt FFmpeg (BtbN builds) by default when `FFMPEG_PREBUILT_DIR` is not provided.
+- On Linux/macOS the system-provided FFmpeg (homebrew/apt) will be used when available; otherwise point `FFMPEG_PREBUILT_DIR` to your prebuilt location.
+- The FFmpeg backend supports `wav`, `mp3`, `aac`, `flac`, `m4a`, and `opus` in the API surface, but the actual usable subset depends on the linked FFmpeg build. The library probes available encoders at runtime and exposes the supported set via the API and CLI/server help messages.
+- `m4a` is a non-standard convenience extension here. OpenAI Speech does not define it; use `response_format` only if your client/server understands this project-specific extension.
+- If a requested format is not supported at runtime, the server/CLI will instruct you to use `wav` or `pcm` instead.
+- On Windows, the build will copy the FFmpeg runtime DLLs it found into the executable directory. If you use a custom prebuilt FFmpeg, make sure the `bin` and `lib` layout matches the expectations in `cmake/Dependencies.cmake`.
+
+License reminder:
+
+- The repository code is MIT. FFmpeg prebuilt binaries may be LGPL or GPL depending on build options. Using a GPL-enabled FFmpeg build may impose GPL obligations on your redistributed binaries. See `FFmpeg-NOTICE.md`.
+
 Dependency priority (effective order):
 - **GGML**: `GGML_SOURCE_DIR` -> auto clone GGML repository if missing.
 - **ICU**: use `ICU_PREBUILT_DIR` if available -> `find_package(ICU)` -> (Windows) auto download prebuilt ICU -> (Linux/macOS) install system ICU manually.

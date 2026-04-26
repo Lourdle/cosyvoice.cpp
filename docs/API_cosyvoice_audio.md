@@ -44,6 +44,11 @@ Opaque handle for the in-memory audio encoder.
 typedef enum cosyvoice_audio_encoding_format
 {
     COSYVOICE_AUDIO_ENCODING_FORMAT_WAV = 0,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_MP3,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_AAC,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_FLAC,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_M4A,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_OPUS,
     COSYVOICE_AUDIO_ENCODING_FORMAT_COUNT
 } cosyvoice_audio_encoding_format_t;
 ```
@@ -51,6 +56,8 @@ typedef enum cosyvoice_audio_encoding_format
 ### Description
 
 Audio payload formats supported by the in-memory encoder.
+
+The FFmpeg backend exposes `wav`, `mp3`, `aac`, `flac`, `m4a`, and `opus` in the public API, but the actually usable subset depends on the linked FFmpeg runtime. `m4a` is a project-specific convenience extension and not part of the OpenAI Speech standard.
 
 ## cosyvoice_audio_encoding_format_supported
 
@@ -71,6 +78,22 @@ Checks whether a format is supported by the audio encoder.
 ### Returns
 
 `true` if supported; otherwise `false`.
+
+## cosyvoice_audio_supported_encoding_formats
+
+### Syntax
+
+```c
+COSYVOICE_API const char* cosyvoice_audio_supported_encoding_formats(void);
+```
+
+### Description
+
+Returns a comma-separated, NUL-terminated string listing audio encoding formats that are supported by the runtime audio backend. This value is computed at runtime (for example, when an FFmpeg backend is used the library will probe available encoders) and is intended for CLI/server help messages or UI usage.
+
+### Returns
+
+Pointer to a string owned by the library; valid for the lifetime of the process.
 
 ## cosyvoice_audio_encoder_create
 
@@ -117,7 +140,7 @@ COSYVOICE_API bool cosyvoice_audio_encoder_encode(
     cosyvoice_audio_encoder_t encoder,
     const float* input,
     uint32_t length,
-	cosyvoice_audio_encoding_format_t format
+    cosyvoice_audio_encoding_format_t format
 );
 ```
 
@@ -264,7 +287,6 @@ The encoder format is inferred from the output file extension:
 - `.wav` -> WAV
 - `.flac` -> FLAC
 - `.mp3` -> MP3
-- `.ogg` -> Ogg Vorbis
 
 If the extension is missing or unsupported, the function falls back to WAV and emits a warning log message (`"Unknown audio file extension, defaulting to WAV format"`).
 

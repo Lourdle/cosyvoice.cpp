@@ -135,6 +135,37 @@ cmake --build build --config Release
 - `ICU_PREBUILT_DIR=<build_dir>/_deps/icu`
 - `ORT_PREBUILT_DIR=<build_dir>/_deps/onnxruntime`
 
+## 音频后端与 FFmpeg
+
+本项目为音频辅助 API 支持两种后端：
+
+- `MINIAUDIO`（默认，精简）：提供 WAV I/O 与基本 PCM 帮助函数。
+- `FFMPEG`（可选）：在可用时启用更多编码/解码格式（MP3/AAC/FLAC/M4A/OPUS）。
+
+通过 CMake 配置音频后端：将 `COSYVOICE_AUDIO_BACKEND` 设为 `MINIAUDIO` 或 `FFMPEG`。
+
+示例：
+```bash
+cmake -S . -B build -DCOSYVOICE_AUDIO_BACKEND=MINIAUDIO
+cmake -S . -B build -DCOSYVOICE_AUDIO_BACKEND=FFMPEG
+cmake -S . -B build -DCOSYVOICE_AUDIO_BACKEND=FFMPEG -DFFMPEG_PREBUILT_DIR=/path/to/ffmpeg
+```
+
+如果启用 FFmpeg 支持，公开音频 API 的函数名保持不变。可使用 `cosyvoice_audio_supported_encoding_formats()` 查询当前链接的 FFmpeg 运行时真正支持哪些格式。
+
+FFmpeg 使用要点：
+
+- 在 Windows 上，构建脚本默认在未提供 `FFMPEG_PREBUILT_DIR` 时下载 BtbN 的预编译 FFmpeg。
+- 在 Linux/macOS 上，若系统提供 FFmpeg（apt/homebrew），项目会优先使用系统库；否则可通过 `FFMPEG_PREBUILT_DIR` 指定预编译位置。
+- FFmpeg 后端在 API 层支持 `wav`、`mp3`、`aac`、`flac`、`m4a`、`opus`，但具体哪些格式真正可用取决于当前链接的 FFmpeg 构建。库会在运行时探测可用编码器，并通过 API / CLI / server 帮助文本暴露支持集合。
+- `m4a` 是这里提供的非标准便捷扩展。OpenAI Speech 标准并没有定义 `m4a`，只在你的客户端/服务端理解这个扩展时使用。
+- 如果客户端请求了运行时不可用的格式，服务/CLI 会建议回退到 `wav` 或 `pcm`。
+- 在 Windows 上，构建脚本会把找到的 FFmpeg 运行时 DLL 复制到可执行文件目录。若你使用自定义预编译 FFmpeg，请确认其 `bin` / `lib` 目录结构符合 `cmake/Dependencies.cmake` 的预期。
+
+许可证提醒：
+
+- 本仓库代码采用 MIT 许可。FFmpeg 预编译包可能是 LGPL 或 GPL，取决于编译选项。使用包含 GPL 编码器的 FFmpeg 构建并重新分发时，可能会对你的发行物带来 GPL 约束。详见 `FFmpeg-NOTICE.md`。
+
 依赖优先级（实际解析顺序）：
 - **GGML**：`GGML_SOURCE_DIR` -> 若缺失则自动克隆 GGML 仓库。
 - **ICU**：若 `ICU_PREBUILT_DIR` 可用则优先使用该目录 -> `find_package(ICU)` ->（Windows）自动下载预编译 ICU ->（Linux/macOS）需手动安装系统 ICU。

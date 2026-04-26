@@ -44,6 +44,11 @@ typedef struct cosyvoice_audio_encoder* cosyvoice_audio_encoder_t;
 typedef enum cosyvoice_audio_encoding_format
 {
     COSYVOICE_AUDIO_ENCODING_FORMAT_WAV = 0,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_MP3,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_AAC,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_FLAC,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_M4A,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_OPUS,
     COSYVOICE_AUDIO_ENCODING_FORMAT_COUNT
 } cosyvoice_audio_encoding_format_t;
 ```
@@ -51,6 +56,8 @@ typedef enum cosyvoice_audio_encoding_format
 ### 说明
 
 内存音频编码器支持的音频格式。
+
+FFmpeg 后端在公共 API 中暴露 `wav`、`mp3`、`aac`、`flac`、`m4a`、`opus`，但具体可用子集取决于当前链接的 FFmpeg 运行时。`m4a` 是本项目提供的便捷扩展，不属于 OpenAI Speech 标准。
 
 ## cosyvoice_audio_encoding_format_supported
 
@@ -71,6 +78,22 @@ COSYVOICE_API bool cosyvoice_audio_encoding_format_supported(cosyvoice_audio_enc
 ### 返回值
 
 支持返回 `true`，否则返回 `false`。
+
+## cosyvoice_audio_supported_encoding_formats
+
+### 语法
+
+```c
+COSYVOICE_API const char* cosyvoice_audio_supported_encoding_formats(void);
+```
+
+### 说明
+
+返回一个以逗号分隔的 NUL 终止字符串，列出运行时音频后端支持的编码格式。该值在运行时计算（例如在使用 FFmpeg 后端时会探测可用的编码器），主要用于 CLI/server 帮助文本或 UI 显示。
+
+### 返回值
+
+返回值指向库内部拥有的字符串，生命周期与进程相同。
 
 ## cosyvoice_audio_encoder_create
 
@@ -117,7 +140,7 @@ COSYVOICE_API bool cosyvoice_audio_encoder_encode(
     cosyvoice_audio_encoder_t encoder,
     const float* input,
     uint32_t length,
-	cosyvoice_audio_encoding_format_t format
+    cosyvoice_audio_encoding_format_t format
 );
 ```
 
@@ -264,7 +287,6 @@ COSYVOICE_API bool cosyvoice_audio_save_to_file(
 - `.wav` -> WAV
 - `.flac` -> FLAC
 - `.mp3` -> MP3
-- `.ogg` -> Ogg Vorbis
 
 如果没有扩展名，或扩展名不受支持，函数会回退为 WAV，并输出一条告警日志（`"Unknown audio file extension, defaulting to WAV format"`）。
 
