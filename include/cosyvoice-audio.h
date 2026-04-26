@@ -35,10 +35,19 @@ typedef struct cosyvoice_audio_encoder* cosyvoice_audio_encoder_t;
 
 /**
  * @brief Supported in-memory audio encoding formats.
+ *
+ * Note: Available formats depend on the audio backend:
+ * - MINIAUDIO backend: only WAV
+ * - FFMPEG backend: WAV, MP3, AAC, FLAC, M4A, OPUS
  */
 typedef enum cosyvoice_audio_encoding_format
 {
     COSYVOICE_AUDIO_ENCODING_FORMAT_WAV = 0,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_MP3,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_AAC,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_FLAC,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_M4A,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_OPUS,
     COSYVOICE_AUDIO_ENCODING_FORMAT_COUNT
 } cosyvoice_audio_encoding_format_t;
 
@@ -48,6 +57,13 @@ typedef enum cosyvoice_audio_encoding_format
  * @return True if the format is supported, otherwise false.
  */
 COSYVOICE_API bool cosyvoice_audio_encoding_format_supported(cosyvoice_audio_encoding_format_t format);
+
+/**
+ * @brief Get the supported audio encoding formats as a comma-separated string.
+ *
+ * The returned pointer is owned by the library and valid until process exit.
+ */
+COSYVOICE_API const char* cosyvoice_audio_supported_encoding_formats(void);
 
 /**
  * @brief Create an in-memory audio encoder.
@@ -74,7 +90,7 @@ COSYVOICE_API bool cosyvoice_audio_encoder_encode(
     cosyvoice_audio_encoder_t encoder,
     const float* input,
     uint32_t length,
-	cosyvoice_audio_encoding_format_t format
+    cosyvoice_audio_encoding_format_t format
 );
 
 /**

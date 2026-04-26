@@ -94,6 +94,11 @@ bool cosyvoice_audio_encoding_format_supported(cosyvoice_audio_encoding_format_t
     }
 }
 
+const char* cosyvoice_audio_supported_encoding_formats(void)
+{
+    return "wav";
+}
+
 cosyvoice_audio_encoder_t cosyvoice_audio_encoder_create(uint32_t sample_rate)
 {
     return new cosyvoice_audio_encoder(sample_rate);

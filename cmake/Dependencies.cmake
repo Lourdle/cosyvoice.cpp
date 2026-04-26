@@ -226,3 +226,84 @@ if(NOT COSYVOICE_NO_FRONTEND)
         endif()
     endif()
 endif()
+
+# 5. FFmpeg (optional, only needed for audio when using FFMPEG backend)
+if(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG")
+    if(NOT EXISTS "${FFMPEG_PREBUILT_DIR}/include/libavcodec/avcodec.h")
+        if(WIN32)
+            if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
+                set(FFMPEG_URL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-winarm64-lgpl-shared-8.1.zip")
+                set(FFMPEG_DIR "ffmpeg-n8.1-latest-winarm64-lgpl-shared-8.1")
+            else()
+                set(FFMPEG_URL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip")
+                set(FFMPEG_DIR "ffmpeg-n8.1-latest-win64-lgpl-shared-8.1")
+            endif()
+            message(STATUS "FFmpeg not found. Downloading pre-built binaries to ${FFMPEG_PREBUILT_DIR}...")
+
+            file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps")
+            file(DOWNLOAD "${FFMPEG_URL}" "${CMAKE_BINARY_DIR}/_deps/ffmpeg.zip" STATUS DL_STATUS)
+            list(GET DL_STATUS 0 DL_ERR_CODE)
+
+            if(DL_ERR_CODE EQUAL 0)
+                execute_process(
+                    COMMAND ${CMAKE_COMMAND} -E tar xf "${CMAKE_BINARY_DIR}/_deps/ffmpeg.zip"
+                    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/_deps"
+                )
+                file(RENAME "${CMAKE_BINARY_DIR}/_deps/${FFMPEG_DIR}" "${FFMPEG_PREBUILT_DIR}")
+            else()
+                message(FATAL_ERROR "Failed to download FFmpeg from ${FFMPEG_URL}")
+            endif()
+        elseif(APPLE)
+            find_program(FFMPEG_EXTERNAL ffmpeg)
+            if(NOT FFMPEG_EXTERNAL)
+                message(FATAL_ERROR "FFmpeg not found! Please install via Homebrew: brew install ffmpeg")
+            endif()
+            execute_process(COMMAND which ffmpeg OUTPUT_VARIABLE FFMPEG_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
+            message(STATUS "Found FFmpeg at: ${FFMPEG_PATH}")
+            set(FFMPEG_PREBUILT_DIR "${FFMPEG_PATH}" CACHE PATH "FFmpeg path" FORCE)
+        else()
+            find_package(PkgConfig QUIET)
+            if(PkgConfig_FOUND)
+                pkg_check_modules(FFMPEG libavcodec libavformat libavutil libswresample QUIET)
+            endif()
+            if(NOT FFMPEG_FOUND)
+                message(FATAL_ERROR "FFmpeg not found! Please install libavcodec-dev, libavformat-dev, libavutil-dev, libswresample-dev (Debian/Ubuntu) or equivalent.")
+            endif()
+            set(FFMPEG_PREBUILT_DIR "${FFMPEG_PREFIX}" CACHE PATH "FFmpeg path" FORCE)
+        endif()
+    endif()
+
+    if(EXISTS "${FFMPEG_PREBUILT_DIR}/include/libavcodec/avcodec.h")
+        message(STATUS "Using FFmpeg from ${FFMPEG_PREBUILT_DIR}")
+        add_library(ffmpeg INTERFACE IMPORTED)
+
+        if(WIN32)
+            file(GLOB FFMPEG_DLLS "${FFMPEG_PREBUILT_DIR}/bin/*.dll")
+            list(LENGTH FFMPEG_DLLS _ffmpeg_dlls_len)
+            if(_ffmpeg_dlls_len EQUAL 0)
+                message(FATAL_ERROR "FFmpeg DLLs not found in ${FFMPEG_PREBUILT_DIR}/bin")
+            endif()
+            set(FFMPEG_RUNTIME_DLLS ${FFMPEG_DLLS})
+
+            set_target_properties(ffmpeg PROPERTIES
+                INTERFACE_INCLUDE_DIRECTORIES "${FFMPEG_PREBUILT_DIR}/include"
+                INTERFACE_LINK_LIBRARIES
+                    "${FFMPEG_PREBUILT_DIR}/lib/avcodec.lib;${FFMPEG_PREBUILT_DIR}/lib/avformat.lib;${FFMPEG_PREBUILT_DIR}/lib/avutil.lib;${FFMPEG_PREBUILT_DIR}/lib/swresample.lib"
+            )
+        else()
+            find_library(FFMPEG_AVCODEC_LIBRARY NAMES avcodec HINTS "${FFMPEG_PREBUILT_DIR}/lib" "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib" "/usr/lib64")
+            find_library(FFMPEG_AVFORMAT_LIBRARY NAMES avformat HINTS "${FFMPEG_PREBUILT_DIR}/lib" "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib" "/usr/lib64")
+            find_library(FFMPEG_AVUTIL_LIBRARY NAMES avutil HINTS "${FFMPEG_PREBUILT_DIR}/lib" "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib" "/usr/lib64")
+            find_library(FFMPEG_SWRESAMPLE_LIBRARY NAMES swresample HINTS "${FFMPEG_PREBUILT_DIR}/lib" "/opt/homebrew/lib" "/usr/local/lib" "/usr/lib" "/usr/lib64")
+
+            if(NOT FFMPEG_AVCODEC_LIBRARY OR NOT FFMPEG_AVFORMAT_LIBRARY OR NOT FFMPEG_AVUTIL_LIBRARY OR NOT FFMPEG_SWRESAMPLE_LIBRARY)
+                message(FATAL_ERROR "FFmpeg libraries not found. Install ffmpeg dev packages or Homebrew ffmpeg.")
+            endif()
+
+            set_target_properties(ffmpeg PROPERTIES
+                INTERFACE_INCLUDE_DIRECTORIES "${FFMPEG_PREBUILT_DIR}/include"
+                INTERFACE_LINK_LIBRARIES "${FFMPEG_AVCODEC_LIBRARY};${FFMPEG_AVFORMAT_LIBRARY};${FFMPEG_AVUTIL_LIBRARY};${FFMPEG_SWRESAMPLE_LIBRARY}"
+            )
+        endif()
+    endif()
+endif()
