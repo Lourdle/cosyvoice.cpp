@@ -446,6 +446,7 @@ const char* cosyvoice_audio_supported_encoding_formats(void)
         case COSYVOICE_AUDIO_ENCODING_FORMAT_MP3: cached += "mp3"; break;
         case COSYVOICE_AUDIO_ENCODING_FORMAT_AAC: cached += "aac"; break;
         case COSYVOICE_AUDIO_ENCODING_FORMAT_FLAC: cached += "flac"; break;
+        case COSYVOICE_AUDIO_ENCODING_FORMAT_M4A: cached += "m4a"; break;
         case COSYVOICE_AUDIO_ENCODING_FORMAT_OPUS: cached += "opus"; break;
         default: break;
         }
