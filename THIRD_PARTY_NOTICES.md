@@ -37,3 +37,17 @@ license file is retained and distributed.
 - Upstream: https://github.com/ggml-org/llama.cpp
 - Usage in this project: tokenizer implementation is adapted/modified from llama.cpp
 - Upstream license: MIT
+
+## cpp-httplib
+
+- Upstream: https://github.com/yhirose/cpp-httplib
+- Local path: `vendor/cpp-httplib`
+- License: MIT
+- License text location: header comment in `vendor/cpp-httplib/httplib.h`
+
+## nlohmann/json
+
+- Upstream: https://github.com/nlohmann/json
+- Local path: `vendor/nlohmann`
+- License: MIT
+- License text location: header comment in `vendor/nlohmann/json.hpp`

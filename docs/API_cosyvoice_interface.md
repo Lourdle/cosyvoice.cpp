@@ -1,6 +1,7 @@
 # cosyvoice-interface.h API Reference
 
 This page documents all symbols declared in `include/cosyvoice-interface.h`, including C++ interface methods.
+These interfaces are internal implementation details and do not guarantee ABI stability; they may change in future releases.
 
 ## cosyvoice_model_context
 
@@ -13,6 +14,7 @@ struct cosyvoice_model_context
     virtual void get_generation_config(cosyvoice_generation_config_t* config) = 0;
     virtual bool set_generation_config(const cosyvoice_generation_config_t* config) = 0;
     virtual void get_context_params(cosyvoice_context_params_t* params) = 0;
+    virtual const char* get_architecture() = 0;
     virtual const char* get_instruction_prefix() = 0;
 
     virtual void get_sampler(cosyvoice_sampler_t* sampler, void** sampler_ctx) = 0;
@@ -145,6 +147,22 @@ Copies effective context parameters.
 ### Returns
 
 No return value.
+
+## cosyvoice_model_context::get_architecture
+
+### Syntax
+
+```cpp
+virtual const char* get_architecture() = 0;
+```
+
+### Description
+
+Gets the architecture identifier of the loaded model.
+
+### Returns
+
+Null-terminated UTF-8 architecture string, for example `cosyvoice3-2512`.
 
 ## cosyvoice_model_context::get_instruction_prefix
 

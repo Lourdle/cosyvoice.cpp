@@ -469,6 +469,26 @@ Retrieves effective context parameters currently active in a loaded context.
 - `ctx`: Context handle.
 - `params`: Output structure receiving parameters.
 
+## cosyvoice_get_architecture
+
+### Syntax
+
+```c
+COSYVOICE_API const char* cosyvoice_get_architecture(cosyvoice_context_t ctx);
+```
+
+### Description
+
+Returns the architecture identifier of the loaded model.
+
+### Parameters
+
+- `ctx`: Context handle.
+
+### Returns
+
+Null-terminated UTF-8 architecture string, such as `cosyvoice3-2512`.
+
 ## cosyvoice_get_generation_config
 
 ### Syntax

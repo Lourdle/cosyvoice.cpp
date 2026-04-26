@@ -24,6 +24,166 @@ This page documents all public symbols declared in `include/cosyvoice-audio.h`.
 
 Controls import/export attributes for audio helper APIs.
 
+## cosyvoice_audio_encoder_t
+
+### Syntax
+
+```c
+typedef struct cosyvoice_audio_encoder* cosyvoice_audio_encoder_t;
+```
+
+### Description
+
+Opaque handle for the in-memory audio encoder.
+
+## cosyvoice_audio_encoding_format_t
+
+### Syntax
+
+```c
+typedef enum cosyvoice_audio_encoding_format
+{
+    COSYVOICE_AUDIO_ENCODING_FORMAT_WAV = 0,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_MP3,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_AAC,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_FLAC,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_M4A,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_OPUS,
+    COSYVOICE_AUDIO_ENCODING_FORMAT_COUNT
+} cosyvoice_audio_encoding_format_t;
+```
+
+### Description
+
+Audio payload formats supported by the in-memory encoder.
+
+The FFmpeg backend exposes `wav`, `mp3`, `aac`, `flac`, `m4a`, and `opus` in the public API, but the actually usable subset depends on the linked FFmpeg runtime. `m4a` is a project-specific convenience extension and not part of the OpenAI Speech standard.
+
+## cosyvoice_audio_encoding_format_supported
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_audio_encoding_format_supported(cosyvoice_audio_encoding_format_t format);
+```
+
+### Description
+
+Checks whether a format is supported by the audio encoder.
+
+### Parameters
+
+- `format`: Format to test.
+
+### Returns
+
+`true` if supported; otherwise `false`.
+
+## cosyvoice_audio_supported_encoding_formats
+
+### Syntax
+
+```c
+COSYVOICE_API const char* cosyvoice_audio_supported_encoding_formats(void);
+```
+
+### Description
+
+Returns a comma-separated, NUL-terminated string listing audio encoding formats that are supported by the runtime audio backend. This value is computed at runtime (for example, when an FFmpeg backend is used the library will probe available encoders) and is intended for CLI/server help messages or UI usage.
+
+### Returns
+
+Pointer to a string owned by the library; valid for the lifetime of the process.
+
+## cosyvoice_audio_encoder_create
+
+### Syntax
+
+```c
+COSYVOICE_API cosyvoice_audio_encoder_t cosyvoice_audio_encoder_create(uint32_t sample_rate);
+```
+
+### Description
+
+Creates an in-memory audio encoder.
+
+### Parameters
+
+- `sample_rate`: Input sample rate in Hz.
+
+### Returns
+
+Encoder handle on success; otherwise `NULL`.
+
+## cosyvoice_audio_encoder_destroy
+
+### Syntax
+
+```c
+COSYVOICE_API void cosyvoice_audio_encoder_destroy(cosyvoice_audio_encoder_t encoder);
+```
+
+### Description
+
+Destroys an encoder created by `cosyvoice_audio_encoder_create`.
+
+### Parameters
+
+- `encoder`: Encoder handle. `NULL` is allowed.
+
+## cosyvoice_audio_encoder_encode
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_audio_encoder_encode(
+    cosyvoice_audio_encoder_t encoder,
+    const float* input,
+    uint32_t length,
+    cosyvoice_audio_encoding_format_t format
+);
+```
+
+### Description
+
+Encodes mono float PCM data into a selected audio format.
+
+### Parameters
+
+- `encoder`: Encoder handle.
+- `input`: Input mono float PCM buffer.
+- `length`: Number of input samples.
+- `format`: Target audio format.
+
+### Returns
+
+`true` on success; otherwise `false`.
+
+## cosyvoice_audio_encoder_get_encoded_data
+
+### Syntax
+
+```c
+COSYVOICE_API void cosyvoice_audio_encoder_get_encoded_data(cosyvoice_audio_encoder_t encoder,
+    const uint8_t** data,
+    uint32_t* length
+);
+```
+
+### Description
+
+Gets the encoded payload from the last successful encode call.
+
+### Parameters
+
+- `encoder`: Encoder handle.
+- `data`: Receives a pointer to encoded bytes owned by the encoder.
+- `length`: Receives the encoded byte length.
+
+### Remarks
+
+The returned `data` pointer remains valid until the next encode call on the same encoder, or until the encoder is destroyed.
+
 ## cosyvoice_audio_load_from_file
 
 ### Syntax
@@ -127,7 +287,6 @@ The encoder format is inferred from the output file extension:
 - `.wav` -> WAV
 - `.flac` -> FLAC
 - `.mp3` -> MP3
-- `.ogg` -> Ogg Vorbis
 
 If the extension is missing or unsupported, the function falls back to WAV and emits a warning log message (`"Unknown audio file extension, defaulting to WAV format"`).
 
@@ -135,7 +294,7 @@ Extension matching is case-insensitive, so uppercase extensions (for example `.W
 
 ### See also
 
-- `cosyvoice_save_wav`
+- `cosyvoice_audio_encoder_encode`
 - `cosyvoice_audio_load_from_file`
 
 ## cosyvoice_audio_free

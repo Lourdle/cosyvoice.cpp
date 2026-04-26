@@ -21,12 +21,15 @@ include(FetchContent)
 # -----------------------------------------------------------------------------
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(COSYVOICE_NO_AUDIO "Disable audio API" OFF)
+set(COSYVOICE_AUDIO_BACKEND "MINIAUDIO" CACHE STRING "Audio backend: MINIAUDIO or FFMPEG")
+set_property(CACHE COSYVOICE_AUDIO_BACKEND PROPERTY STRINGS MINIAUDIO FFMPEG)
 option(COSYVOICE_NO_ICU "Disable ICU dependency" OFF)
 option(COSYVOICE_NO_FRONTEND "Disable ONNX Runtime dependency" OFF)
 
 set(GGML_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ggml" CACHE PATH "Path to ggml source directory")
 set(ICU_PREBUILT_DIR "${CMAKE_BINARY_DIR}/_deps/icu" CACHE PATH "Path to custom prebuilt ICU")
 set(ORT_PREBUILT_DIR "${CMAKE_BINARY_DIR}/_deps/onnxruntime" CACHE PATH "Path to custom prebuilt ONNX Runtime")
+set(FFMPEG_PREBUILT_DIR "${CMAKE_BINARY_DIR}/_deps/ffmpeg" CACHE PATH "Path to custom prebuilt FFmpeg")
 
 # -----------------------------------------------------------------------------
 # Dependencies
@@ -44,7 +47,11 @@ add_subdirectory(common)
 file(GLOB COSYVOICE_SOURCES "src/*.cpp" "src/*.h" "include/*.h")
 
 if(COSYVOICE_NO_AUDIO)
+    # Audio disabled - skip all audio files
+elseif(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG")
     list(REMOVE_ITEM COSYVOICE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/cosyvoice-audio.cpp")
+else()
+    list(REMOVE_ITEM COSYVOICE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/cosyvoice-audio-ffmpeg.cpp")
 endif()
 
 # Separate frontend and text-norm into OBJECT libraries so their heavy dependencies 
@@ -82,6 +89,9 @@ target_link_libraries(cosyvoice PRIVATE common ${OBJECT_LIBS})
 
 target_include_directories(cosyvoice PUBLIC "include")
 target_include_directories(cosyvoice PRIVATE "vendor/miniaudio" "common")
+if(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG")
+    target_include_directories(cosyvoice PRIVATE "${FFMPEG_PREBUILT_DIR}/include")
+endif()
 
 # -----------------------------------------------------------------------------
 # Compiler Flags & SIMD Support
@@ -150,6 +160,9 @@ endif()
 # Note: Object library dependencies (ICU, ONNX) are implicitly forwarded as link dependencies,
 # but we still need to add ICU::data manually on Windows so it gets picked up by post-build DLL copy.
 set(COSYVOICE_LINK_LIBS ggml pcre2-8 pcre2-16)
+if(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG")
+    list(APPEND COSYVOICE_LINK_LIBS ffmpeg)
+endif()
 if(NOT COSYVOICE_NO_ICU AND WIN32)
     list(APPEND COSYVOICE_LINK_LIBS ICU::data)
 endif()

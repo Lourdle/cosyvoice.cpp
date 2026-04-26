@@ -8,24 +8,24 @@
 #include <ranges>
 
 #define LOAD_SUBMODULE_EX(name, module) do {\
-	auto& _module = module;\
-	auto _name = combine_prefix(prefix, name);\
-	_module.OnLoad(loader, _name);\
-	this->submodules[std::move(_name)] = &_module;\
+    auto& _module = module;\
+    auto _name = combine_prefix(prefix, name);\
+    _module.OnLoad(loader, _name);\
+    this->submodules[std::move(_name)] = &_module;\
 } while (false)
 #define LOAD_SUBMODULE(name) LOAD_SUBMODULE_EX(#name, name)
 
 #define LOAD_TENSOR_EX(name, obj) do {\
-	this->obj = loader.get_gguf_tensor(prefix, name);\
-	this->tensors[combine_prefix(prefix, name)] = &this->obj;\
+    this->obj = loader.get_gguf_tensor(prefix, name);\
+    this->tensors[combine_prefix(prefix, name)] = &this->obj;\
 } while (false)
 #define LOAD_TENSOR(name) LOAD_TENSOR_EX(#name, name)
 
 #define LOAD_OPTIONAL_TENSOR_EX(name, obj) do {\
-	auto tensor = loader.get_gguf_tensor(prefix, name, true);\
-	this->obj = tensor;\
-	if (tensor)\
-		this->tensors[combine_prefix(prefix, name)] = &this->obj;\
+    auto tensor = loader.get_gguf_tensor(prefix, name, true);\
+    this->obj = tensor;\
+    if (tensor)\
+        this->tensors[combine_prefix(prefix, name)] = &this->obj;\
 } while (false)
 #define LOAD_OPTIONAL_TENSOR(name) LOAD_OPTIONAL_TENSOR_EX(#name, name)
 
@@ -36,573 +36,577 @@ void Module::OnLoad(const gguf_loader& loader, const std::string& prefix) {}
 
 void BasicModule::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_TENSOR(weight);
-	LOAD_OPTIONAL_TENSOR(bias);
+    LOAD_TENSOR(weight);
+    LOAD_OPTIONAL_TENSOR(bias);
 }
 
 void LayerNorm::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_OPTIONAL_TENSOR(weight);
-	LOAD_OPTIONAL_TENSOR(bias);
+    LOAD_OPTIONAL_TENSOR(weight);
+    LOAD_OPTIONAL_TENSOR(bias);
 }
 
 void CausalConvPositionEmbedding::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE_EX("conv1.0", conv1);
-	LOAD_SUBMODULE_EX("conv2.0", conv2);
+    LOAD_SUBMODULE_EX("conv1.0", conv1);
+    LOAD_SUBMODULE_EX("conv2.0", conv2);
 }
 
 void InputEmbedding::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE(proj);
-	LOAD_SUBMODULE(conv_pos_embed);
+    LOAD_SUBMODULE(proj);
+    LOAD_SUBMODULE(conv_pos_embed);
 }
 
 void TimestepEmbedding::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE_EX("time_mlp.0", time_mlp_0);
-	LOAD_SUBMODULE_EX("time_mlp.2", time_mlp_2);
+    LOAD_SUBMODULE_EX("time_mlp.0", time_mlp_0);
+    LOAD_SUBMODULE_EX("time_mlp.2", time_mlp_2);
 }
 
 void AdaLayerNormZero::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE(linear);
-	LOAD_SUBMODULE(norm);
+    LOAD_SUBMODULE(linear);
+    LOAD_SUBMODULE(norm);
 }
 
 void Attention::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE(to_q);
-	LOAD_SUBMODULE(to_k);
-	LOAD_SUBMODULE(to_v);
-	LOAD_SUBMODULE_EX("to_out.0", to_out);
+    LOAD_SUBMODULE(to_q);
+    LOAD_SUBMODULE(to_k);
+    LOAD_SUBMODULE(to_v);
+    LOAD_SUBMODULE_EX("to_out.0", to_out);
 }
 
 void FeedForward::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE_EX("ff.0.0", ff_0_0);
-	LOAD_SUBMODULE_EX("ff.2", ff_2);
+    LOAD_SUBMODULE_EX("ff.0.0", ff_0_0);
+    LOAD_SUBMODULE_EX("ff.2", ff_2);
 }
 
 void DiTBlock::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE(attn_norm);
-	LOAD_SUBMODULE(attn);
-	LOAD_SUBMODULE(ff_norm);
-	LOAD_SUBMODULE(ff);
+    LOAD_SUBMODULE(attn_norm);
+    LOAD_SUBMODULE(attn);
+    LOAD_SUBMODULE(ff_norm);
+    LOAD_SUBMODULE(ff);
 }
 
 void AdaLayerNorm_Final::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE(linear);
-	LOAD_SUBMODULE(norm);
+    LOAD_SUBMODULE(linear);
+    LOAD_SUBMODULE(norm);
 }
 
 void DiT::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE(time_embed);
-	LOAD_SUBMODULE(input_embed);
+    LOAD_SUBMODULE(time_embed);
+    LOAD_SUBMODULE(input_embed);
 
-	int heads;
-	int depth;
-	LOAD_METADATA(heads);
-	LOAD_METADATA(depth);
-	LOAD_METADATA(mel_dim);
+    int heads;
+    int depth;
+    LOAD_METADATA(heads);
+    LOAD_METADATA(depth);
+    LOAD_METADATA(mel_dim);
 
-	transformer_blocks.resize(depth);
-	for (int i = 0; i != depth; ++i)
-	{
-		auto& block = transformer_blocks[i];
-		auto name = std::format("{}.transformer_blocks.{}", prefix, i);
-		block.OnLoad(loader, name);
-		block.attn.heads = heads;
-		submodules[std::move(name)] = &transformer_blocks[i];
-	}
+    transformer_blocks.resize(depth);
+    for (int i = 0; i != depth; ++i)
+    {
+        auto& block = transformer_blocks[i];
+        auto name = std::format("{}.transformer_blocks.{}", prefix, i);
+        block.OnLoad(loader, name);
+        block.attn.heads = heads;
+        submodules[std::move(name)] = &transformer_blocks[i];
+    }
 
-	LOAD_SUBMODULE(norm_out);
-	LOAD_SUBMODULE(proj_out);
+    LOAD_SUBMODULE(norm_out);
+    LOAD_SUBMODULE(proj_out);
 }
 
 void CausalConditionalCFM::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE(estimator);
+    LOAD_SUBMODULE(estimator);
 
-	LOAD_METADATA(inference_cfg_rate);
+    LOAD_METADATA(inference_cfg_rate);
 
-	for (int i = 0; i != 11; ++i)
-		t_span[i] = 1.f - std::cos(0.1f * 0.5f * 3.14159265358979323846f * i);
+    for (int i = 0; i != 11; ++i)
+        t_span[i] = 1.f - std::cos(0.1f * 0.5f * 3.14159265358979323846f * i);
 }
 
 void PreLookaheadLayer::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_METADATA(pre_lookahead_len);
+    LOAD_METADATA(pre_lookahead_len);
 
-	LOAD_SUBMODULE(conv1);
-	LOAD_SUBMODULE(conv2);
+    LOAD_SUBMODULE(conv1);
+    LOAD_SUBMODULE(conv2);
 }
 
 void CausalMaskedDiffWithDiT::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_METADATA(token_mel_ratio);
+    LOAD_METADATA(token_mel_ratio);
 
-	LOAD_TENSOR_EX("input_embedding.weight", input_embedding);
-	LOAD_SUBMODULE(spk_embed_affine_layer);
-	LOAD_SUBMODULE(pre_lookahead_layer);
-	LOAD_SUBMODULE(decoder);
+    LOAD_TENSOR_EX("input_embedding.weight", input_embedding);
+    LOAD_SUBMODULE(spk_embed_affine_layer);
+    LOAD_SUBMODULE(pre_lookahead_layer);
+    LOAD_SUBMODULE(decoder);
 }
 
 void CausalConvRNNF0Predictor::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE_EX("condnet.0", condnet_0);
-	LOAD_SUBMODULE_EX("condnet.2", condnet_2);
-	LOAD_SUBMODULE_EX("condnet.4", condnet_4);
-	LOAD_SUBMODULE_EX("condnet.6", condnet_6);
-	LOAD_SUBMODULE_EX("condnet.8", condnet_8);
-	LOAD_SUBMODULE(classifier);
+    LOAD_SUBMODULE_EX("condnet.0", condnet_0);
+    LOAD_SUBMODULE_EX("condnet.2", condnet_2);
+    LOAD_SUBMODULE_EX("condnet.4", condnet_4);
+    LOAD_SUBMODULE_EX("condnet.6", condnet_6);
+    LOAD_SUBMODULE_EX("condnet.8", condnet_8);
+    LOAD_SUBMODULE(classifier);
 }
 
 void SourceModuleHnNSF::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE(l_linear);
+    LOAD_SUBMODULE(l_linear);
 }
 
 void Snake::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_TENSOR(alpha);
+    LOAD_TENSOR(alpha);
 
-	constexpr float epsilon = 0.000000001f;
-	for (auto& i : std::span(reinterpret_cast<float*>(ggml_get_data(alpha)), ggml_nelements(alpha)))
-		if (std::abs(i) < epsilon)
-			i = epsilon;
+    constexpr float epsilon = 0.000000001f;
+    for (auto& i : std::span(reinterpret_cast<float*>(ggml_get_data(alpha)), ggml_nelements(alpha)))
+        if (std::abs(i) < epsilon)
+            i = epsilon;
 }
 
 void ResBlock::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	int64_t id;
-	GGML_ASSERT(loader.find_metadata_key(combine_prefix(prefix, "dilations").c_str(), id));
-	GGML_ASSERT(gguf_get_arr_type(loader.gguf_ctx, id) == GGUF_TYPE_INT32);
+    int64_t id;
+    GGML_ASSERT(loader.find_metadata_key(combine_prefix(prefix, "dilations").c_str(), id));
+    GGML_ASSERT(gguf_get_arr_type(loader.gguf_ctx, id) == GGUF_TYPE_INT32);
 
-	const auto n_dilations = gguf_get_arr_n(loader.gguf_ctx, id);
-	const int* dilations = reinterpret_cast<const int*>(gguf_get_arr_data(loader.gguf_ctx, id));
-	convs.resize(n_dilations);
-	for (size_t i = 0; i != n_dilations; ++i)
-	{
-		auto& [snk1, conv1, snk2, conv2] = convs[i];
-		conv1.causal_type = CausalConv1d::causal_type_t::left;
-		conv1.d = dilations[i];
-		conv2.causal_type = CausalConv1d::causal_type_t::left;
-		conv2.d = 1;
+    const auto n_dilations = gguf_get_arr_n(loader.gguf_ctx, id);
+    const int* dilations = reinterpret_cast<const int*>(gguf_get_arr_data(loader.gguf_ctx, id));
+    convs.resize(n_dilations);
+    for (size_t i = 0; i != n_dilations; ++i)
+    {
+        auto& [snk1, conv1, snk2, conv2] = convs[i];
+        conv1.causal_type = CausalConv1d::causal_type_t::left;
+        conv1.d = dilations[i];
+        conv2.causal_type = CausalConv1d::causal_type_t::left;
+        conv2.d = 1;
 
-		LOAD_SUBMODULE_EX(std::format("convs1.{}", i).c_str(), conv1);
-		LOAD_SUBMODULE_EX(std::format("convs2.{}", i).c_str(), conv2);
-		LOAD_SUBMODULE_EX(std::format("activations1.{}", i).c_str(), snk1);
-		LOAD_SUBMODULE_EX(std::format("activations2.{}", i).c_str(), snk2);
-	}
+        LOAD_SUBMODULE_EX(std::format("convs1.{}", i).c_str(), conv1);
+        LOAD_SUBMODULE_EX(std::format("convs2.{}", i).c_str(), conv2);
+        LOAD_SUBMODULE_EX(std::format("activations1.{}", i).c_str(), snk1);
+        LOAD_SUBMODULE_EX(std::format("activations2.{}", i).c_str(), snk2);
+    }
 }
 
 void CausalHiFTGenerator::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE(f0_predictor);
-	LOAD_SUBMODULE(m_source);
-	LOAD_SUBMODULE(conv_pre);
-	conv_pre.causal_type = CausalConv1d::causal_type_t::right;
+    LOAD_SUBMODULE(f0_predictor);
+    LOAD_SUBMODULE(m_source);
+    LOAD_SUBMODULE(conv_pre);
+    conv_pre.causal_type = CausalConv1d::causal_type_t::right;
 
-	int num_kernels;
-	loader.get_metadata("sample_rate", reinterpret_cast<uint32_t&>(sampling_rate));
-	LOAD_METADATA(num_kernels);
-	LOAD_METADATA(nb_harmonics);
-	LOAD_METADATA(nsf_alpha);
-	LOAD_METADATA(nsf_voiced_threshold);
-	LOAD_METADATA(nsf_sigma);
-	LOAD_METADATA(lrelu_slope);
-	LOAD_METADATA(audio_limit);
-	loader.get_metadata(prefix, "istft_params.n_fft", nfft);
-	loader.get_metadata(prefix, "istft_params.hop_len", hop_len);
+    int num_kernels;
+    loader.get_metadata("sample_rate", reinterpret_cast<uint32_t&>(sampling_rate));
+    LOAD_METADATA(num_kernels);
+    LOAD_METADATA(nb_harmonics);
+    LOAD_METADATA(nsf_alpha);
+    LOAD_METADATA(nsf_voiced_threshold);
+    LOAD_METADATA(nsf_sigma);
+    LOAD_METADATA(lrelu_slope);
+    LOAD_METADATA(audio_limit);
+    loader.get_metadata(prefix, "istft_params.n_fft", nfft);
+    loader.get_metadata(prefix, "istft_params.hop_len", hop_len);
 
-	int64_t id;
-	GGML_ASSERT(loader.find_metadata_key(combine_prefix(prefix, "upsample_rates").c_str(), id));
-	GGML_ASSERT(gguf_get_arr_type(loader.gguf_ctx, id) == GGUF_TYPE_INT32);
+    int64_t id;
+    GGML_ASSERT(loader.find_metadata_key(combine_prefix(prefix, "upsample_rates").c_str(), id));
+    GGML_ASSERT(gguf_get_arr_type(loader.gguf_ctx, id) == GGUF_TYPE_INT32);
 
-	auto layers = gguf_get_arr_n(loader.gguf_ctx, id);
-	auto upsample_rates = reinterpret_cast<const int*>(gguf_get_arr_data(loader.gguf_ctx, id));
+    auto layers = gguf_get_arr_n(loader.gguf_ctx, id);
+    auto upsample_rates = reinterpret_cast<const int*>(gguf_get_arr_data(loader.gguf_ctx, id));
 
-	ups.resize(layers);
-	scale_factor = hop_len;
-	for (size_t i = 0; i != layers; ++i)
-	{
-		auto& up = ups[i];
-		int upsample_rate = upsample_rates[i];
-		scale_factor *= upsample_rate;
-		up.s = upsample_rate;
-		LOAD_SUBMODULE_EX(std::format("ups.{}", i).c_str(), up);
-	}
-	
-	source_downs.resize(layers);
-	source_resblocks.resize(layers);
-	for (size_t i = 0; i != layers - 1; ++i)
-	{
-		auto down = new CausalConv1dDownSample;
-		down->s = 1;
-		for (const auto rate : std::ranges::reverse_view(std::span(upsample_rates + 1 + i, layers - i - 1)))
-			down->s *= rate;
-		source_downs[i].reset(down);
+    ups.resize(layers);
+    scale_factor = hop_len;
+    for (size_t i = 0; i != layers; ++i)
+    {
+        auto& up = ups[i];
+        int upsample_rate = upsample_rates[i];
+        scale_factor *= upsample_rate;
+        up.s = upsample_rate;
+        LOAD_SUBMODULE_EX(std::format("ups.{}", i).c_str(), up);
+    }
+    
+    source_downs.resize(layers);
+    source_resblocks.resize(layers);
+    for (size_t i = 0; i != layers - 1; ++i)
+    {
+        auto down = new CausalConv1dDownSample;
+        down->s = 1;
+        for (const auto rate : std::ranges::reverse_view(std::span(upsample_rates + 1 + i, layers - i - 1)))
+            down->s *= rate;
+        source_downs[i].reset(down);
 
-		LOAD_SUBMODULE_EX(std::format("source_downs.{}", i).c_str(), *down);
-		LOAD_SUBMODULE_EX(std::format("source_resblocks.{}", i).c_str(), source_resblocks[i]);
-	}
-	// Final block.
-	{
-		const auto layer_idx = layers - 1;
-		auto conv = new CausalConv1d;
-		conv->d = 1;
-		conv->causal_type = CausalConv1d::causal_type_t::left;
-		source_downs[layer_idx].reset(conv);
+        LOAD_SUBMODULE_EX(std::format("source_downs.{}", i).c_str(), *down);
+        LOAD_SUBMODULE_EX(std::format("source_resblocks.{}", i).c_str(), source_resblocks[i]);
+    }
+    // Final block.
+    {
+        const auto layer_idx = layers - 1;
+        auto conv = new CausalConv1d;
+        conv->d = 1;
+        conv->causal_type = CausalConv1d::causal_type_t::left;
+        source_downs[layer_idx].reset(conv);
 
-		LOAD_SUBMODULE_EX(std::format("source_downs.{}", layer_idx).c_str(), *conv);
-		LOAD_SUBMODULE_EX(std::format("source_resblocks.{}", layer_idx).c_str(), source_resblocks[layer_idx]);
-	}
+        LOAD_SUBMODULE_EX(std::format("source_downs.{}", layer_idx).c_str(), *conv);
+        LOAD_SUBMODULE_EX(std::format("source_resblocks.{}", layer_idx).c_str(), source_resblocks[layer_idx]);
+    }
 
-	layers *= num_kernels;
-	resblocks.resize(layers);
-	for (size_t i = 0; i != layers; ++i)
-		LOAD_SUBMODULE_EX(std::format("resblocks.{}", i).c_str(), resblocks[i]);
+    layers *= num_kernels;
+    resblocks.resize(layers);
+    for (size_t i = 0; i != layers; ++i)
+        LOAD_SUBMODULE_EX(std::format("resblocks.{}", i).c_str(), resblocks[i]);
 
-	LOAD_SUBMODULE(conv_post);
-	conv_post.causal_type = CausalConv1d::causal_type_t::left;
+    LOAD_SUBMODULE(conv_post);
+    conv_post.causal_type = CausalConv1d::causal_type_t::left;
 }
 
 void Qwen2MLP::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE(gate_proj);
-	LOAD_SUBMODULE(up_proj);
-	LOAD_SUBMODULE(down_proj);
+    LOAD_SUBMODULE(gate_proj);
+    LOAD_SUBMODULE(up_proj);
+    LOAD_SUBMODULE(down_proj);
 }
 
 void Qwen2RMSNorm::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_TENSOR(weight);
+    LOAD_TENSOR(weight);
 }
 
 void Qwen2Attention::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE(q_proj);
-	LOAD_SUBMODULE(k_proj);
-	LOAD_SUBMODULE(v_proj);
-	LOAD_SUBMODULE(o_proj);
+    LOAD_SUBMODULE(q_proj);
+    LOAD_SUBMODULE(k_proj);
+    LOAD_SUBMODULE(v_proj);
+    LOAD_SUBMODULE(o_proj);
 }
 
 void Qwen2DecoderLayer::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
-	LOAD_SUBMODULE(self_attn);
-	LOAD_SUBMODULE(mlp);
-	LOAD_SUBMODULE(input_layernorm);
-	LOAD_SUBMODULE(post_attention_layernorm);
+    LOAD_SUBMODULE(self_attn);
+    LOAD_SUBMODULE(mlp);
+    LOAD_SUBMODULE(input_layernorm);
+    LOAD_SUBMODULE(post_attention_layernorm);
 }
 
 void CosyVoice3LM::OnLoad(const gguf_loader& loader, const std::string& prefix, const cosyvoice_context_params_t& params)
 {
-	LOAD_TENSOR_EX("embed_tokens.weight", embed_tokens_weight);
-	LOAD_TENSOR_EX("speech_embedding.weight", speech_embedding_weight);
-	LOAD_SUBMODULE(norm);
-	LOAD_SUBMODULE(llm_decoder);
+    LOAD_TENSOR_EX("embed_tokens.weight", embed_tokens_weight);
+    LOAD_TENSOR_EX("speech_embedding.weight", speech_embedding_weight);
+    LOAD_SUBMODULE(norm);
+    LOAD_SUBMODULE(llm_decoder);
 
-	int num_hidden_layers;
-	LOAD_METADATA(num_hidden_layers);
-	LOAD_METADATA(num_attention_heads);
-	LOAD_METADATA(num_key_value_heads);
-	LOAD_METADATA(rms_norm_eps);
-	LOAD_METADATA(rope_theta);
-	LOAD_METADATA(sos_token_id);
-	LOAD_METADATA(task_token_id);
+    int num_hidden_layers;
+    LOAD_METADATA(num_hidden_layers);
+    LOAD_METADATA(num_attention_heads);
+    LOAD_METADATA(num_key_value_heads);
+    LOAD_METADATA(rms_norm_eps);
+    LOAD_METADATA(rope_theta);
+    LOAD_METADATA(sos_token_id);
+    LOAD_METADATA(task_token_id);
 
-	GGML_ASSERT(embed_tokens_weight->ne[0] == speech_embedding_weight->ne[0]);
-	layers.resize(num_hidden_layers);
+    GGML_ASSERT(embed_tokens_weight->ne[0] == speech_embedding_weight->ne[0]);
+    layers.resize(num_hidden_layers);
 
-	auto layers_prefix = combine_prefix(prefix, "layers");
-	for (int i = 0; i != num_hidden_layers; ++i)
-	{
-		auto& layer = layers[i];
-		auto name = std::format("{}.{}", layers_prefix, i);
-		LOAD_SUBMODULE_EX(name.c_str(), layer);
-	}
+    auto layers_prefix = combine_prefix(prefix, "layers");
+    for (int i = 0; i != num_hidden_layers; ++i)
+    {
+        auto& layer = layers[i];
+        auto name = std::format("{}.{}", layers_prefix, i);
+        LOAD_SUBMODULE_EX(name.c_str(), layer);
+    }
 }
 
 void cosyvoice_model_3::load(gguf_loader& loader)
 {
-	switch (this->params.llm_kv_cache_type)
-	{
-	case COSYVOICE_LLM_KV_CACHE_TYPE_F32:
-		kv_type = GGML_TYPE_F32;
-		break;
-	case COSYVOICE_LLM_KV_CACHE_TYPE_F16:
-		kv_type = GGML_TYPE_F16;
-		break;
-	case COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0:
-		kv_type = GGML_TYPE_Q8_0;
-		break;
-	case COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1:
-		kv_type = GGML_TYPE_Q5_1;
-		break;
-	case COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0:
-		kv_type = GGML_TYPE_Q5_0;
-		break;
-	case COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1:
-		kv_type = GGML_TYPE_Q4_1;
-		break;
-	case COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0:
-		kv_type = GGML_TYPE_Q4_0;
-		break;
-	default:
-		throw std::invalid_argument("unexpected kv cache type");
-	}
+    switch (this->params.llm_kv_cache_type)
+    {
+    case COSYVOICE_LLM_KV_CACHE_TYPE_F32:
+        kv_type = GGML_TYPE_F32;
+        break;
+    case COSYVOICE_LLM_KV_CACHE_TYPE_F16:
+        kv_type = GGML_TYPE_F16;
+        break;
+    case COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0:
+        kv_type = GGML_TYPE_Q8_0;
+        break;
+    case COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1:
+        kv_type = GGML_TYPE_Q5_1;
+        break;
+    case COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0:
+        kv_type = GGML_TYPE_Q5_0;
+        break;
+    case COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1:
+        kv_type = GGML_TYPE_Q4_1;
+        break;
+    case COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0:
+        kv_type = GGML_TYPE_Q4_0;
+        break;
+    default:
+        throw std::invalid_argument("unexpected kv cache type");
+    }
 
-	flow.OnLoad(loader, {});
-	hift.OnLoad(loader, {});
-	llm.OnLoad(loader, {}, params);
+    flow.OnLoad(loader, {});
+    hift.OnLoad(loader, {});
+    llm.OnLoad(loader, {}, params);
 
-	auto tensors = llm.get_all_tensors();
-	for (auto& kv : flow.get_all_tensors())
-		tensors.insert(std::move(kv));
-	for (auto& kv : hift.get_all_tensors())
-		tensors.insert(std::move(kv));
+    auto tensors = llm.get_all_tensors();
+    for (auto& kv : flow.get_all_tensors())
+        tensors.insert(std::move(kv));
+    for (auto& kv : hift.get_all_tensors())
+        tensors.insert(std::move(kv));
 
-	ggml_init_params params =
-	{
-		.mem_size = (tensors.size() + 8) * ggml_tensor_overhead()
-		+ ggml_backend_buft_get_alloc_size(ggml_backend_cpu_buffer_type(), llm.embed_tokens_weight)
-		+ ggml_backend_buft_get_alloc_size(ggml_backend_cpu_buffer_type(), llm.speech_embedding_weight),
-		.mem_buffer = nullptr,
-		.no_alloc = true
-	};
+    ggml_init_params params =
+    {
+        .mem_size = (tensors.size() + 8) * ggml_tensor_overhead()
+        + ggml_backend_buft_get_alloc_size(ggml_backend_cpu_buffer_type(), llm.embed_tokens_weight)
+        + ggml_backend_buft_get_alloc_size(ggml_backend_cpu_buffer_type(), llm.speech_embedding_weight),
+        .mem_buffer = nullptr,
+        .no_alloc = true
+    };
 
-	// init sinusodal position embedding
-	constexpr int dim = 256;
-	constexpr int half_dim = dim / 2;
+    // init sinusodal position embedding
+    constexpr int dim = 256;
+    constexpr int half_dim = dim / 2;
 
-	auto emb_buffer = std::make_unique<float[]>(half_dim);
-	const auto emb = std::log(10000.f) / (half_dim - 1);
+    auto emb_buffer = std::make_unique<float[]>(half_dim);
+    const auto emb = std::log(10000.f) / (half_dim - 1);
 
-	for (int i = 0; i != half_dim; ++i)
-		emb_buffer[i] = std::exp(i * -emb) * 1000;
+    for (int i = 0; i != half_dim; ++i)
+        emb_buffer[i] = std::exp(i * -emb) * 1000;
 
-	auto buft = ggml_backend_get_default_buffer_type(backend.get());
-	auto alignment = ggml_backend_buft_get_alignment(buft);
+    auto buft = ggml_backend_get_default_buffer_type(backend.get());
+    auto alignment = ggml_backend_buft_get_alignment(buft);
 
-	const int mel_dim = flow.decoder.estimator.mel_dim;
-	size_t mem_size = get_aligned_size(sizeof(float) * half_dim, alignment)
-		+ get_aligned_size(sizeof(float) * (hift.nfft / 2 + 1), alignment)
-		+ get_aligned_size(sizeof(float) * hift.nfft, alignment)
-		+ get_aligned_size(sizeof(int) * this->params.n_batch, alignment)
-		+ get_aligned_size(sizeof(float) * (hift.nfft / 2 + 1) * hift.nfft, alignment) * 2
-		+ get_aligned_size((this->params.n_max_seq - 1) * this->params.n_batch * sizeof(ggml_fp16_t), alignment);
-	for (const auto& [name, tensor] : tensors)
-		if (tensor != &llm.embed_tokens_weight
-			&& tensor != &llm.speech_embedding_weight)
-			mem_size += get_aligned_size(ggml_backend_buft_get_alloc_size(buft, *tensor), alignment);
+    const int mel_dim = flow.decoder.estimator.mel_dim;
+    size_t mem_size = get_aligned_size(sizeof(float) * half_dim, alignment)
+        + get_aligned_size(sizeof(float) * (hift.nfft / 2 + 1), alignment)
+        + get_aligned_size(sizeof(float) * hift.nfft, alignment)
+        + get_aligned_size(sizeof(int) * this->params.n_batch, alignment)
+        + get_aligned_size(sizeof(float) * (hift.nfft / 2 + 1) * hift.nfft, alignment) * 2
+        + get_aligned_size((this->params.n_max_seq - 1) * this->params.n_batch * sizeof(ggml_fp16_t), alignment);
+    for (const auto& [name, tensor] : tensors)
+        if (tensor != &llm.embed_tokens_weight
+            && tensor != &llm.speech_embedding_weight)
+            mem_size += get_aligned_size(ggml_backend_buft_get_alloc_size(buft, *tensor), alignment);
 
-	buffer.reset(ggml_backend_buft_alloc_buffer(buft, mem_size));
-	auto buffer_base = reinterpret_cast<char*>(ggml_backend_buffer_get_base(buffer.get()));
-	ctx.reset(ggml_init(params));
+    buffer.reset(ggml_backend_buft_alloc_buffer(buft, mem_size));
+    auto buffer_base = reinterpret_cast<char*>(ggml_backend_buffer_get_base(buffer.get()));
+    ctx.reset(ggml_init(params));
 
-	auto set_tensor = [&](ggml_tensor* tensor, const void* data, size_t size)
-	{
-		ggml_backend_tensor_set_async(backend.get(), tensor, data, 0, size);
-		buffer_base += get_aligned_size(ggml_backend_buft_get_alloc_size(buft, tensor), alignment);
-	};
-	flow.decoder.estimator.time_embed.time_embed.emb = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_F32, half_dim);
-	ggml_backend_tensor_alloc(buffer.get(), flow.decoder.estimator.time_embed.time_embed.emb, buffer_base);
-	set_tensor(flow.decoder.estimator.time_embed.time_embed.emb, emb_buffer.get(), sizeof(float) * half_dim);
+    auto set_tensor = [&](ggml_tensor* tensor, const void* data, size_t size)
+    {
+        ggml_backend_tensor_set_async(backend.get(), tensor, data, 0, size);
+        buffer_base += get_aligned_size(ggml_backend_buft_get_alloc_size(buft, tensor), alignment);
+    };
+    flow.decoder.estimator.time_embed.time_embed.emb = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_F32, half_dim);
+    ggml_backend_tensor_alloc(buffer.get(), flow.decoder.estimator.time_embed.time_embed.emb, buffer_base);
+    set_tensor(flow.decoder.estimator.time_embed.time_embed.emb, emb_buffer.get(), sizeof(float) * half_dim);
 
-	for (const auto& [name, tensor] : tensors)
-	{
-		size_t tensor_size = ggml_nbytes(*tensor);
-		if (tensor == &llm.embed_tokens_weight
-			|| tensor == &llm.speech_embedding_weight)
-		{
-			ggml_set_no_alloc(ctx.get(), false);
-			auto new_tensor = ggml_new_tensor(ctx.get(), (*tensor)->type, GGML_MAX_DIMS, (*tensor)->ne);
-			memcpy(new_tensor->data, (**tensor).data, tensor_size);
-			*tensor = new_tensor;
-			ggml_set_no_alloc(ctx.get(), true);
-		}
-		else
-		{
-			auto new_tensor = ggml_new_tensor(ctx.get(), (*tensor)->type, GGML_MAX_DIMS, (*tensor)->ne);
-			ggml_backend_tensor_alloc(buffer.get(), new_tensor, buffer_base);
-			set_tensor(new_tensor, ggml_get_data(*tensor), tensor_size);
-			*tensor = new_tensor;
-		}
+    for (const auto& [name, tensor] : tensors)
+    {
+        size_t tensor_size = ggml_nbytes(*tensor);
+        if (tensor == &llm.embed_tokens_weight
+            || tensor == &llm.speech_embedding_weight)
+        {
+            ggml_set_no_alloc(ctx.get(), false);
+            auto new_tensor = ggml_new_tensor(ctx.get(), (*tensor)->type, GGML_MAX_DIMS, (*tensor)->ne);
+            memcpy(new_tensor->data, (**tensor).data, tensor_size);
+            *tensor = new_tensor;
+            ggml_set_no_alloc(ctx.get(), true);
+        }
+        else
+        {
+            auto new_tensor = ggml_new_tensor(ctx.get(), (*tensor)->type, GGML_MAX_DIMS, (*tensor)->ne);
+            ggml_backend_tensor_alloc(buffer.get(), new_tensor, buffer_base);
+            set_tensor(new_tensor, ggml_get_data(*tensor), tensor_size);
+            *tensor = new_tensor;
+        }
 
-		ggml_set_param(*tensor);
-		ggml_set_name(*tensor, name.c_str());
-	}
+        ggml_set_param(*tensor);
+        ggml_set_name(*tensor, name.c_str());
+    }
 
 
-	noise_rng.seed(this->params.seed);
-	sampler_rng.seed(noise_rng());
+    noise_rng.seed(this->params.seed);
+    sampler_rng.seed(noise_rng());
 
-	hift.m_source.l_sin_gen.rand_ini = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_F32, hift.nfft / 2 + 1);
-	ggml_backend_tensor_alloc(buffer.get(), hift.m_source.l_sin_gen.rand_ini, buffer_base);
-	buffer_base += get_aligned_size(hift.m_source.l_sin_gen.rand_ini->nb[1], alignment);
+    hift.m_source.l_sin_gen.rand_ini = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_F32, hift.nfft / 2 + 1);
+    ggml_backend_tensor_alloc(buffer.get(), hift.m_source.l_sin_gen.rand_ini, buffer_base);
+    buffer_base += get_aligned_size(hift.m_source.l_sin_gen.rand_ini->nb[1], alignment);
 
-	auto temp_buffer = std::make_unique<float[]>(hift.nfft);
-	temp_buffer[0] = 0.f;
-	std::normal_distribution<float> dist(0.0f, 1.0f);
-	for (auto& i : std::span(temp_buffer.get() + 1, hift.nfft / 2))
-		i = dist(noise_rng);
-	hift.set_rand_ini(temp_buffer.get());
+    auto temp_buffer = std::make_unique<float[]>(hift.nfft);
+    temp_buffer[0] = 0.f;
+    std::normal_distribution<float> dist(0.0f, 1.0f);
+    for (auto& i : std::span(temp_buffer.get() + 1, hift.nfft / 2))
+        i = dist(noise_rng);
+    hift.set_rand_ini(temp_buffer.get());
 
-	hift.window = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_F32, hift.nfft);
-	for (int i = 0; i != hift.nfft; ++i)
-		temp_buffer[i] = (1.0f - std::cos(2.0f * 3.14159265358979323846f * i / hift.nfft)) / 2.f;
-	ggml_backend_tensor_alloc(buffer.get(), hift.window, buffer_base);
-	set_tensor(hift.window, temp_buffer.get(), hift.nfft * sizeof(float));
+    hift.window = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_F32, hift.nfft);
+    for (int i = 0; i != hift.nfft; ++i)
+        temp_buffer[i] = (1.0f - std::cos(2.0f * 3.14159265358979323846f * i / hift.nfft)) / 2.f;
+    ggml_backend_tensor_alloc(buffer.get(), hift.window, buffer_base);
+    set_tensor(hift.window, temp_buffer.get(), hift.nfft * sizeof(float));
 
-	position_ids = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_I32, this->params.n_batch);
-	ggml_set_name(position_ids, "position_ids");
-	ggml_backend_tensor_alloc(buffer.get(), position_ids, buffer_base);
-	full_position_ids.reset(new int[this->params.n_max_seq]);
-	for (int i = 0; i != this->params.n_max_seq; ++i)
-		full_position_ids.get()[i] = i;
-	buffer_base += get_aligned_size(position_ids->nb[1], alignment);
+    position_ids = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_I32, this->params.n_batch);
+    ggml_set_name(position_ids, "position_ids");
+    ggml_backend_tensor_alloc(buffer.get(), position_ids, buffer_base);
+    full_position_ids.reset(new int[this->params.n_max_seq]);
+    for (int i = 0; i != this->params.n_max_seq; ++i)
+        full_position_ids.get()[i] = i;
+    buffer_base += get_aligned_size(position_ids->nb[1], alignment);
 
-	hift.fctx = create_fft_context(hift.nfft);
-	hift.ictx = create_istft_context(hift.nfft, ctx.get(),
-		[&](ggml_tensor* tensor, void* data, size_t size)
-		{
-			ggml_backend_tensor_alloc(buffer.get(), tensor, buffer_base);
-			set_tensor(tensor, data, size);
-			ggml_backend_synchronize(backend.get());
-		});
+    hift.fctx = create_fft_context(hift.nfft);
+    hift.ictx = create_istft_context(hift.nfft, ctx.get(),
+        [&](ggml_tensor* tensor, void* data, size_t size)
+        {
+            ggml_backend_tensor_alloc(buffer.get(), tensor, buffer_base);
+            set_tensor(tensor, data, size);
+            ggml_backend_synchronize(backend.get());
+        });
 
-	causal_mask_buffer.reset(new ggml_fp16_t[(this->params.n_max_seq - 1) * this->params.n_batch]);
-	causal_mask = ggml_new_tensor_2d(ctx.get(), GGML_TYPE_F16, this->params.n_max_seq - 1, this->params.n_batch);
-	ggml_set_name(causal_mask, "attention_mask");
-	ggml_backend_tensor_alloc(buffer.get(), causal_mask, buffer_base);
+    causal_mask_buffer.reset(new ggml_fp16_t[(this->params.n_max_seq - 1) * this->params.n_batch]);
+    causal_mask = ggml_new_tensor_2d(ctx.get(), GGML_TYPE_F16, this->params.n_max_seq - 1, this->params.n_batch);
+    ggml_set_name(causal_mask, "attention_mask");
+    ggml_backend_tensor_alloc(buffer.get(), causal_mask, buffer_base);
 
-	int64_t id = gguf_find_key(loader, "stop_token_ids");
-	auto stop_tok_data = reinterpret_cast<const int*>(gguf_get_arr_data(loader, id));
-	id = static_cast<int64_t>(gguf_get_arr_n(loader, id));
-	stop_tokens.insert(stop_tok_data, stop_tok_data + id);
+    int64_t id = gguf_find_key(loader, "stop_token_ids");
+    auto stop_tok_data = reinterpret_cast<const int*>(gguf_get_arr_data(loader, id));
+    id = static_cast<int64_t>(gguf_get_arr_n(loader, id));
+    stop_tokens.insert(stop_tok_data, stop_tok_data + id);
 
-	config.temperature = 1.f;
-	config.max_token_text_ratio = 20.f;
-	config.min_token_text_ratio = 2.f;
+    config.temperature = 1.f;
+    config.max_token_text_ratio = 20.f;
+    config.min_token_text_ratio = 2.f;
 
-	id = gguf_find_key(loader, "cosyvoice.instruction_prefix");
-	if (id != -1)
-	{
-		auto str = gguf_get_val_str(loader, id);
-		auto len = strlen(str) + 1;
-		instruction_prefix.reset(new char[len]);
-		memcpy(instruction_prefix.get(), str, len);
-	}
+    id = gguf_find_key(loader, "cosyvoice.instruction_prefix");
+    if (id != -1)
+    {
+        auto str = gguf_get_val_str(loader, id);
+        auto len = strlen(str) + 1;
+        instruction_prefix.reset(new char[len]);
+        memcpy(instruction_prefix.get(), str, len);
+    }
 
-	auto& sampling = config.sampling;
-	LOAD_METADATA_NOPREFIX(sampling.top_k);
-	LOAD_METADATA_NOPREFIX(sampling.top_p);
-	LOAD_METADATA_NOPREFIX(sampling.win_size);
-	LOAD_METADATA_NOPREFIX(sampling.tau_r);
+    auto& sampling = config.sampling;
+    LOAD_METADATA_NOPREFIX(sampling.top_k);
+    LOAD_METADATA_NOPREFIX(sampling.top_p);
+    LOAD_METADATA_NOPREFIX(sampling.win_size);
+    LOAD_METADATA_NOPREFIX(sampling.tau_r);
 
-	nucleus_probs.reset(new float[sampling.top_k * 2 + 1]);
-	probs.reset(new float[llm.llm_decoder.weight->ne[1]]);
-	batch_buffer.reset(new char[this->params.n_batch * std::max(llm.embed_tokens_weight->nb[1], llm.speech_embedding_weight->nb[1])]);
+    nucleus_probs.reset(new float[sampling.top_k * 2 + 1]);
+    probs.reset(new float[llm.llm_decoder.weight->ne[1]]);
+    batch_buffer.reset(new char[this->params.n_batch * std::max(llm.embed_tokens_weight->nb[1], llm.speech_embedding_weight->nb[1])]);
 
-	if (this->params.llm_use_flash_attn)
-		if (this->params.llm_allow_kv_cache_fallback
-			&& ggml_is_quantized(kv_type))
-		{
-			auto cur_type = kv_type;
-			while (cur_type != GGML_TYPE_F32)
-			{
-				auto q = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attention_heads);
-				auto k = ggml_new_tensor_3d(ctx0.get(), kv_type, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
-				auto v = ggml_new_tensor_3d(ctx0.get(), kv_type, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
-				auto o = ggml_flash_attn_ext(ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
-				if (ggml_backend_supports_op(backend.get(), o))
-				{
-					kv_type = cur_type;
-					break;
-				}
-				--reinterpret_cast<int&>(cur_type);
-			}
+    if (this->params.llm_use_flash_attn)
+        if (this->params.llm_allow_kv_cache_fallback
+            && ggml_is_quantized(kv_type))
+        {
+            auto cur_type = kv_type;
+            while (cur_type != GGML_TYPE_F32)
+            {
+                auto q = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attention_heads);
+                auto k = ggml_new_tensor_3d(ctx0.get(), kv_type, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
+                auto v = ggml_new_tensor_3d(ctx0.get(), kv_type, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
+                auto o = ggml_flash_attn_ext(ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
+                if (ggml_backend_supports_op(backend.get(), o))
+                {
+                    kv_type = cur_type;
+                    break;
+                }
+                --reinterpret_cast<int&>(cur_type);
+            }
 
-			this->params.llm_use_flash_attn = cur_type != GGML_TYPE_F32;
-			switch (kv_type)
-			{
-			case GGML_TYPE_F32:
-				this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_F32;
-				break;
-			case GGML_TYPE_F16:
-				this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_F16;
-				break;
-			case GGML_TYPE_Q8_0:
-				this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0;
-				break;
-			case GGML_TYPE_Q5_1:
-				this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1;
-				break;
-			case GGML_TYPE_Q5_0:
-				this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0;
-				break;
-			case GGML_TYPE_Q4_1:
-				this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1;
-				break;
-			case GGML_TYPE_Q4_0:
-				this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0;
-				break;
-			default:
-				throw std::invalid_argument("unexpected type");
-			}
-		}
-		else
-		{
-			auto q = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attention_heads);
-			auto k = ggml_new_tensor_3d(ctx0.get(), kv_type, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
-			auto v = ggml_new_tensor_3d(ctx0.get(), kv_type, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
-			auto o = ggml_flash_attn_ext(ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
-			this->params.llm_use_flash_attn = ggml_backend_supports_op(backend.get(), o);
-		}
-	else if (ggml_is_quantized(kv_type))
-		kv_type = GGML_TYPE_F16;
+            this->params.llm_use_flash_attn = cur_type != GGML_TYPE_F32;
+            switch (kv_type)
+            {
+            case GGML_TYPE_F32:
+                this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_F32;
+                break;
+            case GGML_TYPE_F16:
+                this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_F16;
+                break;
+            case GGML_TYPE_Q8_0:
+                this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0;
+                break;
+            case GGML_TYPE_Q5_1:
+                this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1;
+                break;
+            case GGML_TYPE_Q5_0:
+                this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0;
+                break;
+            case GGML_TYPE_Q4_1:
+                this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1;
+                break;
+            case GGML_TYPE_Q4_0:
+                this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0;
+                break;
+            default:
+                throw std::invalid_argument("unexpected type");
+            }
+        }
+        else
+        {
+            auto q = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attention_heads);
+            auto k = ggml_new_tensor_3d(ctx0.get(), kv_type, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
+            auto v = ggml_new_tensor_3d(ctx0.get(), kv_type, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
+            auto o = ggml_flash_attn_ext(ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
+            this->params.llm_use_flash_attn = ggml_backend_supports_op(backend.get(), o);
+        }
+    else if (ggml_is_quantized(kv_type))
+        kv_type = GGML_TYPE_F16;
 
-	kv_cache = new cosyvoice_llm_kv_cache(
-		backend.get(),
-		kv_buffer,
-		static_cast<int>(llm.layers.size()),
-		static_cast<int>(llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads),
-		static_cast<int>(llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads),
-		llm.num_attention_heads,
-		llm.num_key_value_heads,
-		this->params.n_max_seq,
-		kv_type,
-		this->params.llm_use_flash_attn
-	);
-	switch (this->params.inference_buffer_policy)
-	{
-	case COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED:
-	case COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED:
-		token2wav_buffer.reset(kv_buffer.get());
-	case COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED:
-		break;
-	default:
-		throw std::invalid_argument("unexpected policy");
-	}
+    kv_cache = new cosyvoice_llm_kv_cache(
+        backend.get(),
+        kv_buffer,
+        static_cast<int>(llm.layers.size()),
+        static_cast<int>(llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads),
+        static_cast<int>(llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads),
+        llm.num_attention_heads,
+        llm.num_key_value_heads,
+        this->params.n_max_seq,
+        kv_type,
+        this->params.llm_use_flash_attn
+    );
+    switch (this->params.inference_buffer_policy)
+    {
+    case COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED:
+    case COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED:
+        token2wav_buffer.reset(kv_buffer.get());
+    case COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED:
+        break;
+    default:
+        throw std::invalid_argument("unexpected policy");
+    }
 
-	if (this->params.flow_use_flash_attn)
-	{
-		int heads = flow.decoder.estimator.transformer_blocks[0].attn.heads;
-		auto q = ggml_new_tensor_4d(ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_q.weight->ne[1] / heads, 1, heads, 2);
-		auto k = ggml_new_tensor_4d(ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_k.weight->ne[1] / heads, 1, heads, 2);
-		auto v = ggml_new_tensor_4d(ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_v.weight->ne[1] / heads, 1, heads, 2);
-		auto o = ggml_flash_attn_ext(ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
-		this->params.flow_use_flash_attn = ggml_backend_supports_op(backend.get(), o);
-	}
+    if (this->params.flow_use_flash_attn)
+    {
+        int heads = flow.decoder.estimator.transformer_blocks[0].attn.heads;
+        auto q = ggml_new_tensor_4d(ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_q.weight->ne[1] / heads, 1, heads, 2);
+        auto k = ggml_new_tensor_4d(ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_k.weight->ne[1] / heads, 1, heads, 2);
+        auto v = ggml_new_tensor_4d(ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_v.weight->ne[1] / heads, 1, heads, 2);
+        auto o = ggml_flash_attn_ext(ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
+        this->params.flow_use_flash_attn = ggml_backend_supports_op(backend.get(), o);
+    }
 
-	for (auto& block : flow.decoder.estimator.transformer_blocks)
-		block.attn.fattn = this->params.flow_use_flash_attn;
+    for (auto& block : flow.decoder.estimator.transformer_blocks)
+        block.attn.fattn = this->params.flow_use_flash_attn;
 
-	orig_max_seq_len = this->params.n_max_seq;
-	
-	ggml_backend_synchronize(backend.get());
+    orig_max_seq_len = this->params.n_max_seq;
+
+    auto arch = loader.get_string("general.architecture");
+    architecture.reset(new char[arch.size() + 1]);
+    memcpy(architecture.get(), arch.data(), arch.size() + 1);
+    
+    ggml_backend_synchronize(backend.get());
 }

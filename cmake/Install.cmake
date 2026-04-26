@@ -16,6 +16,15 @@ if(TARGET ICU::uc AND NOT ICU_FOUND)
     endif()
 endif()
 
+if(TARGET ffmpeg AND NOT FFMPEG_FOUND)
+    if(DEFINED FFMPEG_RUNTIME_DLLS)
+        list(APPEND PREBUILT_SHARED_LIBS ${FFMPEG_RUNTIME_DLLS})
+    else()
+        file(GLOB FFMPEG_DLLS "${FFMPEG_PREBUILT_DIR}/bin/*.dll")
+        list(APPEND PREBUILT_SHARED_LIBS ${FFMPEG_DLLS})
+    endif()
+endif()
+
 if(WIN32)
     # For local execution on Windows: Copy ALL required DLLs next to the binaries
     # Note: $<TARGET_RUNTIME_DLLS:...> only works for EXECUTABLE, SHARED, or MODULE targets.
@@ -48,3 +57,7 @@ install(TARGETS cosyvoice
 )
 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+if(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.FFmpeg" DESTINATION ${CMAKE_INSTALL_DOCDIR})
+endif()

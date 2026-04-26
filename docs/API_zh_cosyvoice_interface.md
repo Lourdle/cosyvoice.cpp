@@ -1,6 +1,7 @@
 # cosyvoice-interface.h API 参考
 
 本文档覆盖 `include/cosyvoice-interface.h` 中声明的全部符号，包含 C++ 接口方法。
+这些接口属于内部实现细节，不承诺 ABI 稳定，未来版本可能会调整。
 
 ## cosyvoice_model_context
 
@@ -13,6 +14,7 @@ struct cosyvoice_model_context
     virtual void get_generation_config(cosyvoice_generation_config_t* config) = 0;
     virtual bool set_generation_config(const cosyvoice_generation_config_t* config) = 0;
     virtual void get_context_params(cosyvoice_context_params_t* params) = 0;
+    virtual const char* get_architecture() = 0;
     virtual const char* get_instruction_prefix() = 0;
 
     virtual void get_sampler(cosyvoice_sampler_t* sampler, void** sampler_ctx) = 0;
@@ -149,6 +151,22 @@ virtual void get_context_params(cosyvoice_context_params_t* params) = 0;
 ### 返回值
 
 无返回值。
+
+## cosyvoice_model_context::get_architecture
+
+### 语法
+
+```cpp
+virtual const char* get_architecture() = 0;
+```
+
+### 说明
+
+获取已加载模型的架构标识。
+
+### 返回值
+
+以 `\0` 结尾的 UTF-8 架构字符串，例如 `cosyvoice3-2512`。
 
 ## cosyvoice_model_context::get_instruction_prefix
 
