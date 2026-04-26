@@ -1,7 +1,3 @@
-#ifdef _MSC_VER
-    #define _CRT_SECURE_NO_WARNINGS
-#endif
-
 #include "tool_common_cosyvoice.h"
 
 #ifndef COSYVOICE_NO_AUDIO
@@ -140,6 +136,7 @@ enum class response_audio_format
     flac,
     pcm,
     aac,
+    m4a,
     opus,
     unknown
 };
@@ -282,6 +279,7 @@ static server_log_level get_log_level(const server_options& options)
 static void print_usage(const tchar* argv0)
 {
     const auto exe = tchar_to_utf8(argv0);
+    const char* supported_formats = cosyvoice_audio_supported_encoding_formats();
     printf("cosyvoice-server - OpenAI Speech compatible API server\n\n");
     printf("Usage:\n");
     printf("  %s --model <file.gguf> --voice-prompt <voice=prompt_speech.gguf> [--voice-prompt ...] [options]\n", exe.c_str());
@@ -336,8 +334,12 @@ static void print_usage(const tchar* argv0)
     printf("  Optional standard: instructions, speed, response_format\n");
     printf("  Optional extensions: seed, temperature, top_k, top_p, win_size, tau_r,\n");
     printf("                      min_token_text_ratio, max_token_text_ratio\n");
-    printf("  response_format standard values: mp3, opus, aac, flac, wav, pcm\n");
+#ifdef COSYVOICE_AUDIO_BACKEND_FFMPEG
+    printf("  response_format standard values: %s, pcm\n", supported_formats);
+#else
+    printf("  response_format standard values: wav, pcm\n");
     printf("  Unsupported formats return OpenAI-style 400 error in this build/runtime.\n");
+#endif
 }
 
 static bool validate_options(server_options& options)
@@ -548,8 +550,8 @@ static response_audio_format parse_response_format(const std::string& value)
 {
     const auto lowered = to_lower(value);
     if (lowered == "mp3") return response_audio_format::mp3;
-    if (lowered == "opus") return response_audio_format::opus;
     if (lowered == "aac") return response_audio_format::aac;
+    if (lowered == "m4a") return response_audio_format::m4a;
     if (lowered == "flac") return response_audio_format::flac;
     if (lowered == "wav") return response_audio_format::wav;
     if (lowered == "pcm") return response_audio_format::pcm;
@@ -562,10 +564,10 @@ static const char* response_format_to_string(response_audio_format format)
     {
     case response_audio_format::mp3:
         return "mp3";
-    case response_audio_format::opus:
-        return "opus";
     case response_audio_format::aac:
         return "aac";
+    case response_audio_format::m4a:
+        return "m4a";
     case response_audio_format::flac:
         return "flac";
     case response_audio_format::wav:
@@ -584,15 +586,23 @@ static bool is_response_format_supported(const server_runtime& runtime, response
     case response_audio_format::pcm:
         return true;
     case response_audio_format::wav:
-#ifndef COSYVOICE_NO_AUDIO
-        return static_cast<bool>(runtime.audio_encoder);
-#else
+#ifdef COSYVOICE_NO_AUDIO
         return true;
+#else
+        return cosyvoice_audio_encoding_format_supported(COSYVOICE_AUDIO_ENCODING_FORMAT_WAV);
 #endif
+#ifdef COSYVOICE_AUDIO_BACKEND_FFMPEG
     case response_audio_format::mp3:
-    case response_audio_format::opus:
+        return cosyvoice_audio_encoding_format_supported(COSYVOICE_AUDIO_ENCODING_FORMAT_MP3);
+    case response_audio_format::m4a:
+        return cosyvoice_audio_encoding_format_supported(COSYVOICE_AUDIO_ENCODING_FORMAT_AAC);
     case response_audio_format::aac:
+        return cosyvoice_audio_encoding_format_supported(COSYVOICE_AUDIO_ENCODING_FORMAT_AAC);
     case response_audio_format::flac:
+        return cosyvoice_audio_encoding_format_supported(COSYVOICE_AUDIO_ENCODING_FORMAT_FLAC);
+    case response_audio_format::opus:
+        return cosyvoice_audio_encoding_format_supported(COSYVOICE_AUDIO_ENCODING_FORMAT_OPUS);
+#endif
     default:
         return false;
     }
@@ -605,6 +615,7 @@ static std::string supported_response_formats_to_string(const server_runtime& ru
         response_audio_format::opus,
         response_audio_format::aac,
         response_audio_format::flac,
+        response_audio_format::m4a,
         response_audio_format::wav,
         response_audio_format::pcm
     };
@@ -634,6 +645,8 @@ static const char* response_format_to_content_type(response_audio_format format)
         return "audio/opus";
     case response_audio_format::aac:
         return "audio/aac";
+    case response_audio_format::m4a:
+        return "audio/mp4";
     case response_audio_format::wav:
         return "audio/wav";
     case response_audio_format::flac:
@@ -646,11 +659,11 @@ static const char* response_format_to_content_type(response_audio_format format)
 }
 
 #ifndef COSYVOICE_NO_AUDIO
-static bool build_wav_bytes_with_audio_encoder(cosyvoice_audio_encoder_t encoder, const float* data, uint32_t length, std::string* output, std::string* error)
+static bool build_wav_bytes_with_audio_encoder(cosyvoice_audio_encoder_t encoder, const float* data, uint32_t length, cosyvoice_audio_encoding_format_t format, std::string* output, std::string* error)
 {
     if (!encoder)
     {
-        *error = "WAV encoder is unavailable in this runtime environment.";
+        *error = "Encoder is unavailable in this runtime environment.";
         return false;
     }
 
@@ -660,7 +673,7 @@ static bool build_wav_bytes_with_audio_encoder(cosyvoice_audio_encoder_t encoder
         return false;
     }
 
-    if (!cosyvoice_audio_encoder_encode(encoder, data, length, COSYVOICE_AUDIO_ENCODING_FORMAT_WAV))
+    if (!cosyvoice_audio_encoder_encode(encoder, data, length, format))
     {
         *error = "Failed to encode WAV payload with cosyvoice_audio_encoder.";
         return false;
@@ -687,12 +700,22 @@ static bool build_audio_payload(response_audio_format format, const cosyvoice_ge
     {
     case response_audio_format::wav:
 #ifndef COSYVOICE_NO_AUDIO
-        return build_wav_bytes_with_audio_encoder(runtime.audio_encoder.get(), generated.data, generated.length, payload, error);
+        return build_wav_bytes_with_audio_encoder(runtime.audio_encoder.get(), generated.data, generated.length, COSYVOICE_AUDIO_ENCODING_FORMAT_WAV, payload, error);
 #else
         return build_wav_bytes(generated.data, generated.length, runtime.sample_rate, payload, error);
 #endif
     case response_audio_format::pcm:
         return build_pcm16_bytes(generated.data, generated.length, payload, error);
+    case response_audio_format::mp3:
+        return build_wav_bytes_with_audio_encoder(runtime.audio_encoder.get(), generated.data, generated.length, COSYVOICE_AUDIO_ENCODING_FORMAT_MP3, payload, error);
+    case response_audio_format::m4a:
+        return build_wav_bytes_with_audio_encoder(runtime.audio_encoder.get(), generated.data, generated.length, COSYVOICE_AUDIO_ENCODING_FORMAT_AAC, payload, error);
+    case response_audio_format::aac:
+        return build_wav_bytes_with_audio_encoder(runtime.audio_encoder.get(), generated.data, generated.length, COSYVOICE_AUDIO_ENCODING_FORMAT_AAC, payload, error);
+    case response_audio_format::flac:
+        return build_wav_bytes_with_audio_encoder(runtime.audio_encoder.get(), generated.data, generated.length, COSYVOICE_AUDIO_ENCODING_FORMAT_FLAC, payload, error);
+    case response_audio_format::opus:
+        return build_wav_bytes_with_audio_encoder(runtime.audio_encoder.get(), generated.data, generated.length, COSYVOICE_AUDIO_ENCODING_FORMAT_OPUS, payload, error);
     default:
         *error = "Unsupported response format.";
         return false;
@@ -1645,7 +1668,7 @@ int main(int argc, char** argv)
         if (format == response_audio_format::unknown)
         {
             set_openai_error(res, 400,
-                "Unsupported response_format. Allowed standard values: mp3, opus, aac, flac, wav, pcm.",
+                "Unsupported response_format. Allowed standard values: mp3, opus, aac, flac, wav, pcm, m4a.",
                 "invalid_request_error",
                 "response_format",
                 "invalid_value");

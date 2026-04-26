@@ -32,15 +32,14 @@ def parse_args() -> argparse.Namespace:
         help="Server base URL, with or without /v1 (default: http://127.0.0.1:8080)",
     )
     parser.add_argument("--api-key", default="", help="Bearer API key (optional)")
-    parser.add_argument("--model", default="cosyvoice-3", help="Model name")
+    parser.add_argument("--model", required=True, help="Model name")
     parser.add_argument("--voice", default="alloy", help="Voice name")
     parser.add_argument("--text", required=True, help="Input text")
     parser.add_argument("--instructions", default="", help="Optional instructions")
     parser.add_argument(
         "--response-format",
-        default="wav",
-        choices=["mp3", "wav", "flac", "pcm", "aac", "opus"],
-        help="Requested audio format",
+        default=None,
+        help="Requested audio format (if omitted, inferred from --output extension)",
     )
     parser.add_argument("--speed", type=float, default=1.0, help="Speech speed (> 0)")
     parser.add_argument("--seed", type=int, default=None, help="Optional seed extension (uint32)")
@@ -144,7 +143,6 @@ def main() -> int:
         "model": args.model,
         "input": args.text,
         "voice": args.voice,
-        "response_format": args.response_format,
         "speed": args.speed,
     }
     if args.instructions:
@@ -169,8 +167,21 @@ def main() -> int:
         extension_body["max_token_text_ratio"] = args.max_token_text_ratio
     if extension_body:
         request_kwargs["extra_body"] = extension_body
+    # Determine response_format: explicit arg > infer from output extension > default 'wav'
+    response_format = args.response_format
+    if response_format is None:
+        if args.output:
+            suffix = pathlib.Path(args.output).suffix
+            if suffix:
+                response_format = suffix.lstrip(".").lower()
+            else:
+                response_format = "wav"
+        else:
+            response_format = "wav"
 
-    output = args.output if args.output else guess_output_path(args.response_format)
+    request_kwargs["response_format"] = response_format
+
+    output = args.output if args.output else guess_output_path(response_format)
     output_path = pathlib.Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
