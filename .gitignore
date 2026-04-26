@@ -35,6 +35,8 @@ Release/
 
 # CMake
 build/
+build-*/
+build_*/
 out/
 CMakeCache.txt
 CMakeFiles/
@@ -56,6 +58,9 @@ vcpkg_installed/
 *.onnx
 *.flac
 *.mp3
+*.m4a
+*.aac
+*.opus
 
 # Python
 __pycache__/
