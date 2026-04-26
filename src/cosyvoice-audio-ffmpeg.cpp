@@ -586,11 +586,13 @@ bool cosyvoice_audio_load_from_file(const char* filename, float** data, uint32_t
 
                 while (avcodec_receive_frame(codec_ctx, frame) >= 0)
                 {
-                    const uint8_t* in_data = frame->data[0];
+                    const uint8_t* in_planes[1] = { frame->data[0] };
                     int in_samples = frame->nb_samples;
-                    int out_samples = av_rescale_rnd(in_samples, codec_ctx->sample_rate, codec_ctx->sample_rate, AV_ROUND_UP);
+                    int out_samples = av_rescale_rnd(swr_get_delay(swr_ctx, codec_ctx->sample_rate) + in_samples,
+                                                     codec_ctx->sample_rate, codec_ctx->sample_rate, AV_ROUND_UP);
                     std::vector<float> out_buffer(static_cast<size_t>(out_samples));
-                    int converted = swr_convert(swr_ctx, reinterpret_cast<uint8_t**>(out_buffer.data()), out_samples, &in_data, in_samples);
+                    uint8_t* out_planes[1] = { reinterpret_cast<uint8_t*>(out_buffer.data()) };
+                    int converted = swr_convert(swr_ctx, out_planes, out_samples, in_planes, in_samples);
                     if (converted > 0)
                         output_buffer.insert(output_buffer.end(), out_buffer.begin(), out_buffer.begin() + converted);
                 }
@@ -601,11 +603,13 @@ bool cosyvoice_audio_load_from_file(const char* filename, float** data, uint32_t
         avcodec_send_packet(codec_ctx, nullptr);
         while (avcodec_receive_frame(codec_ctx, frame) >= 0)
         {
-            const uint8_t* in_data = frame->data[0];
+            const uint8_t* in_planes[1] = { frame->data[0] };
             int in_samples = frame->nb_samples;
-            int out_samples = av_rescale_rnd(in_samples, codec_ctx->sample_rate, codec_ctx->sample_rate, AV_ROUND_UP);
+            int out_samples = av_rescale_rnd(swr_get_delay(swr_ctx, codec_ctx->sample_rate) + in_samples,
+                                             codec_ctx->sample_rate, codec_ctx->sample_rate, AV_ROUND_UP);
             std::vector<float> out_buffer(static_cast<size_t>(out_samples));
-            int converted = swr_convert(swr_ctx, reinterpret_cast<uint8_t**>(out_buffer.data()), out_samples, &in_data, in_samples);
+            uint8_t* out_planes[1] = { reinterpret_cast<uint8_t*>(out_buffer.data()) };
+            int converted = swr_convert(swr_ctx, out_planes, out_samples, in_planes, in_samples);
             if (converted > 0)
                 output_buffer.insert(output_buffer.end(), out_buffer.begin(), out_buffer.begin() + converted);
         }
@@ -661,8 +665,9 @@ bool cosyvoice_audio_resample(const float* input, uint32_t input_length, uint32_
     int64_t delay = swr_get_delay(swr_ctx, input_sample_rate);
     int64_t out_samples = av_rescale_rnd(input_length + delay, output_sample_rate, input_sample_rate, AV_ROUND_UP);
     std::unique_ptr<float[]> out_buffer(new float[out_samples]);
-    const uint8_t* in_data = reinterpret_cast<const uint8_t*>(input);
-    int converted = swr_convert(swr_ctx, reinterpret_cast<uint8_t**>(out_buffer.get()), out_samples, &in_data, input_length);
+    const uint8_t* in_planes[1] = { reinterpret_cast<const uint8_t*>(input) };
+    uint8_t* out_planes[1] = { reinterpret_cast<uint8_t*>(out_buffer.get()) };
+    int converted = swr_convert(swr_ctx, out_planes, out_samples, in_planes, input_length);
     swr_free(&swr_ctx);
 
     if (converted < 0) return false;
@@ -683,7 +688,11 @@ bool cosyvoice_audio_save_to_file(const char* filename, const float* data, uint3
         else if (strcasecmp(ext, ".flac") == 0) format = COSYVOICE_AUDIO_ENCODING_FORMAT_FLAC;
         else if (strcasecmp(ext, ".m4a") == 0) format = COSYVOICE_AUDIO_ENCODING_FORMAT_M4A;
         else if (strcasecmp(ext, ".opus") == 0) format = COSYVOICE_AUDIO_ENCODING_FORMAT_OPUS;
-        else cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_WARN, std::format("Unrecognized file extension ({}), defaulting to WAV format.\n", ext).c_str());
+        else if (strcasecmp(ext, ".wav") != 0)
+        {
+            const std::string warning = std::format("Unrecognized file extension ({}), defaulting to WAV format.\n", ext);
+            cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_WARN, warning.c_str());
+        }
 
     cosyvoice_audio_encoder encoder(sample_rate);
     if (!encoder.save(filename, data, length, format))
