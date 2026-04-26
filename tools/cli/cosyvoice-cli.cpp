@@ -116,6 +116,7 @@ static cli_log_level get_log_level(const cli_options& options)
 static void print_usage(const tchar* argv0)
 {
     auto exe = tchar_to_utf8(argv0);
+    const char* supported_formats = cosyvoice_audio_supported_encoding_formats();
     printf("cosyvoice-cli - command line TTS tool\n\n");
     printf("Usage:\n");
     printf("  %s --model <file.gguf> --prompt-speech <file> --text <text> --output <file>\n", exe.c_str());
@@ -132,7 +133,7 @@ static void print_usage(const tchar* argv0)
 #ifdef COSYVOICE_NO_AUDIO
     printf("  --output, -o <file>                         Output audio file path (WAV).\n");
 #else
-    printf("  --output, -o <file>                         Output audio file path (.wav).\n");
+    printf("  --output, -o <file>                         Output audio file path (%s).\n", supported_formats);
 #endif
     printf("  --mode <zero-shot|instruct|cross-lingual>   TTS mode. Default: auto-detect by --instruction.\n");
     printf("  --speed, -s <value>                         Speech speed. Default: 1.0.\n");
