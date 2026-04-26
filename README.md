@@ -4,7 +4,7 @@ Language: [中文](README_zh.md)
 
 > Unofficial project notice: this repository is **not** affiliated with, endorsed by, or maintained by the official CosyVoice team. It is a community-maintained C++/GGML port created by an independent developer.
 
-> **Current status notice:** CUDA stability issues are resolved in current tests, and both Windows and Linux CUDA runs can generate normal audio. CPU and Vulkan backends are still not running normally. Please review [Known Issues](#known-issues) before production use.
+> **Current status notice:** In recent tests on Ada Lovelace GPUs, CUDA stability issues were resolved and both Windows and Linux CUDA runs generated normal audio. CPU and Vulkan backends are still not running normally. Please review [Known Issues](#known-issues) before production use.
 
 C++/GGML port of the Python CosyVoice inference pipeline released by the original CosyVoice project, currently focused on **CosyVoice3**.
 
@@ -106,26 +106,19 @@ Build outputs are placed in:
 - `build/lib` (libraries)
 
 ## Dependency Resolution
-The top-level CMake project handles dependencies as follows:
+The top-level CMake project resolves dependencies in this order:
 
 - **PCRE2**
   - Built from `vendor/pcre2` as static libraries (`pcre2-8`, `pcre2-16`).
 - **GGML**
   - Uses `GGML_SOURCE_DIR` (default: `vendor/ggml`).
   - If missing, CMake clones `https://github.com/ggml-org/ggml.git` automatically.
-- **ICU** (used by text normalization unless disabled)
-  - Controlled by `COSYVOICE_NO_ICU`.
-  - If `ICU_PREBUILT_DIR` is available, uses it directly.
-  - Otherwise tries `find_package(ICU)`.
-  - On Windows, if still not found, prebuilt ICU is downloaded automatically.
-  - On Linux/macOS, install system ICU if still not found.
-- **ONNX Runtime** (used by frontend unless disabled)
-  - Controlled by `COSYVOICE_NO_FRONTEND`.
-  - If `ORT_PREBUILT_DIR` is available, uses it directly.
-  - Otherwise tries `find_package(onnxruntime)`.
-  - If still not found, prebuilt ONNX Runtime is downloaded automatically.
+- **ICU** (used by text normalization unless disabled with `COSYVOICE_NO_ICU`)
+  - Resolution order: `ICU_PREBUILT_DIR` -> `find_package(ICU)` -> Windows auto-download -> system ICU on Linux/macOS.
+- **ONNX Runtime** (used by the frontend unless disabled with `COSYVOICE_NO_FRONTEND`)
+  - Resolution order: `ORT_PREBUILT_DIR` -> `find_package(onnxruntime)` -> auto-download.
 
-Useful dependency path cache variables:
+Useful cache variables:
 - `GGML_SOURCE_DIR`
 - `ICU_PREBUILT_DIR`
 - `ORT_PREBUILT_DIR`
@@ -135,14 +128,20 @@ Default values:
 - `ICU_PREBUILT_DIR=<build_dir>/_deps/icu`
 - `ORT_PREBUILT_DIR=<build_dir>/_deps/onnxruntime`
 
+Notes:
+- If `GGML_SOURCE_DIR` does not contain GGML sources, CMake will try to clone GGML.
+- If ICU/ONNX Runtime are not found by `find_package`, CMake will use or download prebuilt binaries into the configured prebuilt directories.
+- On Windows, prebuilt dependency DLLs are copied next to built executables.
+
 ## Audio backend & FFmpeg
 
 This project supports two audio backends for encoding/decoding helper APIs:
 
-- `MINIAUDIO` (default minimal): provides WAV I/O and basic PCM helpers.
-- `FFMPEG` (optional): enables encoding/decoding for additional formats (MP3/AAC/FLAC/M4A/OPUS) when the FFmpeg libraries and encoders are available at runtime.
+- `MINIAUDIO` (default): provides WAV I/O and basic PCM helpers.
+- `FFMPEG` (optional): enables encoding/decoding for additional formats when the linked FFmpeg runtime provides the required encoders.
 
 Control the audio backend via CMake: set `COSYVOICE_AUDIO_BACKEND` to `MINIAUDIO` or `FFMPEG`.
+Default: `MINIAUDIO`.
 
 Examples:
 ```bash
@@ -157,23 +156,14 @@ FFmpeg usage notes:
 
 - On Windows the build scripts download prebuilt FFmpeg (BtbN builds) by default when `FFMPEG_PREBUILT_DIR` is not provided.
 - On Linux/macOS the system-provided FFmpeg (homebrew/apt) will be used when available; otherwise point `FFMPEG_PREBUILT_DIR` to your prebuilt location.
-- The FFmpeg backend supports `wav`, `mp3`, `aac`, `flac`, `m4a`, and `opus` in the API surface, but the actual usable subset depends on the linked FFmpeg build. The library probes available encoders at runtime and exposes the supported set via the API and CLI/server help messages.
+- The API surface includes `wav`, `mp3`, `aac`, `flac`, `m4a`, and `opus`, but the usable subset depends on the linked FFmpeg build. The library probes available encoders at runtime and exposes the supported set via the API and CLI/server help messages.
 - `m4a` is a non-standard convenience extension here. OpenAI Speech does not define it; use `response_format` only if your client/server understands this project-specific extension.
 - If a requested format is not supported at runtime, the server/CLI will instruct you to use `wav` or `pcm` instead.
 - On Windows, the build will copy the FFmpeg runtime DLLs it found into the executable directory. If you use a custom prebuilt FFmpeg, make sure the `bin` and `lib` layout matches the expectations in `cmake/Dependencies.cmake`.
 
 License reminder:
 
-- The repository code is MIT. FFmpeg prebuilt binaries may be LGPL or GPL depending on build options. Using a GPL-enabled FFmpeg build may impose GPL obligations on your redistributed binaries. See `FFmpeg-NOTICE.md`.
-
-Dependency priority (effective order):
-- **GGML**: `GGML_SOURCE_DIR` -> auto clone GGML repository if missing.
-- **ICU**: use `ICU_PREBUILT_DIR` if available -> `find_package(ICU)` -> (Windows) auto download prebuilt ICU -> (Linux/macOS) install system ICU manually.
-- **ONNX Runtime**: use `ORT_PREBUILT_DIR` if available -> `find_package(onnxruntime)` -> auto download prebuilt ONNX Runtime.
-
-Platform notes:
-- **Windows**: prebuilt dependency DLLs are copied next to executables after build.
-- **Linux/macOS**: prebuilt shared libraries are installed under library install directories.
+- The repository code is MIT. FFmpeg prebuilt binaries may be LGPL or GPL depending on build options. Using a GPL-enabled FFmpeg build may impose GPL obligations on your redistributed binaries. See [FFmpeg-NOTICE.md](FFmpeg-NOTICE.md).
 
 ## CMake Options
 Project-level options:
@@ -181,11 +171,13 @@ Project-level options:
 - `COSYVOICE_NO_AUDIO=ON/OFF` (default: `OFF`)
 - `COSYVOICE_NO_FRONTEND=ON/OFF` (default: `OFF`)
 - `COSYVOICE_NO_ICU=ON/OFF` (default: `OFF`)
+- `COSYVOICE_AUDIO_BACKEND=MINIAUDIO/FFMPEG` (default: `MINIAUDIO`)
 
 Dependency path options:
 - `GGML_SOURCE_DIR=<path>`
 - `ICU_PREBUILT_DIR=<path>`
 - `ORT_PREBUILT_DIR=<path>`
+- `FFMPEG_PREBUILT_DIR=<path>`
 
 GGML backend options are passed through from GGML CMake (for example `GGML_CUDA`, `GGML_VULKAN`, etc.).
 
@@ -303,13 +295,14 @@ Current generation stability is backend-dependent.
 
 Tested observations:
 - **CUDA backend (Windows + Linux):**
-  - CUDA stability issues are resolved in current tests.
-  - Windows CUDA and Linux CUDA runs are both normal.
+  - In recent tests on Ada Lovelace GPUs, CUDA stability issues were resolved.
+  - Windows CUDA and Linux CUDA runs generated normal audio in those tests.
 - **CPU / Vulkan backends:**
   - Still cannot run normally in current tests (for example noisy/incorrect output).
 
 Additional note:
 - Tests were performed on Ada Lovelace GPUs only.
+- These results may not generalize to other GPU architectures or driver/runtime combinations.
 - Other backends are not tested yet.
 
 ## Troubleshooting

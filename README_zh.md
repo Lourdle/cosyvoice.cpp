@@ -4,7 +4,7 @@
 
 > 非官方说明：本仓库**与 CosyVoice 官方团队无隶属关系**，也未获得官方背书或维护。本项目是社区开发者发起和维护的 C++/GGML 移植实现。
 
-> **当前状态提示：** 当前测试中 CUDA 稳定性问题已解决，Windows/Linux 下 CUDA 均可正常生成音频；CPU 和 Vulkan 仍无法正常运行。用于生产前请先阅读[已知问题](#已知问题)。
+> **当前状态提示：** 在近期针对 Ada Lovelace GPU 的测试中，CUDA 稳定性问题已解决，Windows/Linux 下 CUDA 均可正常生成音频；CPU 和 Vulkan 仍无法正常运行。用于生产前请先阅读[已知问题](#已知问题)。
 
 本项目将原始 CosyVoice 项目发布的 Python 推理流程迁移到 C++/GGML，目前主要支持 **CosyVoice3**。
 
@@ -106,26 +106,19 @@ cmake --build build --config Release
 - `build/lib`（库文件）
 
 ## 依赖解析方式
-顶层 CMake 对依赖的处理逻辑如下：
+顶层 CMake 按以下顺序解析依赖：
 
 - **PCRE2**
   - 从 `vendor/pcre2` 构建静态库（`pcre2-8`、`pcre2-16`）。
 - **GGML**
   - 使用 `GGML_SOURCE_DIR`（默认 `vendor/ggml`）。
   - 若目录不存在，会自动克隆 `https://github.com/ggml-org/ggml.git`。
-- **ICU**（用于文本规范化，除非关闭）
-  - 由 `COSYVOICE_NO_ICU` 控制。
-  - 如果 `ICU_PREBUILT_DIR` 可用，会优先直接使用该目录。
-  - 否则尝试 `find_package(ICU)`。
-  - Windows 下若仍找不到，会自动下载预编译 ICU。
-  - Linux/macOS 下若仍找不到，需要安装系统 ICU。
-- **ONNX Runtime**（用于前端，除非关闭）
-  - 由 `COSYVOICE_NO_FRONTEND` 控制。
-  - 如果 `ORT_PREBUILT_DIR` 可用，会优先直接使用该目录。
-  - 否则尝试 `find_package(onnxruntime)`。
-  - 若仍找不到，会自动下载预编译 ONNX Runtime。
+- **ICU**（用于文本规范化，除非通过 `COSYVOICE_NO_ICU` 关闭）
+  - 解析顺序：`ICU_PREBUILT_DIR` -> `find_package(ICU)` -> Windows 自动下载 -> Linux/macOS 使用系统 ICU。
+- **ONNX Runtime**（用于前端，除非通过 `COSYVOICE_NO_FRONTEND` 关闭）
+  - 解析顺序：`ORT_PREBUILT_DIR` -> `find_package(onnxruntime)` -> 自动下载。
 
-常用依赖路径缓存变量：
+常用缓存变量：
 - `GGML_SOURCE_DIR`
 - `ICU_PREBUILT_DIR`
 - `ORT_PREBUILT_DIR`
@@ -135,14 +128,20 @@ cmake --build build --config Release
 - `ICU_PREBUILT_DIR=<build_dir>/_deps/icu`
 - `ORT_PREBUILT_DIR=<build_dir>/_deps/onnxruntime`
 
+说明：
+- 如果 `GGML_SOURCE_DIR` 下没有 GGML 源码，CMake 会尝试自动克隆 GGML。
+- 如果 ICU/ONNX Runtime 未被 `find_package` 找到，CMake 会在配置的预编译目录中使用或下载对应二进制。
+- Windows 下预编译依赖 DLL 会复制到可执行文件旁。
+
 ## 音频后端与 FFmpeg
 
-本项目为音频辅助 API 支持两种后端：
+本项目的音频辅助 API 支持两种后端：
 
-- `MINIAUDIO`（默认，精简）：提供 WAV I/O 与基本 PCM 帮助函数。
-- `FFMPEG`（可选）：在可用时启用更多编码/解码格式（MP3/AAC/FLAC/M4A/OPUS）。
+- `MINIAUDIO`（默认）：提供 WAV I/O 与基本 PCM 帮助函数。
+- `FFMPEG`（可选）：在链接的 FFmpeg 运行时提供所需编码器时，启用更多编码/解码格式。
 
 通过 CMake 配置音频后端：将 `COSYVOICE_AUDIO_BACKEND` 设为 `MINIAUDIO` 或 `FFMPEG`。
+默认值为 `MINIAUDIO`。
 
 示例：
 ```bash
@@ -157,23 +156,14 @@ FFmpeg 使用要点：
 
 - 在 Windows 上，构建脚本默认在未提供 `FFMPEG_PREBUILT_DIR` 时下载 BtbN 的预编译 FFmpeg。
 - 在 Linux/macOS 上，若系统提供 FFmpeg（apt/homebrew），项目会优先使用系统库；否则可通过 `FFMPEG_PREBUILT_DIR` 指定预编译位置。
-- FFmpeg 后端在 API 层支持 `wav`、`mp3`、`aac`、`flac`、`m4a`、`opus`，但具体哪些格式真正可用取决于当前链接的 FFmpeg 构建。库会在运行时探测可用编码器，并通过 API / CLI / server 帮助文本暴露支持集合。
+- API 层支持 `wav`、`mp3`、`aac`、`flac`、`m4a`、`opus`，但具体可用格式取决于当前链接的 FFmpeg 构建。库会在运行时探测可用编码器，并通过 API / CLI / server 帮助文本暴露支持集合。
 - `m4a` 是这里提供的非标准便捷扩展。OpenAI Speech 标准并没有定义 `m4a`，只在你的客户端/服务端理解这个扩展时使用。
 - 如果客户端请求了运行时不可用的格式，服务/CLI 会建议回退到 `wav` 或 `pcm`。
 - 在 Windows 上，构建脚本会把找到的 FFmpeg 运行时 DLL 复制到可执行文件目录。若你使用自定义预编译 FFmpeg，请确认其 `bin` / `lib` 目录结构符合 `cmake/Dependencies.cmake` 的预期。
 
 许可证提醒：
 
-- 本仓库代码采用 MIT 许可。FFmpeg 预编译包可能是 LGPL 或 GPL，取决于编译选项。使用包含 GPL 编码器的 FFmpeg 构建并重新分发时，可能会对你的发行物带来 GPL 约束。详见 `FFmpeg-NOTICE.md`。
-
-依赖优先级（实际解析顺序）：
-- **GGML**：`GGML_SOURCE_DIR` -> 若缺失则自动克隆 GGML 仓库。
-- **ICU**：若 `ICU_PREBUILT_DIR` 可用则优先使用该目录 -> `find_package(ICU)` ->（Windows）自动下载预编译 ICU ->（Linux/macOS）需手动安装系统 ICU。
-- **ONNX Runtime**：若 `ORT_PREBUILT_DIR` 可用则优先使用该目录 -> `find_package(onnxruntime)` -> 自动下载预编译 ONNX Runtime。
-
-平台说明：
-- **Windows**：构建后会将预编译依赖 DLL 复制到可执行文件目录。
-- **Linux/macOS**：预编译共享库按安装规则放到库安装目录。
+- 本仓库代码采用 MIT 许可。FFmpeg 预编译包可能是 LGPL 或 GPL，取决于编译选项。使用包含 GPL 编码器的 FFmpeg 构建并重新分发时，可能会对你的发行物带来 GPL 约束。详见 [FFmpeg-NOTICE.md](FFmpeg-NOTICE.md)。
 
 ## CMake 选项
 项目级选项：
@@ -181,11 +171,13 @@ FFmpeg 使用要点：
 - `COSYVOICE_NO_AUDIO=ON/OFF`（默认：`OFF`）
 - `COSYVOICE_NO_FRONTEND=ON/OFF`（默认：`OFF`）
 - `COSYVOICE_NO_ICU=ON/OFF`（默认：`OFF`）
+- `COSYVOICE_AUDIO_BACKEND=MINIAUDIO/FFMPEG`（默认：`MINIAUDIO`）
 
 依赖路径选项：
 - `GGML_SOURCE_DIR=<path>`
 - `ICU_PREBUILT_DIR=<path>`
 - `ORT_PREBUILT_DIR=<path>`
+- `FFMPEG_PREBUILT_DIR=<path>`
 
 GGML 后端相关选项可直接透传（例如 `GGML_CUDA`、`GGML_VULKAN` 等）。
 
@@ -303,13 +295,14 @@ python convert_model_to_gguf.py \
 
 已测试现象：
 - **CUDA 后端（Windows + Linux）：**
-  - 当前测试中 CUDA 稳定性问题已解决。
-  - Windows CUDA 与 Linux CUDA 均可正常运行。
+  - 在近期针对 Ada Lovelace GPU 的测试中，CUDA 稳定性问题已解决。
+  - Windows CUDA 与 Linux CUDA 在这些测试中均可正常生成音频。
 - **CPU / Vulkan：**
   - 当前测试中仍无法正常运行（例如噪音/输出异常）。
 
 补充说明：
 - 目前仅在 Ada Lovelace 架构显卡上做过验证。
+- 这些结果未必适用于其他 GPU 架构或驱动/运行时组合。
 - 其他后端尚未测试。
 
 ## 故障排查
