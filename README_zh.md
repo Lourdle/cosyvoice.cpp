@@ -4,7 +4,7 @@
 
 > 非官方说明：本仓库**与 CosyVoice 官方团队无隶属关系**，也未获得官方背书或维护。本项目是社区开发者发起和维护的 C++/GGML 移植实现。
 
-> **当前状态提示：** 在近期针对 Ada Lovelace GPU 的测试中，CUDA 稳定性问题已解决，Windows/Linux 下 CUDA 均可正常生成音频；CPU 和 Vulkan 仍无法正常运行。用于生产前请先阅读[已知问题](#已知问题)。
+> **当前状态提示：** CUDA 和 CPU 的稳定性问题已修复；近期在 Windows 和 Linux 的测试中均能生成正常音频。Vulkan 后端仍存在问题（可能产生噪音或输出异常）。用于生产前请先阅读[已知问题](#已知问题)。
 
 本项目将原始 CosyVoice 项目发布的 Python 推理流程迁移到 C++/GGML，目前主要支持 **CosyVoice3**。
 
@@ -297,8 +297,11 @@ python convert_model_to_gguf.py \
 - **CUDA 后端（Windows + Linux）：**
   - 在近期针对 Ada Lovelace GPU 的测试中，CUDA 稳定性问题已解决。
   - Windows CUDA 与 Linux CUDA 在这些测试中均可正常生成音频。
-- **CPU / Vulkan：**
-  - 当前测试中仍无法正常运行（例如噪音/输出异常）。
+- **CPU 后端：**
+  - 在近期测试中，CPU 后端的稳定性问题也已得到解决。
+  - Windows 与 Linux 在这些测试中均可正常生成音频。(感谢 @[jasagiri](https://github.com/jasagiri))
+- **Vulkan：**
+  - Vulkan 后端在当前测试中仍无法正常运行（例如产生噪音或输出异常）。
 
 补充说明：
 - 目前仅在 Ada Lovelace 架构显卡上做过验证。
@@ -309,7 +312,7 @@ python convert_model_to_gguf.py \
 - CMake 找不到 GGML：设置 `-DGGML_SOURCE_DIR=...`，或使用默认 `vendor/ggml` 并确保本机可用 Git（用于自动克隆）。
 - ICU/ONNX Runtime 检测失败：可安装系统包（适用平台），或将预编译文件放到 `<build_dir>/_deps/icu` 与 `<build_dir>/_deps/onnxruntime`。
 - Windows 运行时缺库：检查 `build/bin` 下是否存在构建后复制的依赖 DLL。
-- CPU/Vulkan 输出异常或有噪音：当前属于已知问题，建议优先使用 CUDA 后端。
+- Vulkan 输出异常或有噪音：当前属于已知问题，建议优先使用 CUDA 后端。
 
 ## 欢迎贡献
 欢迎提交 Issue 和 Pull Request，尤其是：

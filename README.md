@@ -4,7 +4,7 @@ Language: [中文](README_zh.md)
 
 > Unofficial project notice: this repository is **not** affiliated with, endorsed by, or maintained by the official CosyVoice team. It is a community-maintained C++/GGML port created by an independent developer.
 
-> **Current status notice:** In recent tests on Ada Lovelace GPUs, CUDA stability issues were resolved and both Windows and Linux CUDA runs generated normal audio. CPU and Vulkan backends are still not running normally. Please review [Known Issues](#known-issues) before production use.
+> **Current status notice:** CUDA and CPU stability issues were resolved; recent Windows and Linux tests produced normal audio. The Vulkan backend remains problematic (noisy/incorrect output). Please review [Known Issues](#known-issues) before production use.
 
 C++/GGML port of the Python CosyVoice inference pipeline released by the original CosyVoice project, currently focused on **CosyVoice3**.
 
@@ -297,8 +297,11 @@ Tested observations:
 - **CUDA backend (Windows + Linux):**
   - In recent tests on Ada Lovelace GPUs, CUDA stability issues were resolved.
   - Windows CUDA and Linux CUDA runs generated normal audio in those tests.
-- **CPU / Vulkan backends:**
-  - Still cannot run normally in current tests (for example noisy/incorrect output).
+- **CPU backend:**
+  - In recent tests, CPU backend stability issues were also resolved.
+  - Windows and Linux runs generated normal audio in those tests. (Thanks @[jasagiri](https://github.com/jasagiri))
+- **Vulkan backend:**
+  - The Vulkan backend still does not run normally in current tests (e.g., produces noisy or incorrect output).
 
 Additional note:
 - Tests were performed on Ada Lovelace GPUs only.
@@ -309,7 +312,7 @@ Additional note:
 - CMake cannot find GGML: set `-DGGML_SOURCE_DIR=...` or keep default `vendor/ggml` and ensure Git is available for auto-clone.
 - ICU/ONNX Runtime detection issues: either install system packages (where applicable) or place prebuilt files into `<build_dir>/_deps/icu` and `<build_dir>/_deps/onnxruntime`.
 - Executable starts but misses runtime libraries on Windows: ensure post-build copied DLLs exist next to binaries in `build/bin`.
-- CPU/Vulkan output is noisy or incorrect: this is currently a known issue; use CUDA backend when possible.
+- Vulkan output is noisy or incorrect: this is currently a known issue; use CUDA backend when possible.
 
 ## Contributing
 Contributions are welcome.
