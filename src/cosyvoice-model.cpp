@@ -71,6 +71,13 @@ cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context
         a = ggml_im2col(ctx0.get(), w, a, 1, 0, 0, 0, 1, 0, false, GGML_TYPE_F32);
         op_caps.im2col = ggml_backend_supports_op(backend, a);
     }
+
+    {
+        ggml_tensor* w = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F16, 3, 4, 8);
+        a = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F16, 16, 4, 1);
+        a = ggml_im2col(ctx0.get(), w, a, 1, 0, 0, 0, 1, 0, false, GGML_TYPE_F16);
+        op_caps.im2col_f16 = ggml_backend_supports_op(backend, a);
+    }
 }
 
 bool cosyvoice_model::using_builtin_sampler() const

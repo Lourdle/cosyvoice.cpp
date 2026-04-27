@@ -138,27 +138,38 @@ ggml_tensor* Conv1d::build_cgraph(ggml_context* ctx, ggml_tensor* x, int s, int 
 
     ggml_tensor* im2col;
     ggml_tensor* weight = this->weight;
+    // Backends without F16 IM2COL support (e.g. Metal) need F32 input + F32/F16
+    // output and contiguous src[1]. Fall back only when the probe says so.
+    const bool needs_f32_fallback = !capabilities.im2col_f16;
+    if (needs_f32_fallback && x->type == GGML_TYPE_F16)
+        x = ggml_cast(ctx, x, GGML_TYPE_F32);
     if (g != 1)
     {
         GGML_ASSERT(weight->ne[2] % g == 0 && weight->ne[1] * g == x->ne[1]);
 
         auto xs = reinterpret_cast<ggml_tensor**>(alloca(sizeof(ggml_tensor*) * g));
         auto ws = reinterpret_cast<ggml_tensor**>(alloca(sizeof(ggml_tensor*) * g));
+        if (needs_f32_fallback && weight->type == GGML_TYPE_F16)
+            weight = ggml_cast(ctx, weight, GGML_TYPE_F32);
         split_tensor(ctx, x, 1, xs, g);
         split_tensor(ctx, weight, 2, ws, g);
+        const auto out_type = needs_f32_fallback ? GGML_TYPE_F32 : weight->type;
         for (int i = 0; i != g; i++)
             xs[i] = unsqueeze(ctx,
                 ggml_im2col(ctx,
                     ws[i],
                     ggml_cont(ctx, xs[i]),
                     s, 0, p, 0, d, 0,
-                    false, weight->type),
+                    false, out_type),
                 2);
         im2col = concat_tensors(ctx, xs, g, 2, capabilities);
     }
     else
     {
-        im2col = ggml_im2col(ctx, weight, x, s, 0, p, 0, d, 0, false, weight->type);
+        const auto out_type = needs_f32_fallback
+            ? ((weight->type == GGML_TYPE_F16) ? GGML_TYPE_F16 : GGML_TYPE_F32)
+            : weight->type;
+        im2col = ggml_im2col(ctx, weight, x, s, 0, p, 0, d, 0, false, out_type);
         if (im2col->ne[1] > 0xFFFF)
         {
             // Split the im2col output along the output-width dimension.
@@ -191,7 +202,8 @@ ggml_tensor* Conv1d::build_cgraph(ggml_context* ctx, ggml_tensor* x, int s, int 
                 );
 
                 auto chunk_im2col = ggml_im2col(
-                    ctx, weight, x_view,
+                    ctx, weight,
+                    needs_f32_fallback ? ggml_cont(ctx, x_view) : x_view,
                     s, 1,
                     chunk_p0, 0,
                     d, 1,
