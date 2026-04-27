@@ -441,14 +441,14 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     noise_rng.seed(this->params.seed);
     sampler_rng.seed(noise_rng());
 
-    hift.m_source.l_sin_gen.rand_ini = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_F32, hift.nfft / 2 + 1);
+    hift.m_source.l_sin_gen.rand_ini = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_F32, hift.nb_harmonics + 1);
     ggml_backend_tensor_alloc(buffer.get(), hift.m_source.l_sin_gen.rand_ini, buffer_base);
     buffer_base += get_aligned_size(hift.m_source.l_sin_gen.rand_ini->nb[1], alignment);
 
     auto temp_buffer = std::make_unique<float[]>(hift.nfft);
     temp_buffer[0] = 0.f;
-    std::normal_distribution<float> dist(0.0f, 1.0f);
-    for (auto& i : std::span(temp_buffer.get() + 1, hift.nfft / 2))
+    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+    for (auto& i : std::span(temp_buffer.get() + 1, hift.nb_harmonics))
         i = dist(noise_rng);
     hift.set_rand_ini(temp_buffer.get());
 

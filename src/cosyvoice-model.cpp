@@ -49,28 +49,28 @@ cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context
     a = ggml_concat(ctx0.get(), a, a, 0);
     op_caps.concat_i32 = ggml_backend_supports_op(backend, a);
 
-	a = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F16, 11, 4, 51);
-	a = ggml_repeat_4d(ctx0.get(), a, 11, 4, 51, 4);
-	op_caps.repeat_f16 = ggml_backend_supports_op(backend, a);
+    a = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F16, 11, 4, 51);
+    a = ggml_repeat_4d(ctx0.get(), a, 11, 4, 51, 4);
+    op_caps.repeat_f16 = ggml_backend_supports_op(backend, a);
 
-	a = ggml_new_tensor_2d(ctx0.get(), GGML_TYPE_F32, 16, 4);
-	a = ggml_pad(ctx0.get(), a, 4, 0, 0, 0);
-	op_caps.pad = ggml_backend_supports_op(backend, a);
+    a = ggml_new_tensor_2d(ctx0.get(), GGML_TYPE_F32, 16, 4);
+    a = ggml_pad(ctx0.get(), a, 4, 0, 0, 0);
+    op_caps.pad = ggml_backend_supports_op(backend, a);
 
-	a = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F32, 16, 4, 1);
-	a = ggml_pad_ext(ctx0.get(), a, 2, 0, 0, 0, 0, 0, 0, 0);
-	op_caps.pad_ext = ggml_backend_supports_op(backend, a);
+    a = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F32, 16, 4, 1);
+    a = ggml_pad_ext(ctx0.get(), a, 2, 0, 0, 0, 0, 0, 0, 0);
+    op_caps.pad_ext = ggml_backend_supports_op(backend, a);
 
-	a = ggml_new_tensor_1d(ctx0.get(), GGML_TYPE_F32, 16);
-	a = ggml_pad_reflect_1d(ctx0.get(), a, 1, 0);
-	op_caps.pad_reflect_1d = ggml_backend_supports_op(backend, a);
+    a = ggml_new_tensor_1d(ctx0.get(), GGML_TYPE_F32, 16);
+    a = ggml_pad_reflect_1d(ctx0.get(), a, 1, 0);
+    op_caps.pad_reflect_1d = ggml_backend_supports_op(backend, a);
 
-	{
-		ggml_tensor* w = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F32, 3, 4, 8);
-		a = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F32, 16, 4, 1);
-		a = ggml_im2col(ctx0.get(), w, a, 1, 0, 0, 0, 1, 0, false, GGML_TYPE_F32);
-		op_caps.im2col = ggml_backend_supports_op(backend, a);
-	}
+    {
+        ggml_tensor* w = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F32, 3, 4, 8);
+        a = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F32, 16, 4, 1);
+        a = ggml_im2col(ctx0.get(), w, a, 1, 0, 0, 0, 1, 0, false, GGML_TYPE_F32);
+        op_caps.im2col = ggml_backend_supports_op(backend, a);
+    }
 }
 
 bool cosyvoice_model::using_builtin_sampler() const
@@ -135,7 +135,7 @@ void cosyvoice_model::empty_buffer_cache()
         backends,
         nullptr,
         backend == cpu_backend ? 1 : 2,
-        GGML_DEFAULT_GRAPH_SIZE,
+        GGML_DEFAULT_GRAPH_SIZE * 2,
         true,
         true
     ));
@@ -209,7 +209,7 @@ cosyvoice_model_3::cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_con
 
 void CausalHiFTGenerator::set_rand_ini(const float* data) const
 {
-    ggml_backend_tensor_set(m_source.l_sin_gen.rand_ini, data, 0, (nfft / 2 + 1) * sizeof(float));
+    ggml_backend_tensor_set(m_source.l_sin_gen.rand_ini, data, 0, (nb_harmonics + 1) * sizeof(float));
 }
 
 bool cosyvoice_model_3::llm_is_stop_token(int token_id)
@@ -229,7 +229,7 @@ const ggml_tensor* cosyvoice_model_3::get_speech_token_embed_weight()
 
 uint32_t cosyvoice_model_3::get_hift_rand_ini_len()
 {
-    return hift.nfft / 2 + 1;
+    return hift.nb_harmonics + 1;
 }
 
 void cosyvoice_model_3::set_hift_rand_ini(const float* data)
