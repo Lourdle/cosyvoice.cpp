@@ -80,12 +80,8 @@ static ggml_tensor* build_qwen2_decoder_layer(const Qwen2DecoderLayer& layer, gg
 
 static void set_graph_backend(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml_backend_t backend)
 {
-    int nodes = ggml_graph_n_nodes(gf);
-
-    for (int i = 0; i != nodes; ++i) {
-        auto node = ggml_graph_node(gf, i);
+    for (auto node : ggml_cgraph_node_iterator(gf))
         ggml_backend_sched_set_tensor_backend(sched, node, backend);
-    }
 }
 
 bool cosyvoice_model_3::llm_prefill(
