@@ -32,6 +32,7 @@ struct cli_options
     bool text_normalization_enabled = true;
 #endif
     std::string model;
+    std::string backend_path;
 #ifndef COSYVOICE_NO_FRONTEND
     bool frontend_only = false;
     std::string speech_tokenizer;
@@ -128,6 +129,7 @@ static void print_usage(const tchar* argv0)
     printf("\nCore options:\n");
     printf("  --help, -h                                  Show this help message and exit.\n");
     printf("  --model, -m <file>                          CosyVoice model file.\n");
+    printf("  --backend-path <dir>                        GGML backend directory. Default: load from the executable's directory.\n");
     printf("  --text, -t <text>                           Text to synthesize.\n");
     printf("  --instruction, -i <text>                    Only used in instruct mode.\n");
 #ifdef COSYVOICE_NO_AUDIO
@@ -761,6 +763,8 @@ int main(int argc, char** argv)
         }
         else if (tchar_casecmp(arg, COSYVOICE_TEXT("--model")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-m")) == 0)
             options.model = tchar_to_utf8(get_arg_value());
+        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--backend-path")) == 0)
+            options.backend_path = tchar_to_utf8(get_arg_value());
         else if (tchar_casecmp(arg, COSYVOICE_TEXT("--max-llm-len")) == 0)
         {
             auto value = tchar_to_utf8(get_arg_value());
@@ -953,7 +957,7 @@ int main(int argc, char** argv)
 #endif
 
     auto stage_start = std::chrono::steady_clock::now();
-    cosyvoice_init_backend();
+    cosyvoice_init_backend_from_path(options.backend_path.empty() ? nullptr : options.backend_path.c_str());
     timing.backend_init_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
 
     cosyvoice_prompt_speech_handle prompt_speech;
