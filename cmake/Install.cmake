@@ -16,13 +16,8 @@ if(TARGET ICU::uc AND NOT ICU_FOUND)
     endif()
 endif()
 
-if(TARGET ffmpeg AND DEFINED FFMPEG_RUNTIME_DLLS)
-    if(DEFINED FFMPEG_RUNTIME_DLLS)
-        list(APPEND PREBUILT_SHARED_LIBS ${FFMPEG_RUNTIME_DLLS})
-    else()
-        file(GLOB FFMPEG_DLLS "${FFMPEG_PREBUILT_DIR}/bin/*.dll")
-        list(APPEND PREBUILT_SHARED_LIBS ${FFMPEG_DLLS})
-    endif()
+if(TARGET ffmpeg AND DEFINED FFMPEG_RUNTIME_SHARED_LIBS)
+    list(APPEND PREBUILT_SHARED_LIBS ${FFMPEG_RUNTIME_SHARED_LIBS})
 endif()
 
 if(WIN32)
@@ -32,6 +27,15 @@ if(WIN32)
         add_custom_command(TARGET cosyvoice POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_RUNTIME_DLLS:cosyvoice>
+                $<TARGET_FILE_DIR:cosyvoice>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
+
+    if(TARGET ffmpeg AND DEFINED FFMPEG_RUNTIME_SHARED_LIBS)
+        add_custom_command(TARGET cosyvoice POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${FFMPEG_RUNTIME_SHARED_LIBS}
                 $<TARGET_FILE_DIR:cosyvoice>
             COMMAND_EXPAND_LISTS
         )

@@ -262,7 +262,7 @@ if(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG")
             if(_ffmpeg_dlls_len EQUAL 0)
                 message(FATAL_ERROR "FFmpeg DLLs not found in ${FFMPEG_PREBUILT_DIR}/bin")
             endif()
-            set(FFMPEG_RUNTIME_DLLS ${FFMPEG_DLLS})
+            set(FFMPEG_RUNTIME_SHARED_LIBS ${FFMPEG_DLLS})
 
             set_target_properties(ffmpeg PROPERTIES
                 INTERFACE_INCLUDE_DIRECTORIES "${FFMPEG_PREBUILT_DIR}/include"
@@ -270,6 +270,26 @@ if(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG")
                     "${FFMPEG_PREBUILT_DIR}/lib/avcodec.lib;${FFMPEG_PREBUILT_DIR}/lib/avformat.lib;${FFMPEG_PREBUILT_DIR}/lib/avutil.lib;${FFMPEG_PREBUILT_DIR}/lib/swresample.lib"
             )
         else()
+            file(GLOB FFMPEG_SHARED_LIBS
+                "${FFMPEG_PREBUILT_DIR}/lib/libavcodec.so"
+                "${FFMPEG_PREBUILT_DIR}/lib/libavcodec.so.*"
+                "${FFMPEG_PREBUILT_DIR}/lib/libavcodec.dylib"
+                "${FFMPEG_PREBUILT_DIR}/lib/libavformat.so"
+                "${FFMPEG_PREBUILT_DIR}/lib/libavformat.so.*"
+                "${FFMPEG_PREBUILT_DIR}/lib/libavformat.dylib"
+                "${FFMPEG_PREBUILT_DIR}/lib/libavutil.so"
+                "${FFMPEG_PREBUILT_DIR}/lib/libavutil.so.*"
+                "${FFMPEG_PREBUILT_DIR}/lib/libavutil.dylib"
+                "${FFMPEG_PREBUILT_DIR}/lib/libswresample.so"
+                "${FFMPEG_PREBUILT_DIR}/lib/libswresample.so.*"
+                "${FFMPEG_PREBUILT_DIR}/lib/libswresample.dylib"
+            )
+            list(LENGTH FFMPEG_SHARED_LIBS _ffmpeg_shared_len)
+            if(_ffmpeg_shared_len EQUAL 0)
+                message(FATAL_ERROR "FFmpeg shared libraries not found in ${FFMPEG_PREBUILT_DIR}/lib")
+            endif()
+            set(FFMPEG_RUNTIME_SHARED_LIBS ${FFMPEG_SHARED_LIBS})
+
             find_library(FFMPEG_AVCODEC_LIBRARY NAMES avcodec HINTS
                 "${FFMPEG_PREBUILT_DIR}/lib"
                 "/opt/homebrew/lib" "/usr/local/lib"
@@ -342,7 +362,7 @@ if(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG")
             if(_ffmpeg_dlls_len EQUAL 0)
                 message(FATAL_ERROR "FFmpeg DLLs not found in ${FFMPEG_PREBUILT_DIR}/bin")
             endif()
-            set(FFMPEG_RUNTIME_DLLS ${FFMPEG_DLLS})
+            set(FFMPEG_RUNTIME_SHARED_LIBS ${FFMPEG_DLLS})
 
             set_target_properties(ffmpeg PROPERTIES
                 INTERFACE_INCLUDE_DIRECTORIES "${FFMPEG_PREBUILT_DIR}/include"

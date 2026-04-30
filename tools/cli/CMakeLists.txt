@@ -20,24 +20,6 @@ if(COSYVOICE_NO_ICU)
     target_compile_definitions(cosyvoice-cli PRIVATE COSYVOICE_NO_ICU)
 endif()
 
-if(WIN32)
-    add_custom_command(TARGET cosyvoice-cli POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_RUNTIME_DLLS:cosyvoice-cli>
-            $<TARGET_FILE_DIR:cosyvoice-cli>
-        COMMAND_EXPAND_LISTS
-    )
-
-    if(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG" AND DEFINED FFMPEG_RUNTIME_DLLS)
-        add_custom_command(TARGET cosyvoice-cli POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${FFMPEG_RUNTIME_DLLS}
-                $<TARGET_FILE_DIR:cosyvoice-cli>
-            COMMAND_EXPAND_LISTS
-        )
-    endif()
-endif()
-
 install(TARGETS cosyvoice-cli
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
