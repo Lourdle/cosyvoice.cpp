@@ -1,5 +1,7 @@
 set(SERVER_SOURCES
+    cosyvoice-server.h
     cosyvoice-server.cpp
+    cosyvoice-server-backend.cpp
 )
 
 add_executable(cosyvoice-server ${SERVER_SOURCES})
@@ -24,24 +26,6 @@ endif()
 
 if(COSYVOICE_NO_ICU)
     target_compile_definitions(cosyvoice-server PRIVATE COSYVOICE_NO_ICU)
-endif()
-
-if(WIN32)
-    add_custom_command(TARGET cosyvoice-server POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_RUNTIME_DLLS:cosyvoice-server>
-            $<TARGET_FILE_DIR:cosyvoice-server>
-        COMMAND_EXPAND_LISTS
-    )
-
-    if(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG" AND DEFINED FFMPEG_RUNTIME_DLLS)
-        add_custom_command(TARGET cosyvoice-server POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${FFMPEG_RUNTIME_DLLS}
-                $<TARGET_FILE_DIR:cosyvoice-server>
-            COMMAND_EXPAND_LISTS
-        )
-    endif()
 endif()
 
 install(TARGETS cosyvoice-server
