@@ -19,6 +19,7 @@ struct ggml_backend_op_capabilities
     bool pad           : 1;
     bool pad_reflect_1d: 1;
     bool im2col_f16    : 1;
+    bool fill          : 1;
 };
 
 struct ggml_cgraph_node_iterator

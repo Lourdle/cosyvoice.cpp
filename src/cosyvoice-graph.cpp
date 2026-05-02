@@ -483,14 +483,13 @@ std::array<float, 2> CausalConditionalCFM::get_t_and_dt(ggml_context* ctx, int s
     return { t, dt };
 }
 
-ggml_tensor* CausalConditionalCFM::build_cgraph_one_step(ggml_context* ctx, const DiTContext& ditctx, int step, ggml_backend_op_capabilities capabilities, int64_t cut_len, ggml_tensor** t_tensor) const
+ggml_tensor* CausalConditionalCFM::build_cgraph_one_step(ggml_context* ctx, const DiTContext& ditctx, int step, ggml_backend_op_capabilities capabilities, int64_t cut_len, ggml_tensor*& t_tensor) const
 {
     auto x = ditctx.x;
     auto [t, dt] = get_t_and_dt(ctx, step);
 
-    auto t_in = ggml_fill_inplace(ctx,
-        ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 2),
-        t);
+    auto t_in = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, 2);
+    t_in = capabilities.fill ? ggml_fill_inplace(ctx, t_in, t) : ggml_scale_bias_inplace(ctx, t_in, 0.f, t);
     auto x_in = ggml_repeat_4d(ctx, x, x->ne[0], x->ne[1], 2, x->ne[3]);
 
     auto [dphi_dt, cfg_dphi_dt] = split_tensor<2>(
@@ -520,8 +519,7 @@ ggml_tensor* CausalConditionalCFM::build_cgraph_one_step(ggml_context* ctx, cons
     x = ggml_add(ctx, x,
         ggml_scale(ctx, dphi_dt, dt));
 
-    if (t_tensor)
-        *t_tensor = t_in;
+    t_tensor = t_in;
     return x;
 }
 
