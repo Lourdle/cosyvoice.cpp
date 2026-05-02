@@ -40,6 +40,7 @@ quantize --help
 
 核心启动参数：
 - `--model <file.gguf>`：必填模型文件。
+- `--backend-path <dir>`：GGML backend 所在目录。如果不指定此选项，将默认加载程序所在目录的 GGML 后端。
 - `--served-model-name <name>`：API 对外模型名（请求中的 `model` 必须匹配）。如果省略，服务器会优先使用 `cosyvoice_get_architecture()` 返回的模型架构名；如果没有可用架构名，则回退为由模型文件名推导的名称。
 - `--voice-prompt <voice=prompt_speech.gguf>`：将一个 `voice` 名映射到一个 `prompt_speech` 文件（可重复传入）。
 - `--host <host>`、`--port <port>`：监听地址，默认 `127.0.0.1:8080`。
@@ -270,6 +271,7 @@ cosyvoice-cli \
 核心参数：
 - `--help, -h`：显示帮助并退出。
 - `--model, -m <file>`：TTS 使用的 CosyVoice 模型文件（`.gguf`）。
+- `--backend-path <dir>`：GGML backend 所在目录。如果不指定此选项，将默认加载程序所在目录的 GGML 后端。
 - `--text, -t <text>`：待合成文本。
 - `--output, -o <file>`：输出音频文件路径。
   - 常规构建：输出格式由文件扩展名决定。

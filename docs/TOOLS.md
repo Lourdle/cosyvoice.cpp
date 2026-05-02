@@ -40,6 +40,7 @@ Authentication behavior:
 
 Core startup options:
 - `--model <file.gguf>`: required model file.
+- `--backend-path <dir>`: GGML backend directory. If omitted, the server will load the GGML backend from the executable's directory.
 - `--served-model-name <name>`: exposed model id used by API requests. If omitted, the server will use the model architecture from `cosyvoice_get_architecture()` when available, and fall back to a name derived from the model filename otherwise.
 - `--voice-prompt <voice=prompt_speech.gguf>`: map one `voice` name to one `prompt_speech` file (repeatable).
 - `--host <host>`, `--port <port>`: bind address. Defaults: `127.0.0.1:8080`.
@@ -270,6 +271,7 @@ cosyvoice-cli \
 Core options:
 - `--help, -h`: Show help message and exit.
 - `--model, -m <file>`: CosyVoice model file (`.gguf`) used for TTS.
+- `--backend-path <dir>`: GGML backend directory. If omitted, the CLI will load the GGML backend from the executable's directory.
 - `--text, -t <text>`: Text to synthesize.
 - `--output, -o <file>`: Output audio path.
   - Normal build: format is inferred from file extension.
