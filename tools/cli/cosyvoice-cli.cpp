@@ -114,16 +114,15 @@ static cli_log_level get_log_level(const cli_options& options)
     #define PROMPT_AUDIO_CMD "--prompt-audio <file>"
 #endif
 
-static void print_usage(const tchar* argv0)
+static void print_usage(const char* argv0)
 {
-    auto exe = tchar_to_utf8(argv0);
     const char* supported_formats = cosyvoice_audio_supported_encoding_formats();
     printf("cosyvoice-cli - command line TTS tool\n\n");
     printf("Usage:\n");
-    printf("  %s --model <file.gguf> --prompt-speech <file> --text <text> --output <file>\n", exe.c_str());
+    printf("  %s --model <file.gguf> --prompt-speech <file> --text <text> --output <file>\n", argv0);
 #ifndef COSYVOICE_NO_FRONTEND
-    printf("  %s --frontend-only --speech-tokenizer <file.onnx> --campplus <file.onnx> %s --prompt-text <text> --prompt-speech-output <file>\n", exe.c_str(), PROMPT_AUDIO_CMD);
-    printf("  %s --model <file.gguf> --speech-tokenizer <file.onnx> --campplus <file.onnx> %s --prompt-text <text> --text <text> --output <file>\n", exe.c_str(), PROMPT_AUDIO_CMD);
+    printf("  %s --frontend-only --speech-tokenizer <file.onnx> --campplus <file.onnx> %s --prompt-text <text> --prompt-speech-output <file>\n", argv0, PROMPT_AUDIO_CMD);
+    printf("  %s --model <file.gguf> --speech-tokenizer <file.onnx> --campplus <file.onnx> %s --prompt-text <text> --text <text> --output <file>\n", argv0, PROMPT_AUDIO_CMD);
 #endif
 
     printf("\nCore options:\n");
@@ -726,14 +725,8 @@ static bool validate_options(cli_options& options)
     return ok;
 }
 
-#ifdef _WIN32
-int wmain(int argc, wchar_t** argv)
+int tool_entry(int argc, char** argv)
 {
-    setup_console_utf8();
-#else
-int main(int argc, char** argv)
-{
-#endif
     if (argc == 1)
     {
         print_usage(argv[0]);
@@ -744,192 +737,192 @@ int main(int argc, char** argv)
     for (int i = 1; i != argc; ++i)
     {
         auto arg = argv[i];
-        auto get_arg_value = [&]() -> tchar*
+        auto get_arg_value = [&]() -> char*
         {
             if (++i == argc)
             {
-                auto option = tchar_to_utf8(arg);
-                print_error_log("Error: missing value for the command-line option \"%s\".\n", option.c_str());
+                auto option = arg;
+                print_error_log("Error: missing value for the command-line option \"%s\".\n", option);
                 exit(1);
             }
 
             return argv[i];
         };
 
-        if (tchar_casecmp(arg, COSYVOICE_TEXT("--help")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-h")) == 0)
+        if (str_casecmp(arg, "--help") == 0 || str_casecmp(arg, "-h") == 0)
         {
             print_usage(argv[0]);
             return 0;
         }
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--model")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-m")) == 0)
-            options.model = tchar_to_utf8(get_arg_value());
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--backend-path")) == 0)
-            options.backend_path = tchar_to_utf8(get_arg_value());
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--max-llm-len")) == 0)
+        else if (str_casecmp(arg, "--model") == 0 || str_casecmp(arg, "-m") == 0)
+            options.model = get_arg_value();
+        else if (str_casecmp(arg, "--backend-path") == 0)
+            options.backend_path = get_arg_value();
+        else if (str_casecmp(arg, "--max-llm-len") == 0)
         {
-            auto value = tchar_to_utf8(get_arg_value());
+            auto value = get_arg_value();
             uint32_t max_llm_len;
             if (!parse_uint32_arg(value, &max_llm_len) || max_llm_len <= 0)
             {
-                print_error_log("Error: invalid --max-llm-len value \"%s\".\n", value.c_str());
+                print_error_log("Error: invalid --max-llm-len value \"%s\".\n", value);
                 return 1;
             }
             options.max_llm_len = max_llm_len;
         }
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--threads")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-j")) == 0)
+        else if (str_casecmp(arg, "--threads") == 0 || str_casecmp(arg, "-j") == 0)
         {
-            auto value = tchar_to_utf8(get_arg_value());
+            auto value = get_arg_value();
             uint32_t n_threads;
             if (!parse_uint32_arg(value, &n_threads))
             {
-                print_error_log("Error: invalid --threads value \"%s\". It should be a non-negative integer between 0 and %u.\n", value.c_str(), UINT32_MAX);
+                print_error_log("Error: invalid --threads value \"%s\". It should be a non-negative integer between 0 and %u.\n", value, UINT32_MAX);
                 return 1;
             }
             options.n_threads = n_threads;
         }
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--llm-kv-cache-type")) == 0)
+        else if (str_casecmp(arg, "--llm-kv-cache-type") == 0)
         {
-            auto value = tchar_to_utf8(get_arg_value());
+            auto value = get_arg_value();
             cosyvoice_llm_kv_cache_type_t type;
             if (!parse_llm_kv_cache_type_arg(value, &type))
             {
-                print_error_log("Error: invalid --llm-kv-cache-type value \"%s\".\n", value.c_str());
+                print_error_log("Error: invalid --llm-kv-cache-type value \"%s\".\n", value);
                 return 1;
             }
             options.llm_kv_cache_type = type;
             options.has_llm_kv_cache_type = true;
         }
 #ifndef COSYVOICE_NO_FRONTEND
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--frontend-only")) == 0)
+        else if (str_casecmp(arg, "--frontend-only") == 0)
             options.frontend_only = true;
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--speech-tokenizer")) == 0)
-            options.speech_tokenizer = tchar_to_utf8(get_arg_value());
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--campplus")) == 0)
-            options.campplus = tchar_to_utf8(get_arg_value());
+        else if (str_casecmp(arg, "--speech-tokenizer") == 0)
+            options.speech_tokenizer = get_arg_value();
+        else if (str_casecmp(arg, "--campplus") == 0)
+            options.campplus = get_arg_value();
     #ifdef COSYVOICE_NO_AUDIO
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--prompt-audio-16k")) == 0)
-            options.prompt_audio_16k = tchar_to_utf8(get_arg_value());
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--prompt-audio-24k")) == 0)
-            options.prompt_audio_24k = tchar_to_utf8(get_arg_value());
+        else if (str_casecmp(arg, "--prompt-audio-16k") == 0)
+            options.prompt_audio_16k = get_arg_value();
+        else if (str_casecmp(arg, "--prompt-audio-24k") == 0)
+            options.prompt_audio_24k = get_arg_value();
     #else
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--prompt-audio")) == 0)
-            options.prompt_audio = tchar_to_utf8(get_arg_value());
+        else if (str_casecmp(arg, "--prompt-audio") == 0)
+            options.prompt_audio = get_arg_value();
     #endif
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--prompt-text")) == 0)
-            options.prompt_text = tchar_to_utf8(get_arg_value());
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--prompt-speech-output")) == 0)
-            options.prompt_speech_output = tchar_to_utf8(get_arg_value());
+        else if (str_casecmp(arg, "--prompt-text") == 0)
+            options.prompt_text = get_arg_value();
+        else if (str_casecmp(arg, "--prompt-speech-output") == 0)
+            options.prompt_speech_output = get_arg_value();
 #endif
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--prompt-speech")) == 0)
-            options.prompt_speech = tchar_to_utf8(get_arg_value());
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--text")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-t")) == 0)
-            options.text = tchar_to_utf8(get_arg_value());
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--instruction")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-i")) == 0)
-            options.instruction = tchar_to_utf8(get_arg_value());
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--output")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-o")) == 0)
-            options.output = tchar_to_utf8(get_arg_value());
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--mode")) == 0)
-            options.mode = to_lower(tchar_to_utf8(get_arg_value()));
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--verbose")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-v")) == 0)
+        else if (str_casecmp(arg, "--prompt-speech") == 0)
+            options.prompt_speech = get_arg_value();
+        else if (str_casecmp(arg, "--text") == 0 || str_casecmp(arg, "-t") == 0)
+            options.text = get_arg_value();
+        else if (str_casecmp(arg, "--instruction") == 0 || str_casecmp(arg, "-i") == 0)
+            options.instruction = get_arg_value();
+        else if (str_casecmp(arg, "--output") == 0 || str_casecmp(arg, "-o") == 0)
+            options.output = get_arg_value();
+        else if (str_casecmp(arg, "--mode") == 0)
+            options.mode = to_lower(get_arg_value());
+        else if (str_casecmp(arg, "--verbose") == 0 || str_casecmp(arg, "-v") == 0)
             options.verbose = true;
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--quiet")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-q")) == 0)
+        else if (str_casecmp(arg, "--quiet") == 0 || str_casecmp(arg, "-q") == 0)
             options.quiet = true;
 #ifndef COSYVOICE_NO_ICU
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--disable-text-normalization")) == 0)
+        else if (str_casecmp(arg, "--disable-text-normalization") == 0)
             options.text_normalization_enabled = false;
 #endif
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--speed")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-s")) == 0)
+        else if (str_casecmp(arg, "--speed") == 0 || str_casecmp(arg, "-s") == 0)
         {
-            auto value = tchar_to_utf8(get_arg_value());
+            auto value = get_arg_value();
             float speed;
             if (!parse_float_arg(value, &speed) || speed <= 0.0f)
             {
-                print_error_log("Error: invalid --speed value \"%s\".\n", value.c_str());
+                print_error_log("Error: invalid --speed value \"%s\".\n", value);
                 return 1;
             }
             options.speed = speed;
         }
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--seed")) == 0)
-            options.seed = tchar_to_utf8(get_arg_value());
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--temperature")) == 0)
+        else if (str_casecmp(arg, "--seed") == 0)
+            options.seed = get_arg_value();
+        else if (str_casecmp(arg, "--temperature") == 0)
         {
-            auto value = tchar_to_utf8(get_arg_value());
+            auto value = get_arg_value();
             float v;
             if (!parse_float_arg(value, &v))
             {
-                print_error_log("Error: invalid --temperature value \"%s\".\n", value.c_str());
+                print_error_log("Error: invalid --temperature value \"%s\".\n", value);
                 return 1;
             }
             options.temperature = v;
             options.has_temperature = true;
         }
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--top-k")) == 0)
+        else if (str_casecmp(arg, "--top-k") == 0)
         {
-            auto value = tchar_to_utf8(get_arg_value());
+            auto value = get_arg_value();
             int v;
             if (!parse_int_arg(value, &v))
             {
-                print_error_log("Error: invalid --top-k value \"%s\".\n", value.c_str());
+                print_error_log("Error: invalid --top-k value \"%s\".\n", value);
                 return 1;
             }
             options.top_k = v;
             options.has_top_k = true;
         }
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--top-p")) == 0)
+        else if (str_casecmp(arg, "--top-p") == 0)
         {
-            auto value = tchar_to_utf8(get_arg_value());
+            auto value = get_arg_value();
             float v;
             if (!parse_float_arg(value, &v))
             {
-                print_error_log("Error: invalid --top-p value \"%s\".\n", value.c_str());
+                print_error_log("Error: invalid --top-p value \"%s\".\n", value);
                 return 1;
             }
             options.top_p = v;
             options.has_top_p = true;
         }
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--win-size")) == 0)
+        else if (str_casecmp(arg, "--win-size") == 0)
         {
-            auto value = tchar_to_utf8(get_arg_value());
+            auto value = get_arg_value();
             int v;
             if (!parse_int_arg(value, &v))
             {
-                print_error_log("Error: invalid --win-size value \"%s\".\n", value.c_str());
+                print_error_log("Error: invalid --win-size value \"%s\".\n", value);
                 return 1;
             }
             options.win_size = v;
             options.has_win_size = true;
         }
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--tau-r")) == 0)
+        else if (str_casecmp(arg, "--tau-r") == 0)
         {
-            auto value = tchar_to_utf8(get_arg_value());
+            auto value = get_arg_value();
             float v;
             if (!parse_float_arg(value, &v))
             {
-                print_error_log("Error: invalid --tau-r value \"%s\".\n", value.c_str());
+                print_error_log("Error: invalid --tau-r value \"%s\".\n", value);
                 return 1;
             }
             options.tau_r = v;
             options.has_tau_r = true;
         }
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--min-token-text-ratio")) == 0)
+        else if (str_casecmp(arg, "--min-token-text-ratio") == 0)
         {
-            auto value = tchar_to_utf8(get_arg_value());
+            auto value = get_arg_value();
             float v;
             if (!parse_float_arg(value, &v))
             {
-                print_error_log("Error: invalid --min-token-text-ratio value \"%s\".\n", value.c_str());
+                print_error_log("Error: invalid --min-token-text-ratio value \"%s\".\n", value);
                 return 1;
             }
             options.min_token_text_ratio = v;
             options.has_min_token_text_ratio = true;
         }
-        else if (tchar_casecmp(arg, COSYVOICE_TEXT("--max-token-text-ratio")) == 0)
+        else if (str_casecmp(arg, "--max-token-text-ratio") == 0)
         {
-            auto value = tchar_to_utf8(get_arg_value());
+            auto value = get_arg_value();
             float v;
             if (!parse_float_arg(value, &v))
             {
-                print_error_log("Error: invalid --max-token-text-ratio value \"%s\".\n", value.c_str());
+                print_error_log("Error: invalid --max-token-text-ratio value \"%s\".\n", value);
                 return 1;
             }
             options.max_token_text_ratio = v;
@@ -937,8 +930,8 @@ int main(int argc, char** argv)
         }
         else
         {
-            auto option = tchar_to_utf8(arg);
-            print_error_log("Error: the program doesn't recognize the command-line option \"%s\".\n", option.c_str());
+            auto option = arg;
+            print_error_log("Error: the program doesn't recognize the command-line option \"%s\".\n", option);
             return 1;
         }
     }

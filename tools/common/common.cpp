@@ -3,7 +3,20 @@
 #ifdef _WIN32
     #define NOMINMAX
     #include <Windows.h>
+    #include <shellapi.h>
     #include <cwchar>
+
+static std::string wstr_to_utf8(const wchar_t* wstr)
+{
+    const int wide_len = static_cast<int>(wcslen(wstr));
+    const int utf8_len = WideCharToMultiByte(CP_UTF8, 0, wstr, wide_len, nullptr, 0, nullptr, nullptr);
+    if (utf8_len <= 0) return {};
+
+    std::string result(static_cast<size_t>(utf8_len), '\0');
+    if (WideCharToMultiByte(CP_UTF8, 0, wstr, wide_len, &result[0], utf8_len, nullptr, nullptr) <= 0)
+        return {};
+    return result;
+}
 #else
     #include <strings.h>
 #endif
@@ -20,24 +33,6 @@ std::string to_lower(std::string value)
 {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
     return value;
-}
-
-std::string tchar_to_utf8(const tchar* value)
-{
-    if (!value) return {};
-
-#ifdef _WIN32
-    const int wide_len = static_cast<int>(wcslen(value));
-    const int utf8_len = WideCharToMultiByte(CP_UTF8, 0, value, wide_len, nullptr, 0, nullptr, nullptr);
-    if (utf8_len <= 0) return {};
-
-    std::string result(static_cast<size_t>(utf8_len), '\0');
-    if (WideCharToMultiByte(CP_UTF8, 0, value, wide_len, &result[0], utf8_len, nullptr, nullptr) <= 0)
-        return {};
-    return result;
-#else
-    return value;
-#endif
 }
 
 std::string trim_copy(const std::string& value)
@@ -61,10 +56,10 @@ double bytes_to_mib(size_t bytes)
     return static_cast<double>(bytes) / (1024.0 * 1024.0);
 }
 
-int tchar_casecmp(const tchar* lhs, const tchar* rhs)
+int str_casecmp(const char* lhs, const char* rhs)
 {
 #ifdef _WIN32
-    return _wcsicmp(lhs, rhs);
+    return _stricmp(lhs, rhs);
 #else
     return strcasecmp(lhs, rhs);
 #endif
@@ -131,9 +126,29 @@ std::string get_local_timestamp_ms()
     return final_buf;
 }
 
-#ifdef _WIN32
-void setup_console_utf8()
+int main(int argc, char** argv)
 {
+#ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
-}
+
+    std::vector<char*> utf8_argv;
+    utf8_argv.reserve(argc);
+    std::vector<std::string> utf8_args_storage;
+    utf8_args_storage.reserve(argc);
+
+    {
+        auto wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
+        if (!wargv) return 1;
+
+        for (int i = 0; i < argc; ++i)
+        {
+            utf8_args_storage.push_back(wstr_to_utf8(wargv[i]));
+            utf8_argv.push_back(utf8_args_storage.back().data());
+        }
+        LocalFree(wargv);
+    }
+    argv = utf8_argv.data();
+
 #endif
+    return tool_entry(argc, argv);
+}

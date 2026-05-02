@@ -65,13 +65,12 @@ struct server_options
     bool quiet = false;
 };
 
-static void print_usage(const tchar* argv0)
+static void print_usage(const char* argv0)
 {
-    const auto exe = tchar_to_utf8(argv0);
     printf("cosyvoice-server - OpenAI Speech compatible API server\n\n");
     printf("Usage:\n");
-    printf("  %s --model <file.gguf> --voice-prompt <voice=prompt_speech.gguf> [--voice-prompt ...] [options]\n", exe.c_str());
-    printf("  %s --model <file.gguf> --voice <voice> --prompt-speech <prompt_speech.gguf> [options]\n", exe.c_str());
+    printf("  %s --model <file.gguf> --voice-prompt <voice=prompt_speech.gguf> [--voice-prompt ...] [options]\n", argv0);
+    printf("  %s --model <file.gguf> --voice <voice> --prompt-speech <prompt_speech.gguf> [options]\n", argv0);
 
     printf("\nCore options:\n");
     printf("  --help, -h                                  Show this help message and exit.\n");
@@ -334,17 +333,8 @@ static bool build_runtime(const server_options& options, server_runtime* runtime
     return true;
 }
 
-#ifdef _WIN32
-    #define tmain wmain
-#else
-    #define tmain main
-static inline void setup_console_utf8() {}
-#endif
-
-int tmain(int argc, tchar** argv)
+int tool_entry(int argc, char** argv)
 {
-    setup_console_utf8();
-
     if (argc == 1)
     {
         print_usage(argv[0]);
@@ -357,218 +347,218 @@ int tmain(int argc, tchar** argv)
         for (int i = 1; i != argc; ++i)
         {
             auto arg = argv[i];
-            auto get_arg_value = [&]() -> tchar*
+            auto get_arg_value = [&]() -> char*
             {
                 if (++i == argc)
                 {
-                    const auto option = tchar_to_utf8(arg);
-                    fprintf(stderr, "Error: missing value for the command-line option \"%s\".\n", option.c_str());
+                    const auto option = arg;
+                    fprintf(stderr, "Error: missing value for the command-line option \"%s\".\n", option);
                     exit(1);
                 }
                 return argv[i];
             };
 
-            if (tchar_casecmp(arg, COSYVOICE_TEXT("--help")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-h")) == 0)
+            if (str_casecmp(arg, "--help") == 0 || str_casecmp(arg, "-h") == 0)
             {
                 print_usage(argv[0]);
                 return 0;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--model")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-m")) == 0)
-                options.model = tchar_to_utf8(get_arg_value());
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--backend-path")) == 0)
-                options.backend_path = tchar_to_utf8(get_arg_value());
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--served-model-name")) == 0)
+            else if (str_casecmp(arg, "--model") == 0 || str_casecmp(arg, "-m") == 0)
+                options.model = get_arg_value();
+            else if (str_casecmp(arg, "--backend-path") == 0)
+                options.backend_path = get_arg_value();
+            else if (str_casecmp(arg, "--served-model-name") == 0)
             {
-                options.served_model_name = tchar_to_utf8(get_arg_value());
+                options.served_model_name = get_arg_value();
                 options.has_served_model_name = true;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--host")) == 0)
-                options.host = tchar_to_utf8(get_arg_value());
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--port")) == 0)
+            else if (str_casecmp(arg, "--host") == 0)
+                options.host = get_arg_value();
+            else if (str_casecmp(arg, "--port") == 0)
             {
-                const auto value = tchar_to_utf8(get_arg_value());
+                const auto value = get_arg_value();
                 uint16_t port;
                 if (!parse_uint16_port(value, &port))
                 {
-                    fprintf(stderr, "Error: invalid --port value \"%s\".\n", value.c_str());
+                    fprintf(stderr, "Error: invalid --port value \"%s\".\n", value);
                     return 1;
                 }
                 options.port = port;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--api-key")) == 0)
-                options.api_key = tchar_to_utf8(get_arg_value());
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--voice-prompt")) == 0)
+            else if (str_casecmp(arg, "--api-key") == 0)
+                options.api_key = get_arg_value();
+            else if (str_casecmp(arg, "--voice-prompt") == 0)
             {
-                const auto value = tchar_to_utf8(get_arg_value());
+                const auto value = get_arg_value();
                 voice_prompt_option mapping;
                 if (!parse_voice_prompt_mapping(value, &mapping))
                 {
-                    fprintf(stderr, "Error: invalid --voice-prompt value \"%s\". Expected <voice=prompt_speech.gguf>.\n", value.c_str());
+                    fprintf(stderr, "Error: invalid --voice-prompt value \"%s\". Expected <voice=prompt_speech.gguf>.\n", value);
                     return 1;
                 }
                 options.voice_prompts.push_back(std::move(mapping));
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--voice")) == 0)
+            else if (str_casecmp(arg, "--voice") == 0)
             {
-                options.single_voice = tchar_to_utf8(get_arg_value());
+                options.single_voice = get_arg_value();
                 options.has_single_voice_arg = true;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--prompt-speech")) == 0)
-                options.single_prompt_speech = tchar_to_utf8(get_arg_value());
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--max-llm-len")) == 0)
+            else if (str_casecmp(arg, "--prompt-speech") == 0)
+                options.single_prompt_speech = get_arg_value();
+            else if (str_casecmp(arg, "--max-llm-len") == 0)
             {
-                const auto value = tchar_to_utf8(get_arg_value());
+                const auto value = get_arg_value();
                 uint32_t max_llm_len;
                 if (!parse_uint32_arg(value, &max_llm_len) || max_llm_len == 0)
                 {
-                    fprintf(stderr, "Error: invalid --max-llm-len value \"%s\".\n", value.c_str());
+                    fprintf(stderr, "Error: invalid --max-llm-len value \"%s\".\n", value);
                     return 1;
                 }
                 options.max_llm_len = max_llm_len;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--inference-buffer-policy")) == 0)
+            else if (str_casecmp(arg, "--inference-buffer-policy") == 0)
             {
-                const auto value = tchar_to_utf8(get_arg_value());
+                const auto value = get_arg_value();
                 cosyvoice_inference_buffer_policy_t policy;
                 if (!parse_inference_buffer_policy_arg(value, &policy))
                 {
-                    fprintf(stderr, "Error: invalid --inference-buffer-policy value \"%s\".\n", value.c_str());
+                    fprintf(stderr, "Error: invalid --inference-buffer-policy value \"%s\".\n", value);
                     return 1;
                 }
                 options.inference_buffer_policy = policy;
                 options.has_inference_buffer_policy = true;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--threads")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-j")) == 0)
+            else if (str_casecmp(arg, "--threads") == 0 || str_casecmp(arg, "-j") == 0)
             {
-                const auto value = tchar_to_utf8(get_arg_value());
+                const auto value = get_arg_value();
                 uint32_t n_threads;
                 if (!parse_uint32_arg(value, &n_threads))
                 {
-                    fprintf(stderr, "Error: invalid --threads value \"%s\".\n", value.c_str());
+                    fprintf(stderr, "Error: invalid --threads value \"%s\".\n", value);
                     return 1;
                 }
                 options.n_threads = n_threads;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--seed")) == 0)
+            else if (str_casecmp(arg, "--seed") == 0)
             {
-                const auto value = tchar_to_utf8(get_arg_value());
+                const auto value = get_arg_value();
                 uint32_t seed;
                 if (!parse_uint32_arg(value, &seed))
                 {
-                    fprintf(stderr, "Error: invalid --seed value \"%s\".\n", value.c_str());
+                    fprintf(stderr, "Error: invalid --seed value \"%s\".\n", value);
                     return 1;
                 }
                 options.seed = seed;
                 options.has_seed = true;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--temperature")) == 0)
+            else if (str_casecmp(arg, "--temperature") == 0)
             {
-                const auto value = tchar_to_utf8(get_arg_value());
+                const auto value = get_arg_value();
                 float v;
                 if (!parse_float_arg(value, &v))
                 {
-                    fprintf(stderr, "Error: invalid --temperature value \"%s\".\n", value.c_str());
+                    fprintf(stderr, "Error: invalid --temperature value \"%s\".\n", value);
                     return 1;
                 }
                 options.temperature = v;
                 options.has_temperature = true;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--top-k")) == 0)
+            else if (str_casecmp(arg, "--top-k") == 0)
             {
-                const auto value = tchar_to_utf8(get_arg_value());
+                const auto value = get_arg_value();
                 int v;
                 if (!parse_int_arg(value, &v))
                 {
-                    fprintf(stderr, "Error: invalid --top-k value \"%s\".\n", value.c_str());
+                    fprintf(stderr, "Error: invalid --top-k value \"%s\".\n", value);
                     return 1;
                 }
                 options.top_k = v;
                 options.has_top_k = true;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--top-p")) == 0)
+            else if (str_casecmp(arg, "--top-p") == 0)
             {
-                const auto value = tchar_to_utf8(get_arg_value());
+                const auto value = get_arg_value();
                 float v;
                 if (!parse_float_arg(value, &v))
                 {
-                    fprintf(stderr, "Error: invalid --top-p value \"%s\".\n", value.c_str());
+                    fprintf(stderr, "Error: invalid --top-p value \"%s\".\n", value);
                     return 1;
                 }
                 options.top_p = v;
                 options.has_top_p = true;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--win-size")) == 0)
+            else if (str_casecmp(arg, "--win-size") == 0)
             {
-                const auto value = tchar_to_utf8(get_arg_value());
+                const auto value = get_arg_value();
                 int v;
                 if (!parse_int_arg(value, &v))
                 {
-                    fprintf(stderr, "Error: invalid --win-size value \"%s\".\n", value.c_str());
+                    fprintf(stderr, "Error: invalid --win-size value \"%s\".\n", value);
                     return 1;
                 }
                 options.win_size = v;
                 options.has_win_size = true;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--tau-r")) == 0)
+            else if (str_casecmp(arg, "--tau-r") == 0)
             {
-                const auto value = tchar_to_utf8(get_arg_value());
+                const auto value = get_arg_value();
                 float v;
                 if (!parse_float_arg(value, &v))
                 {
-                    fprintf(stderr, "Error: invalid --tau-r value \"%s\".\n", value.c_str());
+                    fprintf(stderr, "Error: invalid --tau-r value \"%s\".\n", value);
                     return 1;
                 }
                 options.tau_r = v;
                 options.has_tau_r = true;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--min-token-text-ratio")) == 0)
+            else if (str_casecmp(arg, "--min-token-text-ratio") == 0)
             {
-                const auto value = tchar_to_utf8(get_arg_value());
+                const auto value = get_arg_value();
                 float v;
                 if (!parse_float_arg(value, &v))
                 {
-                    fprintf(stderr, "Error: invalid --min-token-text-ratio value \"%s\".\n", value.c_str());
+                    fprintf(stderr, "Error: invalid --min-token-text-ratio value \"%s\".\n", value);
                     return 1;
                 }
                 options.min_token_text_ratio = v;
                 options.has_min_token_text_ratio = true;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--max-token-text-ratio")) == 0)
+            else if (str_casecmp(arg, "--max-token-text-ratio") == 0)
             {
-                const auto value = tchar_to_utf8(get_arg_value());
+                const auto value = get_arg_value();
                 float v;
                 if (!parse_float_arg(value, &v))
                 {
-                    fprintf(stderr, "Error: invalid --max-token-text-ratio value \"%s\".\n", value.c_str());
+                    fprintf(stderr, "Error: invalid --max-token-text-ratio value \"%s\".\n", value);
                     return 1;
                 }
                 options.max_token_text_ratio = v;
                 options.has_max_token_text_ratio = true;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--llm-kv-cache-type")) == 0)
+            else if (str_casecmp(arg, "--llm-kv-cache-type") == 0)
             {
-                const auto value = tchar_to_utf8(get_arg_value());
+                const auto value = get_arg_value();
                 cosyvoice_llm_kv_cache_type_t type;
                 if (!parse_llm_kv_cache_type_arg(value, &type))
                 {
-                    fprintf(stderr, "Error: invalid --llm-kv-cache-type value \"%s\".\n", value.c_str());
+                    fprintf(stderr, "Error: invalid --llm-kv-cache-type value \"%s\".\n", value);
                     return 1;
                 }
                 options.llm_kv_cache_type = type;
                 options.has_llm_kv_cache_type = true;
             }
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--verbose")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-v")) == 0)
+            else if (str_casecmp(arg, "--verbose") == 0 || str_casecmp(arg, "-v") == 0)
                 options.verbose = true;
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--quiet")) == 0 || tchar_casecmp(arg, COSYVOICE_TEXT("-q")) == 0)
+            else if (str_casecmp(arg, "--quiet") == 0 || str_casecmp(arg, "-q") == 0)
                 options.quiet = true;
 #ifndef COSYVOICE_NO_ICU
-            else if (tchar_casecmp(arg, COSYVOICE_TEXT("--disable-text-normalization")) == 0)
+            else if (str_casecmp(arg, "--disable-text-normalization") == 0)
                 options.text_normalization_enabled = false;
 #endif
             else
             {
-                const auto option = tchar_to_utf8(arg);
-                fprintf(stderr, "Error: the program doesn't recognize the command-line option \"%s\".\n", option.c_str());
+                const auto option = arg;
+                fprintf(stderr, "Error: the program doesn't recognize the command-line option \"%s\".\n", option);
                 return 1;
             }
         }
