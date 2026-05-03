@@ -29,8 +29,8 @@
 } while (false)
 #define LOAD_OPTIONAL_TENSOR(name) LOAD_OPTIONAL_TENSOR_EX(#name, name)
 
-#define LOAD_METADATA(name) loader.get_metadata(prefix, #name, name)
-#define LOAD_METADATA_NOPREFIX(name) loader.get_metadata(#name, name)
+#define LOAD_METADATA(name) GGML_ASSERT(loader.get_metadata(prefix, #name, name))
+#define LOAD_METADATA_NOPREFIX(name) GGML_ASSERT(loader.get_metadata(#name, name))
 
 void Module::OnLoad(const gguf_loader& loader, const std::string& prefix) {}
 
@@ -208,7 +208,7 @@ void CausalHiFTGenerator::OnLoad(const gguf_loader& loader, const std::string& p
     conv_pre.causal_type = CausalConv1d::causal_type_t::right;
 
     int num_kernels;
-    loader.get_metadata("sample_rate", reinterpret_cast<uint32_t&>(sampling_rate));
+    GGML_ASSERT(loader.get_metadata("sample_rate", reinterpret_cast<uint32_t&>(sampling_rate)));
     LOAD_METADATA(num_kernels);
     LOAD_METADATA(nb_harmonics);
     LOAD_METADATA(nsf_alpha);
@@ -216,8 +216,8 @@ void CausalHiFTGenerator::OnLoad(const gguf_loader& loader, const std::string& p
     LOAD_METADATA(nsf_sigma);
     LOAD_METADATA(lrelu_slope);
     LOAD_METADATA(audio_limit);
-    loader.get_metadata(prefix, "istft_params.n_fft", nfft);
-    loader.get_metadata(prefix, "istft_params.hop_len", hop_len);
+    GGML_ASSERT(loader.get_metadata(prefix, "istft_params.n_fft", nfft));
+    GGML_ASSERT(loader.get_metadata(prefix, "istft_params.hop_len", hop_len));
 
     int64_t id;
     GGML_ASSERT(loader.find_metadata_key(combine_prefix(prefix, "upsample_rates").c_str(), id));
