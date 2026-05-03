@@ -182,7 +182,7 @@ struct DiT : Module
 
     void OnLoad(const gguf_loader& loader, const std::string& prefix);
 
-    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* mu, ggml_tensor* t, ggml_tensor* spks, ggml_tensor* cond, int64_t cut_len, ggml_backend_op_capabilities capabilities) const;
+    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* mu, ggml_tensor* t, ggml_tensor* spks, ggml_tensor* cond, int64_t cut_len, ggml_tensor*& position_ids, ggml_backend_op_capabilities capabilities) const;
 };
 
 struct CausalConditionalCFM : Module
@@ -205,7 +205,7 @@ struct CausalConditionalCFM : Module
 
     DiTContext prepare_context(ggml_context* ctx, ggml_tensor* mu, ggml_tensor* spks, ggml_tensor* cond) const;
     std::array<float, 2> get_t_and_dt(ggml_context* ctx, int step) const;
-    ggml_tensor* build_cgraph_one_step(ggml_context* ctx, const DiTContext& ditctx, int step, ggml_backend_op_capabilities capabilities, int64_t cut_len, ggml_tensor*& t_tensor) const;
+    ggml_tensor* build_cgraph_one_step(ggml_context* ctx, const DiTContext& ditctx, int step, ggml_backend_op_capabilities capabilities, int64_t cut_len, ggml_tensor*& t_tensor, ggml_tensor*& position_ids) const;
 };
 
 struct PreLookaheadLayer : Module

@@ -186,6 +186,15 @@ static void set_graph_backends(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml
         case GGML_OP_PAD_REFLECT_1D:
             target_backend = op_caps.pad_reflect_1d ? backend : cpu_backend;
             break;
+        case GGML_OP_CUMSUM:
+            target_backend = op_caps.cumsum ? backend : cpu_backend;
+            break;
+        case GGML_OP_CPY:
+            if (node->type == GGML_TYPE_I32 && node->src[0]->type == GGML_TYPE_F32)
+            {
+                target_backend = cpu_backend;
+                break;
+            }
         default:
             target_backend = backend;
         }
@@ -236,12 +245,19 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
     ggml_backend_tensor_set_async(backend.get(), ditctx.x, noise_buffer, 0, ggml_nbytes(ditctx.x));
 
     ggml_tensor* t_leaf;
-    auto feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 1, op_caps, cut_len, t_leaf);
+    ggml_tensor* position_ids;
+    auto feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 1, op_caps, cut_len, t_leaf, position_ids);
     ggml_build_forward_expand(gf, feat);
     set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps);
     ggml_backend_sched_synchronize(sched.get());
     ggml_backend_sched_alloc_graph(sched.get(), gf);
-    if(!op_caps.fill) ggml_set_zero(t_leaf);
+    if (!op_caps.fill) ggml_set_zero(t_leaf);
+    for (int64_t i = 0; i < position_ids->ne[1]; ++i)
+    {
+        auto cur_row = reinterpret_cast<int32_t*>(position_ids->data) + i * position_ids->ne[0];
+        for (int32_t j = 0; j < position_ids->ne[0]; ++j)
+            cur_row[j] = j;
+    }
 
     ggml_backend_tensor_set_async(backend.get(), token, token_ids, 0, token->nb[1]);
     ggml_backend_tensor_set_async(backend.get(), prompt_token, prompt->flow_prompt_speech_tokens.first.get(), 0, prompt_token->nb[1]);
@@ -268,13 +284,19 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
     ggml_reset(ctx0.get());
     ggml_backend_sched_reset(sched.get());
     gf = ggml_new_graph(ctx0.get());
-    feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 2, op_caps, cut_len, t_leaf);
+    feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 2, op_caps, cut_len, t_leaf, position_ids);
 
     ggml_build_forward_expand(gf, feat);
     set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps);
 
     ggml_backend_sched_alloc_graph(sched.get(), gf);
     if (!op_caps.fill) ggml_set_zero(t_leaf);
+    for (int64_t i = 0; i < position_ids->ne[1]; ++i)
+    {
+        auto cur_row = reinterpret_cast<int32_t*>(position_ids->data) + i * position_ids->ne[0];
+        for (int32_t j = 0; j < position_ids->ne[0]; ++j)
+            cur_row[j] = j;
+    }
     status = ggml_backend_sched_graph_compute(sched.get(), gf);
     if (status != GGML_STATUS_SUCCESS) return false;
 
@@ -298,13 +320,19 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
     ggml_reset(ctx0.get());
     ggml_backend_sched_reset(sched.get());
     gf = ggml_new_graph(ctx0.get());
-    feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, static_cast<int>(flow.decoder.t_span.size() - 1), op_caps, cut_len, t_leaf);
+    feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, static_cast<int>(flow.decoder.t_span.size() - 1), op_caps, cut_len, t_leaf, position_ids);
 
     ggml_build_forward_expand(gf, feat);
     set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps);
 
     ggml_backend_sched_alloc_graph(sched.get(), gf);
     if (!op_caps.fill) ggml_set_zero(t_leaf);
+    for (int64_t i = 0; i < position_ids->ne[1]; ++i)
+    {
+        auto cur_row = reinterpret_cast<int32_t*>(position_ids->data) + i * position_ids->ne[0];
+        for (int32_t j = 0; j < position_ids->ne[0]; ++j)
+            cur_row[j] = j;
+    }
     status = ggml_backend_sched_graph_compute(sched.get(), gf);
     if (status != GGML_STATUS_SUCCESS) return false;
 

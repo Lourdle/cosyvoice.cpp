@@ -430,16 +430,17 @@ ggml_tensor* AdaLayerNorm_Final::build_cgraph(ggml_context* ctx, ggml_tensor* x,
     return x;
 }
 
-ggml_tensor* DiT::build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* mu, ggml_tensor* t, ggml_tensor* spks, ggml_tensor* cond, int64_t cut_len, ggml_backend_op_capabilities capabilities) const
+ggml_tensor* DiT::build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* mu, ggml_tensor* t, ggml_tensor* spks, ggml_tensor* cond, int64_t cut_len, ggml_tensor*& ref_position_ids, ggml_backend_op_capabilities capabilities) const
 {
     x = ggml_permute(ctx, x, 1, 0, 2, 3);
 
     t = time_embed.build_cgraph(ctx, t);
     x = input_embed.build_cgraph(ctx, x, cond, mu, spks, capabilities);
 
-    auto position_ids = ggml_arange(ctx, 0.f, static_cast<float>(x->ne[1]), 1.f);
-    position_ids = ggml_repeat_4d(ctx, position_ids, position_ids->ne[0], x->ne[2], 1, 1);
-    position_ids = ggml_cast(ctx, position_ids, GGML_TYPE_I32);
+    ggml_tensor* position_ids = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, x->ne[1], x->ne[2]);
+    ggml_set_input(position_ids);
+    ref_position_ids = position_ids;
+    position_ids = ggml_dup(ctx, position_ids);
 
     for (const auto& block : std::span(transformer_blocks.cbegin(), transformer_blocks.size() - 1))
         x = block.build_cgraph(ctx, x, t, position_ids, 0);
@@ -483,7 +484,7 @@ std::array<float, 2> CausalConditionalCFM::get_t_and_dt(ggml_context* ctx, int s
     return { t, dt };
 }
 
-ggml_tensor* CausalConditionalCFM::build_cgraph_one_step(ggml_context* ctx, const DiTContext& ditctx, int step, ggml_backend_op_capabilities capabilities, int64_t cut_len, ggml_tensor*& t_tensor) const
+ggml_tensor* CausalConditionalCFM::build_cgraph_one_step(ggml_context* ctx, const DiTContext& ditctx, int step, ggml_backend_op_capabilities capabilities, int64_t cut_len, ggml_tensor*& t_tensor, ggml_tensor*& position_ids) const
 {
     auto x = ditctx.x;
     auto [t, dt] = get_t_and_dt(ctx, step);
@@ -500,6 +501,7 @@ ggml_tensor* CausalConditionalCFM::build_cgraph_one_step(ggml_context* ctx, cons
             ditctx.spks_in,
             ditctx.cond_in,
             step == t_span.size() - 1 ? cut_len : 0,
+            position_ids,
             capabilities),
         2);
 
