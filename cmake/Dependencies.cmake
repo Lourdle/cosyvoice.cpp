@@ -45,6 +45,36 @@ endif()
 
 add_subdirectory("${GGML_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/_deps/ggml-build")
 
+function(cosyvoice_fetch_github_latest_tag REPO OUT_TAG)
+  string(REPLACE "/" "_" _repo_id "${REPO}")
+  set(_latest_json "${CMAKE_BINARY_DIR}/_deps/${_repo_id}_latest.json")
+  file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps")
+
+  file(DOWNLOAD
+    "https://api.github.com/repos/${REPO}/releases/latest"
+    "${_latest_json}"
+    STATUS _download_status
+    TLS_VERIFY ON
+    HTTPHEADER "Accept: application/vnd.github+json"
+    HTTPHEADER "User-Agent: cosyvoice-cmake"
+  )
+
+  list(GET _download_status 0 _download_code)
+  if(NOT _download_code EQUAL 0)
+    set(${OUT_TAG} "" PARENT_SCOPE)
+    return()
+  endif()
+
+  file(READ "${_latest_json}" _latest_json_content)
+  string(REGEX MATCH "\"tag_name\"[ \t\r\n]*:[ \t\r\n]*\"([^\"]+)\"" _tag_match "${_latest_json_content}")
+  if(NOT CMAKE_MATCH_1)
+    set(${OUT_TAG} "" PARENT_SCOPE)
+    return()
+  endif()
+
+  set(${OUT_TAG} "${CMAKE_MATCH_1}" PARENT_SCOPE)
+endfunction()
+
 # 3. ICU
 if(NOT COSYVOICE_NO_ICU)
   if(NOT EXISTS "${ICU_PREBUILT_DIR}/include/unicode/utypes.h")
@@ -56,11 +86,29 @@ if(NOT COSYVOICE_NO_ICU)
       if(WIN32)
         message(STATUS "ICU not found. Downloading pre-built Windows binaries to ${ICU_PREBUILT_DIR}...")
 
-        if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
-          set(ICU_ZIP_URL "https://github.com/unicode-org/icu/releases/download/release-78.2/icu4c-78.2-WinARM64-MSVC2022.zip")
+        set(_ICU_FALLBACK_VERSION "78.2")
+        set(_ICU_FALLBACK_TAG "release-78.2")
+        set(_ICU_RELEASE_TAG "")
+        cosyvoice_fetch_github_latest_tag("unicode-org/icu" _ICU_RELEASE_TAG)
+
+        if(_ICU_RELEASE_TAG MATCHES "^release-([0-9]+)\.([0-9]+)$")
+          set(_ICU_VERSION_MAJOR "${CMAKE_MATCH_1}")
+          set(_ICU_VERSION_MINOR "${CMAKE_MATCH_2}")
+          set(_ICU_VERSION "${_ICU_VERSION_MAJOR}.${_ICU_VERSION_MINOR}")
+          message(STATUS "ICU latest release: tag=${_ICU_RELEASE_TAG}, version=${_ICU_VERSION}")
         else()
-          set(ICU_ZIP_URL "https://github.com/unicode-org/icu/releases/download/release-78.2/icu4c-78.2-Win64-MSVC2022.zip")
+          set(_ICU_VERSION "${_ICU_FALLBACK_VERSION}")
+          set(_ICU_RELEASE_TAG "${_ICU_FALLBACK_TAG}")
+          message(STATUS "Failed to query latest ICU release; using configured version=${_ICU_VERSION}")
         endif()
+
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
+          set(ICU_ZIP_URL "https://github.com/unicode-org/icu/releases/download/${_ICU_RELEASE_TAG}/icu4c-${_ICU_VERSION}-WinARM64-MSVC2022.zip")
+        else()
+          set(ICU_ZIP_URL "https://github.com/unicode-org/icu/releases/download/${_ICU_RELEASE_TAG}/icu4c-${_ICU_VERSION}-Win64-MSVC2022.zip")
+        endif()
+
+        message(STATUS "ICU download URL: ${ICU_ZIP_URL}")
 
         file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps")
         file(DOWNLOAD "${ICU_ZIP_URL}" "${CMAKE_BINARY_DIR}/_deps/icu.zip" STATUS DL_STATUS)
@@ -189,29 +237,45 @@ if(NOT COSYVOICE_NO_FRONTEND)
             message(STATUS "Found ONNX Runtime via find_package")
         else()
             message(STATUS "ONNX Runtime not found. Downloading pre-built binaries to ${ORT_PREBUILT_DIR}...")
+
+            set(_ORT_FALLBACK_VERSION "1.24.4")
+            set(_ORT_RELEASE_TAG "")
+            cosyvoice_fetch_github_latest_tag("microsoft/onnxruntime" _ORT_RELEASE_TAG)
+
+            if(_ORT_RELEASE_TAG MATCHES "^v([0-9]+\.[0-9]+\.[0-9]+)$")
+                set(_ORT_VERSION "${CMAKE_MATCH_1}")
+                message(STATUS "ONNX Runtime latest release: tag=${_ORT_RELEASE_TAG}, version=${_ORT_VERSION}")
+            else()
+                set(_ORT_VERSION "${_ORT_FALLBACK_VERSION}")
+                set(_ORT_RELEASE_TAG "v${_ORT_FALLBACK_VERSION}")
+                message(STATUS "Failed to query latest ONNX Runtime release; falling back to version=${_ORT_VERSION}")
+            endif()
+
             if(WIN32)
                 if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
-                    set(ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/v1.24.4/onnxruntime-win-arm64-1.24.4.zip")
-                    set(ORT_DIR "onnxruntime-win-arm64-1.24.4")
+                    set(ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/${_ORT_RELEASE_TAG}/onnxruntime-win-arm64-${_ORT_VERSION}.zip")
+                    set(ORT_DIR "onnxruntime-win-arm64-${_ORT_VERSION}")
                 else()
-                    set(ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/v1.24.4/onnxruntime-win-x64-1.24.4.zip")
-                    set(ORT_DIR "onnxruntime-win-x64-1.24.4")
+                    set(ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/${_ORT_RELEASE_TAG}/onnxruntime-win-x64-${_ORT_VERSION}.zip")
+                    set(ORT_DIR "onnxruntime-win-x64-${_ORT_VERSION}")
                 endif()
                 set(ORT_EXT "zip")
             elseif(APPLE)
-                set(ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/v1.24.4/onnxruntime-osx-arm64-1.24.4.tgz")
-                set(ORT_DIR "onnxruntime-osx-arm64-1.24.4")
+                set(ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/${_ORT_RELEASE_TAG}/onnxruntime-osx-arm64-${_ORT_VERSION}.tgz")
+                set(ORT_DIR "onnxruntime-osx-arm64-${_ORT_VERSION}")
                 set(ORT_EXT "tgz")
             else()
                 if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
-                    set(ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/v1.24.4/onnxruntime-linux-aarch64-1.24.4.tgz")
-                    set(ORT_DIR "onnxruntime-linux-aarch64-1.24.4")
+                    set(ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/${_ORT_RELEASE_TAG}/onnxruntime-linux-aarch64-${_ORT_VERSION}.tgz")
+                    set(ORT_DIR "onnxruntime-linux-aarch64-${_ORT_VERSION}")
                 else()
-                    set(ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/v1.24.4/onnxruntime-linux-x64-1.24.4.tgz")
-                    set(ORT_DIR "onnxruntime-linux-x64-1.24.4")
+                    set(ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/${_ORT_RELEASE_TAG}/onnxruntime-linux-x64-${_ORT_VERSION}.tgz")
+                    set(ORT_DIR "onnxruntime-linux-x64-${_ORT_VERSION}")
                 endif()
                 set(ORT_EXT "tgz")
             endif()
+
+            message(STATUS "ONNX Runtime download URL: ${ORT_URL}")
             
             file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps")
             file(DOWNLOAD ${ORT_URL} "${CMAKE_BINARY_DIR}/_deps/ort.${ORT_EXT}" STATUS DL_STATUS)
