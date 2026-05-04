@@ -4,7 +4,7 @@ Language: [中文](README_zh.md)
 
 > Unofficial project notice: this repository is **not** affiliated with, endorsed by, or maintained by the official CosyVoice team. It is a community-maintained C++/GGML port created by an independent developer.
 
-> **Current status notice:** CUDA and CPU stability issues were resolved; recent Windows and Linux tests produced normal audio. The Vulkan backend remains problematic (noisy/incorrect output). Please review [Known Issues](#known-issues) before production use.
+> **Current status notice:** CPU, CUDA, Metal, and SYCL backends are currently working. The Vulkan backend currently fails to execute properly. Please review [Backend Test Status](#backend-test-status) before production use.
 
 C++/GGML port of the Python CosyVoice inference pipeline released by the original CosyVoice project, currently focused on **CosyVoice3**.
 
@@ -29,7 +29,7 @@ This project provides:
 - [Using Custom Dependencies](#using-custom-dependencies)
 - [Model Conversion to GGUF](#model-conversion-to-gguf)
 - [Tooling Guide](#tooling-guide)
-- [Known Issues](#known-issues)
+- [Backend Test Status](#backend-test-status)
 - [Troubleshooting](#troubleshooting)
 - [Third-Party Notices](#third-party-notices)
 - [Licensing](#licensing)
@@ -59,6 +59,16 @@ This project provides:
 - **Model license file**: [MODEL_LICENSE.md](MODEL_LICENSE.md)
 
 ## Quick Start
+
+### Pre-built Releases
+
+The releases provided in this repository do not bundle the GGML backend libraries. To use them:
+1. Download `cosyvoice-cli` or `cosyvoice-server` from this repository's Releases page.
+2. Download a `llama.cpp` release that matches your hardware (e.g., CUDA, CPU, etc.) and OS.
+3. Extract the `llama.cpp` release and place the `cosyvoice` executables into the same directory where the GGML backend shared libraries (like `ggml.dll`, `ggml-cuda.dll`, etc.) are located.
+4. Run the executables from that directory. They will automatically load the GGML backend from the current executable directory by default.
+
+### Setup using Python (For Model Conversion)
 1. Convert upstream CosyVoice model weights to GGUF (via this repository's `convert_model_to_gguf.py`).
 2. Configure and build this project.
 3. (Optional) Quantize the GGUF model with `quantize`.
@@ -290,29 +300,23 @@ This repository includes three user-facing tools:
 Full commands, options, and examples are documented in:
 - [docs/TOOLS.md](docs/TOOLS.md)
 
-## Known Issues
-Current generation stability is backend-dependent.
+## Backend Test Status
+Current backend test results are as follows:
 
-Tested observations:
-- **CUDA backend (Windows + Linux):**
-  - In recent tests on Ada Lovelace GPUs, CUDA stability issues were resolved.
-  - Windows CUDA and Linux CUDA runs generated normal audio in those tests.
-- **CPU backend:**
-  - In recent tests, CPU backend stability issues were also resolved.
-  - Windows and Linux runs generated normal audio in those tests. (Thanks @[jasagiri](https://github.com/jasagiri))
-- **Vulkan backend:**
-  - The Vulkan backend still does not run normally in current tests (e.g., produces noisy or incorrect output).
-
-Additional note:
-- Tests were performed on Ada Lovelace GPUs only.
-- These results may not generalize to other GPU architectures or driver/runtime combinations.
-- Other backends are not tested yet.
+| Backend | Status | Notes |
+|---|---:|---|
+| CPU | Working | Thanks to @[jasagiri](https://github.com/jasagiri) for helping identify the issue. Tested on Windows, Linux, and Mac. |
+| CUDA | Working | Tested on Ada Lovelace GPUs (Windows & Linux). |
+| Metal | Working | Thanks to @[jasagiri](https://github.com/jasagiri) for his help and code contributions. |
+| SYCL | Working | Verified on the Intel Raptor Lake integrated GPU on Windows 11 x64. |
+| Vulkan | Not working | Currently cannot run normally. |
+| Others | Untested | |
 
 ## Troubleshooting
 - CMake cannot find GGML: set `-DGGML_SOURCE_DIR=...` or keep default `vendor/ggml` and ensure Git is available for auto-clone.
 - ICU/ONNX Runtime detection issues: either install system packages (where applicable) or place prebuilt files into `<build_dir>/_deps/icu` and `<build_dir>/_deps/onnxruntime`.
 - Executable starts but misses runtime libraries on Windows: ensure post-build copied DLLs exist next to binaries in `build/bin`.
-- Vulkan output is noisy or incorrect: this is currently a known issue; use CUDA backend when possible.
+- Backend-specific issues are summarized in [Backend Test Status](#backend-test-status).
 
 ## Contributing
 Contributions are welcome.

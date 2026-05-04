@@ -4,7 +4,7 @@
 
 > 非官方说明：本仓库**与 CosyVoice 官方团队无隶属关系**，也未获得官方背书或维护。本项目是社区开发者发起和维护的 C++/GGML 移植实现。
 
-> **当前状态提示：** CUDA 和 CPU 的稳定性问题已修复；近期在 Windows 和 Linux 的测试中均能生成正常音频。Vulkan 后端仍存在问题（可能产生噪音或输出异常）。用于生产前请先阅读[已知问题](#已知问题)。
+> **当前状态提示：** 当前 CPU、CUDA、Metal 和 SYCL 后端均可正常运行。Vulkan 后端目前无法正常工作。用于生产前请先阅读[后端测试情况](#后端测试情况)。
 
 本项目将原始 CosyVoice 项目发布的 Python 推理流程迁移到 C++/GGML，目前主要支持 **CosyVoice3**。
 
@@ -29,7 +29,7 @@
 - [使用自定义依赖](#使用自定义依赖)
 - [模型转 GGUF](#模型转-gguf)
 - [工具使用说明](#工具使用说明)
-- [已知问题](#已知问题)
+- [后端测试情况](#后端测试情况)
 - [故障排查](#故障排查)
 - [第三方许可说明](#第三方许可说明)
 - [许可证说明](#许可证说明)
@@ -59,6 +59,16 @@
 - **模型许可证文件**：[MODEL_LICENSE.md](MODEL_LICENSE.md)
 
 ## 快速开始
+
+### 预编译发布版 (Releases)
+
+本仓库提供的 Releases 不包含 GGML 后端库。要使用它们：
+1. 从本仓库的 Releases 页面下载 `cosyvoice-cli` 或 `cosyvoice-server`。
+2. 下载与您的硬件（如 CUDA、CPU 等）和操作系统匹配的 `llama.cpp` release。
+3. 解压 `llama.cpp` release，并将 `cosyvoice` 的可执行文件放入其中，即包含 GGML 后端共享库（如 `ggml.dll`、`ggml-cuda.dll` 等）的目录。
+4. 在该目录下运行可执行文件。它们默认会自动加载程序所在目录的 GGML 后端。
+
+### Python 环境准备（用于模型转换）
 1. 先用本仓库的 `convert_model_to_gguf.py` 将上游 CosyVoice 模型权重转换为 GGUF。
 2. 配置并编译本项目。
 3. （可选）用 `quantize` 对 GGUF 模型量化。
@@ -290,29 +300,23 @@ python convert_model_to_gguf.py \
 完整命令、参数和示例见：
 - [docs/TOOLS_zh.md](docs/TOOLS_zh.md)
 
-## 已知问题
-当前生成稳定性与后端关系较大。
+## 后端测试情况
+当前各后端测试结果如下：
 
-已测试现象：
-- **CUDA 后端（Windows + Linux）：**
-  - 在近期针对 Ada Lovelace GPU 的测试中，CUDA 稳定性问题已解决。
-  - Windows CUDA 与 Linux CUDA 在这些测试中均可正常生成音频。
-- **CPU 后端：**
-  - 在近期测试中，CPU 后端的稳定性问题也已得到解决。
-  - Windows 与 Linux 在这些测试中均可正常生成音频。(感谢 @[jasagiri](https://github.com/jasagiri))
-- **Vulkan：**
-  - Vulkan 后端在当前测试中仍无法正常运行（例如产生噪音或输出异常）。
-
-补充说明：
-- 目前仅在 Ada Lovelace 架构显卡上做过验证。
-- 这些结果未必适用于其他 GPU 架构或驱动/运行时组合。
-- 其他后端尚未测试。
+| 后端 | 状态 | 备注 |
+|---|---:|---|
+| CPU | 可运行 | 感谢 @[jasagiri](https://github.com/jasagiri) 帮助定位问题。已在 Windows、Linux 和 Mac 上测试。 |
+| CUDA | 可运行 | 已在 Ada Lovelace GPU (Windows & Linux) 上测试。 |
+| Metal | 可运行 | 感谢 @[jasagiri](https://github.com/jasagiri) 的支持与代码贡献。 |
+| SYCL | 可运行 | 已在 Windows 11 x64 上的 Intel Raptor Lake 集成显卡上验证。 |
+| Vulkan | 不能运行 | 目前无法正常运行。 |
+| 其它 | 未测试 | |
 
 ## 故障排查
 - CMake 找不到 GGML：设置 `-DGGML_SOURCE_DIR=...`，或使用默认 `vendor/ggml` 并确保本机可用 Git（用于自动克隆）。
 - ICU/ONNX Runtime 检测失败：可安装系统包（适用平台），或将预编译文件放到 `<build_dir>/_deps/icu` 与 `<build_dir>/_deps/onnxruntime`。
 - Windows 运行时缺库：检查 `build/bin` 下是否存在构建后复制的依赖 DLL。
-- Vulkan 输出异常或有噪音：当前属于已知问题，建议优先使用 CUDA 后端。
+- 后端相关情况见[后端测试情况](#后端测试情况)。
 
 ## 欢迎贡献
 欢迎提交 Issue 和 Pull Request，尤其是：
