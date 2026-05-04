@@ -6,6 +6,7 @@
 
 #ifdef COSYVOICE_NO_AUDIO
     #define cosyvoice_audio_save_to_file cosyvoice_save_wav
+    #define cosyvoice_audio_supported_encoding_formats() "wav"
 #endif
 
 #include <ggml-backend.h>
