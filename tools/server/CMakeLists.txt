@@ -14,9 +14,7 @@ target_include_directories(cosyvoice-server PRIVATE
 if(COSYVOICE_NO_AUDIO)
     target_compile_definitions(cosyvoice-server PRIVATE COSYVOICE_NO_AUDIO)
     target_link_libraries(cosyvoice-server PRIVATE ggml-base)
-endif()
-
-if(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG")
+elseif(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG")
     target_compile_definitions(cosyvoice-server PRIVATE COSYVOICE_AUDIO_BACKEND_FFMPEG)
 endif()
 

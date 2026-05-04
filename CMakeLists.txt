@@ -47,7 +47,7 @@ add_subdirectory(common)
 file(GLOB COSYVOICE_SOURCES "src/*.cpp" "src/*.h" "include/*.h")
 
 if(COSYVOICE_NO_AUDIO)
-    # Audio disabled - skip all audio files
+    list(REMOVE_ITEM COSYVOICE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/cosyvoice-audio.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/cosyvoice-audio-ffmpeg.cpp")
 elseif(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG")
     list(REMOVE_ITEM COSYVOICE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/cosyvoice-audio.cpp")
 else()
