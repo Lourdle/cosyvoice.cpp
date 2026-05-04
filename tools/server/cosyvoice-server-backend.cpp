@@ -345,20 +345,61 @@ static bool build_wav_bytes_with_audio_encoder(cosyvoice_audio_encoder_t encoder
     output->assign(reinterpret_cast<const char*>(encoded), static_cast<size_t>(encoded_length));
     return true;
 }
+#else
+static bool build_wav_bytes(const float* data, uint32_t length, uint32_t sample_rate, std::string* output, std::string* error)
+{
+    if (!data || length == 0)
+    {
+        *error = "Generated audio buffer is empty.";
+        return false;
+    }
+    constexpr uint16_t num_channels = 1;
+    constexpr uint16_t bits_per_sample = 16;
+    const uint32_t byte_rate = sample_rate * num_channels * bits_per_sample / 8;
+    const uint16_t block_align = num_channels * bits_per_sample / 8;
+    const uint32_t subchunk2_size = length * num_channels * bits_per_sample / 8;
+    const uint32_t chunk_size = 4 + (8 + 16) + (8 + subchunk2_size);
+    output->clear();
+    output->reserve(44 + subchunk2_size);
+    // RIFF header
+    output->append("RIFF", 4);
+    output->append(reinterpret_cast<const char*>(&chunk_size), 4);
+    output->append("WAVE", 4);
+    // fmt subchunk
+    output->append("fmt ", 4);
+    uint32_t fmt_subchunk_size = 16;
+    output->append(reinterpret_cast<const char*>(&fmt_subchunk_size), 4);
+    uint16_t audio_format = 1; // PCM
+    output->append(reinterpret_cast<const char*>(&audio_format), 2);
+    output->append(reinterpret_cast<const char*>(&num_channels), 2);
+    output->append(reinterpret_cast<const char*>(&sample_rate), 4);
+    output->append(reinterpret_cast<const char*>(&byte_rate), 4);
+    output->append(reinterpret_cast<const char*>(&block_align), 2);
+    output->append(reinterpret_cast<const char*>(&bits_per_sample), 2);
+    // data subchunk
+    output->append("data", 4);
+    output->append(reinterpret_cast<const char*>(&subchunk2_size), 4);
+    for (uint32_t i = 0; i < length; ++i)
+    {
+        const auto sample = float_to_pcm16(data[i]);
+        output->push_back(static_cast<char>(sample & 0xFF));
+        output->push_back(static_cast<char>((sample >> 8) & 0xFF));
+    }
+    return true;
+}
 #endif
 
 static bool build_audio_payload(response_audio_format format, const cosyvoice_generated_speech& generated, const server_runtime& runtime, std::string* payload, std::string* error)
 {
     switch (format)
     {
-    case response_audio_format::wav:
-#ifndef COSYVOICE_NO_AUDIO
-        return build_wav_bytes_with_audio_encoder(runtime.audio_encoder.get(), generated.data, generated.length, COSYVOICE_AUDIO_ENCODING_FORMAT_WAV, payload, error);
-#else
-        return build_wav_bytes(generated.data, generated.length, runtime.sample_rate, payload, error);
-#endif
     case response_audio_format::pcm:
         return build_pcm16_bytes(generated.data, generated.length, payload, error);
+    case response_audio_format::wav:
+#ifdef COSYVOICE_NO_AUDIO
+        return build_wav_bytes(generated.data, generated.length, runtime.sample_rate, payload, error);
+#else
+        return build_wav_bytes_with_audio_encoder(runtime.audio_encoder.get(), generated.data, generated.length, COSYVOICE_AUDIO_ENCODING_FORMAT_WAV, payload, error);
     case response_audio_format::mp3:
         return build_wav_bytes_with_audio_encoder(runtime.audio_encoder.get(), generated.data, generated.length, COSYVOICE_AUDIO_ENCODING_FORMAT_MP3, payload, error);
     case response_audio_format::m4a:
@@ -369,6 +410,7 @@ static bool build_audio_payload(response_audio_format format, const cosyvoice_ge
         return build_wav_bytes_with_audio_encoder(runtime.audio_encoder.get(), generated.data, generated.length, COSYVOICE_AUDIO_ENCODING_FORMAT_FLAC, payload, error);
     case response_audio_format::opus:
         return build_wav_bytes_with_audio_encoder(runtime.audio_encoder.get(), generated.data, generated.length, COSYVOICE_AUDIO_ENCODING_FORMAT_OPUS, payload, error);
+#endif
     default:
         *error = "Unsupported response format.";
         return false;
