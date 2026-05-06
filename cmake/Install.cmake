@@ -3,13 +3,27 @@
 # -----------------------------------------------------------------------------
 include(GNUInstallDirs)
 
+set(COSYVOICE_PUBLIC_HEADERS
+    include/cosyvoice.h
+    include/cosyvoice-interface.h
+    include/cosyvoice-lowlevel.h
+)
+
+if(NOT COSYVOICE_NO_FRONTEND)
+    list(APPEND COSYVOICE_PUBLIC_HEADERS include/cosyvoice-frontend.h)
+endif()
+
+if(NOT COSYVOICE_NO_AUDIO)
+    list(APPEND COSYVOICE_PUBLIC_HEADERS include/cosyvoice-audio.h)
+endif()
+
 # Track prebuilt dynamic libraries that need to be copied/installed
 set(PREBUILT_SHARED_LIBS "")
-if(TARGET onnxruntime AND NOT onnxruntime_FOUND)
+if(WIN32 AND TARGET onnxruntime AND NOT onnxruntime_FOUND)
     list(APPEND PREBUILT_SHARED_LIBS $<TARGET_FILE:onnxruntime>)
 endif()
 
-if(TARGET ICU::uc AND NOT ICU_FOUND)
+if(WIN32 AND TARGET ICU::uc AND NOT ICU_FOUND)
     list(APPEND PREBUILT_SHARED_LIBS $<TARGET_FILE:ICU::uc> $<TARGET_FILE:ICU::i18n>)
     if(TARGET ICU::data)
         list(APPEND PREBUILT_SHARED_LIBS $<TARGET_FILE:ICU::data>)
@@ -18,6 +32,39 @@ endif()
 
 if(TARGET ffmpeg AND DEFINED FFMPEG_RUNTIME_SHARED_LIBS)
     list(APPEND PREBUILT_SHARED_LIBS ${FFMPEG_RUNTIME_SHARED_LIBS})
+endif()
+
+if(UNIX AND NOT APPLE)
+    if(TARGET onnxruntime AND NOT onnxruntime_FOUND)
+        file(GLOB _ORT_SHARED_LIBS CONFIGURE_DEPENDS
+            "${ORT_PREBUILT_DIR}/lib/libonnxruntime.so*"
+        )
+        list(APPEND PREBUILT_SHARED_LIBS ${_ORT_SHARED_LIBS})
+    endif()
+
+    if(TARGET ICU::uc AND NOT ICU_FOUND)
+        file(GLOB _ICU_SHARED_LIBS CONFIGURE_DEPENDS
+            "${ICU_PREBUILT_DIR}/lib/libicuuc.so*"
+            "${ICU_PREBUILT_DIR}/lib/libicui18n.so*"
+            "${ICU_PREBUILT_DIR}/lib/libicudata.so*"
+        )
+        list(APPEND PREBUILT_SHARED_LIBS ${_ICU_SHARED_LIBS})
+    endif()
+
+    if(TARGET ffmpeg AND DEFINED FFMPEG_RUNTIME_SHARED_LIBS)
+        file(GLOB _FFMPEG_SHARED_LIBS CONFIGURE_DEPENDS
+            "${FFMPEG_PREBUILT_DIR}/lib/libavcodec.so*"
+            "${FFMPEG_PREBUILT_DIR}/lib/libavformat.so*"
+            "${FFMPEG_PREBUILT_DIR}/lib/libavutil.so*"
+            "${FFMPEG_PREBUILT_DIR}/lib/libswresample.so*"
+        )
+        list(APPEND PREBUILT_SHARED_LIBS ${_FFMPEG_SHARED_LIBS})
+    endif()
+
+    if(PREBUILT_SHARED_LIBS)
+        list(FILTER PREBUILT_SHARED_LIBS EXCLUDE REGEX "\.a$")
+        list(REMOVE_DUPLICATES PREBUILT_SHARED_LIBS)
+    endif()
 endif()
 
 if(WIN32)
@@ -45,8 +92,7 @@ if(WIN32)
     if(PREBUILT_SHARED_LIBS)
         install(FILES ${PREBUILT_SHARED_LIBS} DESTINATION ${CMAKE_INSTALL_BINDIR})
     endif()
-else()
-    # Unix installation of prebuilt SO/Dylibs
+elseif(UNIX AND NOT APPLE)
     if(PREBUILT_SHARED_LIBS)
         install(FILES ${PREBUILT_SHARED_LIBS} DESTINATION ${CMAKE_INSTALL_LIBDIR})
     endif()
@@ -60,4 +106,4 @@ install(TARGETS cosyvoice
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(FILES ${COSYVOICE_PUBLIC_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
