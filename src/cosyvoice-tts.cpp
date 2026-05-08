@@ -1,6 +1,7 @@
 #include "cosyvoice-internal.h"
 #include "cosyvoice-model.h"
 #include "cosyvoice-llm-kv-cache.h"
+#include "ggml-cpu-flag.h"
 
 #include <cfloat>
 #include <cstring>
@@ -25,16 +26,16 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
         if (speech_type == llm.embed_tokens_weight->type)
         {
             auto prefill_embedding = [&](const char* data, int token_id)
+            {
+                if (offset == n_batch)
                 {
-                    if (offset == n_batch)
-                    {
-                        if (!llm_prefill(speech_type, batch_buffer.get(), n_batch))
-                            throw std::runtime_error("Failed to prefill LLM KV cache.\n");
-                        offset = 0;
-                    }
+                    if (!llm_prefill(speech_type, batch_buffer.get(), n_batch))
+                        throw std::runtime_error("Failed to prefill LLM KV cache.\n");
+                    offset = 0;
+                }
 
-                    memcpy(batch_buffer.get() + offset++ * speech_row_size, data + token_id * speech_row_size, speech_row_size);
-                };
+                memcpy(batch_buffer.get() + offset++ * speech_row_size, data + token_id * speech_row_size, speech_row_size);
+            };
 
             if (llm_get_kv_cache_len() == 0)
             {
@@ -71,16 +72,16 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
             const auto token_row_size = static_cast<uint32_t>(llm.embed_tokens_weight->nb[1]);
 
             auto prefill_embedding = [&](const char* data, int token_id, uint32_t row_size, ggml_type type)
+            {
+                if (offset == n_batch)
                 {
-                    if (offset == n_batch)
-                    {
-                        if (!llm_prefill(type, batch_buffer.get(), n_batch))
-                            throw std::runtime_error("Failed to prefill LLM KV cache.\n");
-                        offset = 0;
-                    }
+                    if (!llm_prefill(type, batch_buffer.get(), n_batch))
+                        throw std::runtime_error("Failed to prefill LLM KV cache.\n");
+                    offset = 0;
+                }
 
-                    memcpy(batch_buffer.get() + offset++ * row_size, data + token_id * row_size, row_size);
-                };
+                memcpy(batch_buffer.get() + offset++ * row_size, data + token_id * row_size, row_size);
+            };
 
             if (llm_get_kv_cache_len() == 0)
                 llm_prefill(speech_type, speech_emb + llm.sos_token_id * speech_row_size, 1);
@@ -162,41 +163,46 @@ static void set_graph_backends(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml
 
     for (auto node : ggml_cgraph_node_iterator(gf, end))
     {
-        if (node->buffer)
+        if (node->data)
             continue;
 
-        auto op = node->op;
-        if (is_virtual(op))
-        {
-            auto cur_node = node;
-            while (cur_node && is_virtual(cur_node->op))
-                cur_node = cur_node->src[0];
-            op = cur_node->op;
-        }
-
         ggml_backend_t target_backend;
-        switch (op)
-        {
-        case GGML_OP_CUSTOM:
+        if (ggml_cpu_fallback(node))
             target_backend = cpu_backend;
-            break;
-        case GGML_OP_PAD:
-            target_backend = op_caps.pad ? backend : cpu_backend;
-            break;
-        case GGML_OP_PAD_REFLECT_1D:
-            target_backend = op_caps.pad_reflect_1d ? backend : cpu_backend;
-            break;
-        case GGML_OP_CUMSUM:
-            target_backend = op_caps.cumsum ? backend : cpu_backend;
-            break;
-        case GGML_OP_CPY:
-            if (node->type == GGML_TYPE_I32 && node->src[0]->type == GGML_TYPE_F32)
+        else
+        {
+            auto op = node->op;
+            if (is_virtual(op))
             {
+                auto cur_node = node;
+                while (cur_node && is_virtual(cur_node->op))
+                    cur_node = cur_node->src[0];
+                op = cur_node->op;
+            }
+
+            switch (op)
+            {
+            case GGML_OP_CUSTOM:
                 target_backend = cpu_backend;
                 break;
+            case GGML_OP_PAD:
+                target_backend = op_caps.pad ? backend : cpu_backend;
+                break;
+            case GGML_OP_PAD_REFLECT_1D:
+                target_backend = op_caps.pad_reflect_1d ? backend : cpu_backend;
+                break;
+            case GGML_OP_CUMSUM:
+                target_backend = op_caps.cumsum ? backend : cpu_backend;
+                break;
+            case GGML_OP_CPY:
+                if (node->type == GGML_TYPE_I32 && node->src[0]->type == GGML_TYPE_F32)
+                {
+                    target_backend = cpu_backend;
+                    break;
+                }
+            default:
+                target_backend = backend;
             }
-        default:
-            target_backend = backend;
         }
         ggml_backend_sched_set_tensor_backend(sched, node, target_backend);
     }
@@ -352,9 +358,8 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 
     auto [generated_speech, noise] = hift.build_cgraph(ctx0.get(), speech_feat);
     ggml_build_forward_expand(gf, generated_speech);
-    set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps, -1);
+    set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps);
 
-    ggml_backend_sched_set_tensor_backend(sched.get(), generated_speech, cpu_backend.get());
     ggml_backend_sched_alloc_graph(sched.get(), gf);
 
     for (auto node : ggml_cgraph_node_iterator(gf))

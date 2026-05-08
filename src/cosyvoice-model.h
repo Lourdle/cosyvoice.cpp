@@ -59,6 +59,7 @@ struct cosyvoice_model : virtual cosyvoice_model_context
     ggml_backend_ptr backend;
     ggml_backend_ptr cpu_backend;
     ggml_backend_buffer_ptr buffer;
+    ggml_backend_buffer_ptr cpu_buffer;
     ggml_backend_sched_ptr sched;
 
     ggml_cgraph* gf;

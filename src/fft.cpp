@@ -1,5 +1,6 @@
 #include "fft.h"
 #include "ggml-fft.h"
+#include "ggml-cpu-flag.h"
 
 #include <math.h>
 #if defined(__x86_64__) || defined(_M_X64)
@@ -1115,6 +1116,10 @@ ggml_tensor* ggml_stft(ggml_context* ctx, ggml_tensor* a, ggml_tensor* b, int ho
         const auto pad_amount = fctx->nfft / 2;
         a = ggml_pad_reflect_1d(ctx, a, pad_amount, pad_amount);
     }
+    else
+        a = ggml_dup(ctx, a);
+
+    ggml_set_cpu(a);
 
     const auto win_size = b->ne[0];
     const auto n_frames = (a->ne[0] - win_size) / hop_len + 1;
@@ -1124,8 +1129,12 @@ ggml_tensor* ggml_stft(ggml_context* ctx, ggml_tensor* a, ggml_tensor* b, int ho
     a->ne[1] = n_frames;
     a->nb[1] = hop_len * a->nb[0];
     a->op = GGML_OP_VIEW;
+    ggml_set_cpu(a);
+
     b = ggml_repeat(ctx, b, a);
+    ggml_set_cpu(b);
     a = ggml_mul(ctx, a, b);
+    ggml_set_cpu(a);
 
     auto result = ggml_fft(ctx, a, fctx);
     result = ggml_view_3d(ctx, result, fctx->nfft / 2 + 1, n_frames, 2, result->nb[1], result->nb[2], 0);

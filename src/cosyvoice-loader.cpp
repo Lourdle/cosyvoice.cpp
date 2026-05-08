@@ -368,9 +368,7 @@ void cosyvoice_model_3::load(gguf_loader& loader)
 
     ggml_init_params params =
     {
-        .mem_size = (tensors.size() + 8) * ggml_tensor_overhead()
-        + ggml_backend_buft_get_alloc_size(ggml_backend_cpu_buffer_type(), llm.embed_tokens_weight)
-        + ggml_backend_buft_get_alloc_size(ggml_backend_cpu_buffer_type(), llm.speech_embedding_weight),
+        .mem_size = (tensors.size() + 8) * ggml_tensor_overhead(),
         .mem_buffer = nullptr,
         .no_alloc = true
     };
@@ -391,7 +389,6 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     const int mel_dim = flow.decoder.estimator.mel_dim;
     size_t mem_size = get_aligned_size(sizeof(float) * half_dim, alignment)
         + get_aligned_size(sizeof(float) * (hift.nfft / 2 + 1), alignment)
-        + get_aligned_size(sizeof(float) * hift.nfft, alignment)
         + get_aligned_size(sizeof(int) * this->params.n_batch, alignment)
         + get_aligned_size(sizeof(float) * (hift.nfft / 2 + 1) * hift.nfft, alignment) * 2
         + get_aligned_size((this->params.n_max_seq - 1) * this->params.n_batch * sizeof(ggml_fp16_t), alignment);
@@ -404,10 +401,21 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     auto buffer_base = reinterpret_cast<char*>(ggml_backend_buffer_get_base(buffer.get()));
     ctx.reset(ggml_init(params));
 
+    mem_size = ggml_backend_buft_get_alloc_size(ggml_backend_cpu_buffer_type(), llm.embed_tokens_weight)
+        + ggml_backend_buft_get_alloc_size(ggml_backend_cpu_buffer_type(), llm.speech_embedding_weight)
+        + sizeof(float) * hift.nfft;
+    cpu_buffer.reset(ggml_backend_buft_alloc_buffer(ggml_backend_get_default_buffer_type(cpu_backend.get()), mem_size));
+    auto cpu_buffer_base = reinterpret_cast<char*>(ggml_backend_buffer_get_base(cpu_buffer.get()));
+
     auto set_tensor = [&](ggml_tensor* tensor, const void* data, size_t size)
     {
         ggml_backend_tensor_set_async(backend.get(), tensor, data, 0, size);
         buffer_base += get_aligned_size(ggml_backend_buft_get_alloc_size(buft, tensor), alignment);
+    };
+    auto set_cpu_tensor = [&](ggml_tensor* tensor, const void* data, size_t size)
+    {
+        ggml_backend_tensor_set(tensor, data, 0, size);
+        cpu_buffer_base += ggml_backend_buft_get_alloc_size(ggml_backend_get_default_buffer_type(cpu_backend.get()), tensor);
     };
     flow.decoder.estimator.time_embed.time_embed.emb = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_F32, half_dim);
     ggml_backend_tensor_alloc(buffer.get(), flow.decoder.estimator.time_embed.time_embed.emb, buffer_base);
@@ -416,27 +424,23 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     for (const auto& [name, tensor] : tensors)
     {
         size_t tensor_size = ggml_nbytes(*tensor);
+        auto new_tensor = ggml_new_tensor(ctx.get(), (*tensor)->type, GGML_MAX_DIMS, (*tensor)->ne);
         if (tensor == &llm.embed_tokens_weight
             || tensor == &llm.speech_embedding_weight)
         {
-            ggml_set_no_alloc(ctx.get(), false);
-            auto new_tensor = ggml_new_tensor(ctx.get(), (*tensor)->type, GGML_MAX_DIMS, (*tensor)->ne);
-            memcpy(new_tensor->data, (**tensor).data, tensor_size);
-            *tensor = new_tensor;
-            ggml_set_no_alloc(ctx.get(), true);
+            ggml_backend_tensor_alloc(cpu_buffer.get(), new_tensor, cpu_buffer_base);
+            set_cpu_tensor(new_tensor, ggml_get_data(*tensor), tensor_size);
         }
         else
         {
-            auto new_tensor = ggml_new_tensor(ctx.get(), (*tensor)->type, GGML_MAX_DIMS, (*tensor)->ne);
             ggml_backend_tensor_alloc(buffer.get(), new_tensor, buffer_base);
             set_tensor(new_tensor, ggml_get_data(*tensor), tensor_size);
-            *tensor = new_tensor;
         }
 
+        *tensor = new_tensor;
         ggml_set_param(*tensor);
         ggml_set_name(*tensor, name.c_str());
     }
-
 
     noise_rng.seed(this->params.seed);
     sampler_rng.seed(noise_rng());
@@ -445,22 +449,24 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     ggml_backend_tensor_alloc(buffer.get(), hift.m_source.l_sin_gen.rand_ini, buffer_base);
     buffer_base += get_aligned_size(hift.m_source.l_sin_gen.rand_ini->nb[1], alignment);
 
-    auto temp_buffer = std::make_unique<float[]>(hift.nfft);
-    temp_buffer[0] = 0.f;
+    auto rand_ini_buffer = std::make_unique<float[]>(hift.nb_harmonics + 1);
+    rand_ini_buffer[0] = 0.f;
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-    for (auto& i : std::span(temp_buffer.get() + 1, hift.nb_harmonics))
+    for (auto& i : std::span(rand_ini_buffer.get() + 1, hift.nb_harmonics))
         i = dist(noise_rng);
-    hift.set_rand_ini(temp_buffer.get());
+    hift.set_rand_ini(rand_ini_buffer.get());
 
     hift.window = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_F32, hift.nfft);
+    ggml_set_param(hift.window);
+    ggml_set_name(hift.window, "stft_window");
+    ggml_backend_tensor_alloc(cpu_buffer.get(), hift.window, cpu_buffer_base);
     for (int i = 0; i != hift.nfft; ++i)
-        temp_buffer[i] = (1.0f - std::cos(2.0f * 3.14159265358979323846f * i / hift.nfft)) / 2.f;
-    ggml_backend_tensor_alloc(buffer.get(), hift.window, buffer_base);
-    set_tensor(hift.window, temp_buffer.get(), hift.nfft * sizeof(float));
+        reinterpret_cast<float*>(hift.window->data)[i] = (1.0f - std::cos(2.0f * 3.14159265358979323846f * i / hift.nfft)) / 2.f;
 
     position_ids = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_I32, this->params.n_batch);
     ggml_set_name(position_ids, "position_ids");
     ggml_backend_tensor_alloc(buffer.get(), position_ids, buffer_base);
+    ggml_set_param(position_ids);
     full_position_ids.reset(new int[this->params.n_max_seq]);
     for (int i = 0; i != this->params.n_max_seq; ++i)
         full_position_ids.get()[i] = i;
@@ -472,12 +478,14 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         {
             ggml_backend_tensor_alloc(buffer.get(), tensor, buffer_base);
             set_tensor(tensor, data, size);
+            ggml_set_param(tensor);
             ggml_backend_synchronize(backend.get());
         });
 
     causal_mask_buffer.reset(new ggml_fp16_t[(this->params.n_max_seq - 1) * this->params.n_batch]);
     causal_mask = ggml_new_tensor_2d(ctx.get(), GGML_TYPE_F16, this->params.n_max_seq - 1, this->params.n_batch);
     ggml_set_name(causal_mask, "attention_mask");
+    ggml_set_param(causal_mask);
     ggml_backend_tensor_alloc(buffer.get(), causal_mask, buffer_base);
 
     int64_t id = gguf_find_key(loader, "stop_token_ids");
@@ -607,6 +615,6 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     auto arch = loader.get_string("general.architecture");
     architecture.reset(new char[arch.size() + 1]);
     memcpy(architecture.get(), arch.data(), arch.size() + 1);
-    
+
     ggml_backend_synchronize(backend.get());
 }

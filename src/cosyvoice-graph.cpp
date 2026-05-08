@@ -1,5 +1,6 @@
 #include "cosyvoice-model.h"
 #include "ggml-fft.h"
+#include "ggml-cpu-flag.h"
 
 #include <cstring>
 #include <span>
@@ -760,7 +761,9 @@ std::array<ggml_tensor*, 2> CausalHiFTGenerator::build_cgraph(ggml_context* ctx,
                 ggml_sin(ctx, phase));
 
             x = ggml_istft(ctx, real, imag, window, hop_len, true, ictx.get());
-            return { ggml_clamp(ctx, x, -audio_limit, audio_limit), noise };
+            x = ggml_clamp(ctx, x, -audio_limit, audio_limit);
+            ggml_set_cpu(x);
+            return { x, noise };
         }
     }
 }
