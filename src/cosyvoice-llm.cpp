@@ -91,8 +91,8 @@ bool cosyvoice_model_3::llm_prefill(
 )
 {
     auto total_len = n_tokens + kv_cache->cur_len;
-    GGML_ASSERT(total_len <= params.n_max_seq - 1);
-    GGML_ASSERT(n_tokens <= params.n_batch);
+    if (total_len > params.n_max_seq - 1) return false;
+    if (n_tokens > params.n_batch) return false;
 
     auto causal_mask = n_tokens == 1 ? nullptr : this->causal_mask;
     if (causal_mask)
@@ -188,7 +188,7 @@ bool cosyvoice_model_3::llm_prefill(
 
 bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
 {
-    GGML_ASSERT(kv_cache->cur_len + 1 <= params.n_max_seq);
+    if (kv_cache->cur_len + 1 > params.n_max_seq) return false;
 
     position_ids->ne[0] = 1;
     ggml_backend_tensor_set_async(backend.get(), position_ids, full_position_ids.get() + kv_cache->cur_len, 0, sizeof(int32_t));
