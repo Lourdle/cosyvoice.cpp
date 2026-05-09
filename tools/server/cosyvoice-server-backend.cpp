@@ -1,6 +1,5 @@
 ﻿#include "cosyvoice-server.h"
 #include "tool_common_cosyvoice.h"
-#include "cosyvoice-text-chunk.h"
 
 #ifndef COSYVOICE_NO_AUDIO
     #include "cosyvoice-audio.h"
@@ -1034,7 +1033,6 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
         }
 
         cosyvoice_generated_speech generated = {};
-        std::vector<float> combined_pcm;
         std::string payload;
         std::string encoding_error;
         std::string generation_error;
@@ -1049,37 +1047,18 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
                 return;
             }
 
-            auto text_chunks = cosyvoice_common::split_text_into_chunks(request.input);
-            if (text_chunks.empty())
-                text_chunks.emplace_back(request.input);
+            bool ok = false;
+            if (request.has_instructions)
+                ok = cosyvoice_tts_instruct(voice_it->second.tts_context.get(), request.input.c_str(), request.instructions.c_str(), request.speed, &generated);
+            else
+                ok = cosyvoice_tts_zero_shot(voice_it->second.tts_context.get(), request.input.c_str(), request.speed, &generated);
 
-            bool ok = true;
-            for (const auto& chunk : text_chunks)
-            {
-                cosyvoice_generated_speech part = {};
-                bool part_ok = false;
-                if (request.has_instructions)
-                    part_ok = cosyvoice_tts_instruct(voice_it->second.tts_context.get(), chunk.c_str(), request.instructions.c_str(), request.speed, &part);
-                else
-                    part_ok = cosyvoice_tts_zero_shot(voice_it->second.tts_context.get(), chunk.c_str(), request.speed, &part);
-
-                if (!part_ok || !part.data || part.length == 0)
-                {
-                    ok = false;
-                    break;
-                }
-                combined_pcm.insert(combined_pcm.end(), part.data, part.data + part.length);
-            }
-
-            if (!ok || combined_pcm.empty())
+            if (!ok || !generated.data || generated.length == 0)
             {
                 set_openai_error(res, 500, "TTS generation failed.", "server_error", nullptr, "generation_failed");
                 log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "generation_failed");
                 return;
             }
-
-            generated.data = combined_pcm.data();
-            generated.length = static_cast<uint32_t>(combined_pcm.size());
 
             if (!build_audio_payload(format, generated, runtime, &payload, &encoding_error))
             {

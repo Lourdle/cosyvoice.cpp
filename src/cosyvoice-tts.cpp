@@ -1,6 +1,7 @@
 #include "cosyvoice-internal.h"
 #include "cosyvoice-model.h"
 #include "cosyvoice-llm-kv-cache.h"
+#include "cosyvoice-text-chunk.h"
 #include "ggml-cpu-flag.h"
 
 #include <cfloat>
@@ -8,6 +9,7 @@
 #include <exception>
 #include <stdexcept>
 #include <span>
+#include <vector>
 
 bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt)
 {
@@ -413,19 +415,87 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
         bool normalized = false;
         if (text_normalization_enabled)
             normalized = cosyvoice_frontend_util_text_normalize(*this, text, static_cast<uint32_t>(strlen(text)), nullptr);
-        cosyvoice_tokenize(
-            ctx,
-            normalized ? c_str() : text,
-            this,
-            true);
+        const char* effective_text = normalized ? c_str() : text;
 
-        return cosyvoice_tts(ctx, get_tokens(), get_n_tokens(), speed, this, result);
+        const auto fragments = cosyvoice_internal::split_into_fragments(effective_text);
+        if (fragments.size() <= 1)
+        {
+            cosyvoice_tokenize(ctx, effective_text, this, true);
+            return cosyvoice_tts(ctx, get_tokens(), get_n_tokens(), speed, this, result);
+        }
+
+        // Compute the maximum text-token budget per chunk:
+        //   m = n_max_seq                                    (the LLM context window)
+        //   o = SOS(1) + prompt_text + (task_token(1) + prompt_speech_tokens when present)
+        //   r = max_token_text_ratio                         (decode-stage growth factor)
+        // We need m > o + l * (1 + r) so the prefill plus decoded speech tokens fit; solving
+        // for l yields the cap below. Falling back to a single call when the budget is
+        // pathological keeps behavior consistent with the pre-chunking path.
+        cosyvoice_context_params_t params;
+        ctx->get_context_params(&params);
+        cosyvoice_generation_config_t gen_config;
+        ctx->get_generation_config(&gen_config);
+
+        const uint32_t prompt_text_len = static_cast<uint32_t>(prompt_text.size());
+        const uint32_t prompt_speech_len = llm_prompt_speech_tokens.second;
+        const uint64_t o = 1ull + prompt_text_len
+            + (prompt_speech_len != 0 ? 1ull + prompt_speech_len : 0ull);
+        const float r = gen_config.max_token_text_ratio;
+
+        if (params.n_max_seq <= o + 1u || !(r > 0.0f))
+        {
+            cosyvoice_tokenize(ctx, effective_text, this, true);
+            return cosyvoice_tts(ctx, get_tokens(), get_n_tokens(), speed, this, result);
+        }
+        const auto max_text_tokens = static_cast<std::size_t>(
+            static_cast<float>(params.n_max_seq - o - 1u) / (1.0f + r));
+
+        // Tokenize each fragment in a scratch buffer so we never disturb `this`'s tokens
+        // between the budget computation and the per-chunk synthesis pass.
+        cosyvoice_tokenization_result_impl tokens_scratch;
+        const auto token_count = [&](std::string_view fragment) -> std::size_t
+        {
+            tokens_scratch.tokens.clear();
+            const std::string copy(fragment);
+            cosyvoice_tokenize(ctx, copy.c_str(), &tokens_scratch, true);
+            return tokens_scratch.get_n_tokens();
+        };
+        const auto chunks = cosyvoice_internal::reassemble_by_token_budget(
+            fragments, max_text_tokens, token_count);
+
+        if (chunks.size() <= 1)
+        {
+            cosyvoice_tokenize(ctx, effective_text, this, true);
+            return cosyvoice_tts(ctx, get_tokens(), get_n_tokens(), speed, this, result);
+        }
+
+        // Multi-chunk path: synthesize each chunk and copy its PCM into a context-owned buffer.
+        // cosyvoice_tts() points result->data at an internal token2wav buffer that is overwritten
+        // on the next call, so the copy must happen before the following synthesis begins.
+        combined_pcm.clear();
+        for (const auto& chunk : chunks)
+        {
+            cosyvoice_tokenize(ctx, chunk.c_str(), this, true);
+            cosyvoice_generated_speech part = {};
+            if (!cosyvoice_tts(ctx, get_tokens(), get_n_tokens(), speed, this, &part)
+                || !part.data || part.length == 0)
+            {
+                result->data = nullptr;
+                result->length = 0;
+                return false;
+            }
+            combined_pcm.insert(combined_pcm.end(), part.data, part.data + part.length);
+        }
+        result->data = combined_pcm.data();
+        result->length = static_cast<uint32_t>(combined_pcm.size());
+        return true;
     }
 
     cosyvoice_context_t ctx;
     std::string instruction_cache;
     size_t prefix_len;
     bool text_normalization_enabled;
+    std::vector<float> combined_pcm;
 };
 
 cosyvoice_tts_context_t cosyvoice_tts_context_new(cosyvoice_context_t ctx, cosyvoice_prompt_t prompt)
