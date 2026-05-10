@@ -68,6 +68,8 @@
 3. 解压 `llama.cpp` release，并将 `cosyvoice` 的可执行文件放入其中，即包含 GGML 后端共享库（如 `ggml.dll`、`ggml-cuda.dll` 等）的目录。
 4. 在该目录下运行可执行文件。它们默认会自动加载程序所在目录的 GGML 后端。
 
+> **预编译 GGML CUDA 后端已知问题（Issue [#15](https://github.com/Lourdle/cosyvoice.cpp/issues/15)）：** 有用户反馈使用 `llama.cpp` 预编译发布版的 GGML CUDA 后端时，生成的音频存在噪音。我测试确认了预编译 GGML CUDA 版本存在此问题，而自行从源码编译的 GGML 则未出现该问题。如果您在使用 CUDA 后端配合预编译 GGML 时遇到噪音，建议参考本文[构建](#构建)章节，将本项目与 GGML 一同从源码编译。
+
 ### Python 环境准备（用于模型转换）
 1. 先用本仓库的 `convert_model_to_gguf.py` 将上游 CosyVoice 模型权重转换为 GGUF。
 2. 配置并编译本项目。

@@ -68,6 +68,8 @@ The releases provided in this repository do not bundle the GGML backend librarie
 3. Extract the `llama.cpp` release and place the `cosyvoice` executables into the same directory where the GGML backend shared libraries (like `ggml.dll`, `ggml-cuda.dll`, etc.) are located.
 4. Run the executables from that directory. They will automatically load the GGML backend from the current executable directory by default.
 
+> **Known issue with pre-built GGML CUDA backend (Issue [#15](https://github.com/Lourdle/cosyvoice.cpp/issues/15)):** Some users have reported noise in generated audio when using pre-built GGML binaries from `llama.cpp` releases with the CUDA backend. I testing confirmed this issue with pre-compiled GGML CUDA builds, while self-compiled GGML from source did not exhibit the problem. If you encounter noise when using the CUDA backend with pre-built GGML, we recommend building both this project and GGML from source as a workaround. Refer to the [Build](#build) section for instructions.
+
 ### Setup using Python (For Model Conversion)
 1. Convert upstream CosyVoice model weights to GGUF (via this repository's `convert_model_to_gguf.py`).
 2. Configure and build this project.
