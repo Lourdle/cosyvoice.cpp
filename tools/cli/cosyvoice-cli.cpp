@@ -3,6 +3,7 @@
 #endif
 
 #include "tool_common_cosyvoice.h"
+#include "cosyvoice-text-chunk.h"
 
 #ifdef COSYVOICE_NO_AUDIO
     #define cosyvoice_audio_save_to_file cosyvoice_save_wav
@@ -23,6 +24,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 #include <format>
 
 struct cli_options
@@ -1170,18 +1172,34 @@ int tool_entry(int argc, char** argv)
     cosyvoice_get_memory_usage(ctx.get(), &memory_usage_before);
     print_tts_runtime_info(options, backend, effective_params, generation_config, sample_rate, log_level);
 
-    cosyvoice_generated_speech result = {};
+    auto text_chunks = cosyvoice_common::split_text_into_chunks(options.text);
+    if (text_chunks.empty())
+        text_chunks.emplace_back(options.text);
+
+    std::vector<float> combined_pcm;
     stage_start = std::chrono::steady_clock::now();
-    bool ok = false;
-    if (options.mode == "cross-lingual")
-        ok = cosyvoice_tts_cross_lingual(tts_ctx.get(), options.text.c_str(), options.speed, &result);
-    else if (options.mode == "zero-shot")
-        ok = cosyvoice_tts_zero_shot(tts_ctx.get(), options.text.c_str(), options.speed, &result);
-    else
-        ok = cosyvoice_tts_instruct(tts_ctx.get(), options.text.c_str(), options.instruction.c_str(), options.speed, &result);
+    bool ok = true;
+    for (const auto& chunk : text_chunks)
+    {
+        cosyvoice_generated_speech part = {};
+        bool part_ok = false;
+        if (options.mode == "cross-lingual")
+            part_ok = cosyvoice_tts_cross_lingual(tts_ctx.get(), chunk.c_str(), options.speed, &part);
+        else if (options.mode == "zero-shot")
+            part_ok = cosyvoice_tts_zero_shot(tts_ctx.get(), chunk.c_str(), options.speed, &part);
+        else
+            part_ok = cosyvoice_tts_instruct(tts_ctx.get(), chunk.c_str(), options.instruction.c_str(), options.speed, &part);
+
+        if (!part_ok || !part.data || part.length == 0)
+        {
+            ok = false;
+            break;
+        }
+        combined_pcm.insert(combined_pcm.end(), part.data, part.data + part.length);
+    }
     timing.tts_generate_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
 
-    if (!ok && (!result.data || result.length == 0))
+    if (!ok || combined_pcm.empty())
     {
         print_error_log("Error: TTS generation failed.\n");
         return 1;
@@ -1191,7 +1209,7 @@ int tool_entry(int argc, char** argv)
     print_memory_runtime_info(memory_usage_before, memory_usage_after, log_level);
 
     stage_start = std::chrono::steady_clock::now();
-    if (!cosyvoice_audio_save_to_file(options.output.c_str(), result.data, result.length, sample_rate))
+    if (!cosyvoice_audio_save_to_file(options.output.c_str(), combined_pcm.data(), static_cast<uint32_t>(combined_pcm.size()), sample_rate))
     {
         print_error_log("Error: failed to save output audio file \"%s\".\n", options.output.c_str());
         return 1;
