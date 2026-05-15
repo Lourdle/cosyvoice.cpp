@@ -2,8 +2,9 @@
 
 #include <array>
 #include <cstring>
+#include <utility>
 
-namespace cosyvoice_common {
+namespace cosyvoice_internal {
 namespace {
 
 constexpr std::array<std::string_view, 7> hard_enders = {
@@ -25,7 +26,7 @@ inline std::size_t utf8_char_len(unsigned char b)
     if ((b & 0xE0) == 0xC0) return 2;
     if ((b & 0xF0) == 0xE0) return 3;
     if ((b & 0xF8) == 0xF0) return 4;
-    return 1;  // invalid byte; advance by one to avoid getting stuck
+    return 1;
 }
 
 inline bool match_at(std::string_view text, std::size_t pos, std::string_view pattern)
@@ -36,26 +37,23 @@ inline bool match_at(std::string_view text, std::size_t pos, std::string_view pa
 
 inline bool is_ws(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
-inline void emit_trimmed(std::vector<std::string>& chunks, std::string_view text, std::size_t lo, std::size_t hi)
+inline void emit_trimmed(std::vector<std::string>& out, std::string_view text, std::size_t lo, std::size_t hi)
 {
     while (lo < hi && is_ws(text[lo])) ++lo;
     while (hi > lo && is_ws(text[hi - 1])) --hi;
     if (lo < hi)
-        chunks.emplace_back(text.substr(lo, hi - lo));
+        out.emplace_back(text.substr(lo, hi - lo));
 }
 
 }  // namespace
 
-std::vector<std::string> split_text_into_chunks(std::string_view text, std::size_t max_bytes)
+std::vector<std::string> split_into_fragments(std::string_view text)
 {
-    std::vector<std::string> chunks;
+    std::vector<std::string> fragments;
     if (text.empty())
-        return chunks;
-    if (max_bytes == 0)
-        max_bytes = default_max_chunk_bytes;
+        return fragments;
 
     std::size_t start = 0;
-    std::size_t last_soft = 0;  // byte position right after the most recent soft separator
     std::size_t i = 0;
     while (i < text.size())
     {
@@ -66,9 +64,8 @@ std::vector<std::string> split_text_into_chunks(std::string_view text, std::size
             if (match_at(text, i, ender))
             {
                 const auto end = i + ender.size();
-                emit_trimmed(chunks, text, start, end);
+                emit_trimmed(fragments, text, start, end);
                 start = end;
-                last_soft = 0;
                 i = end;
                 matched = true;
                 break;
@@ -80,14 +77,10 @@ std::vector<std::string> split_text_into_chunks(std::string_view text, std::size
         {
             if (match_at(text, i, sep))
             {
-                i += sep.size();
-                last_soft = i;
-                if (i - start >= max_bytes)
-                {
-                    emit_trimmed(chunks, text, start, last_soft);
-                    start = last_soft;
-                    last_soft = 0;
-                }
+                const auto end = i + sep.size();
+                emit_trimmed(fragments, text, start, end);
+                start = end;
+                i = end;
                 matched = true;
                 break;
             }
@@ -95,24 +88,41 @@ std::vector<std::string> split_text_into_chunks(std::string_view text, std::size
         if (matched) continue;
 
         i += utf8_char_len(static_cast<unsigned char>(text[i]));
-
-        if (i - start >= max_bytes)
-        {
-            std::size_t cut = (last_soft > start) ? last_soft : i;
-            while (cut > start && cut < text.size()
-                && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80)
-                --cut;
-            if (cut <= start) cut = i;
-            emit_trimmed(chunks, text, start, cut);
-            start = cut;
-            last_soft = 0;
-        }
     }
 
     if (start < text.size())
-        emit_trimmed(chunks, text, start, text.size());
+        emit_trimmed(fragments, text, start, text.size());
+
+    return fragments;
+}
+
+std::vector<std::string> reassemble_by_token_budget(
+    const std::vector<std::string>& fragments,
+    std::size_t max_tokens,
+    const token_count_fn& count)
+{
+    std::vector<std::string> chunks;
+    if (fragments.empty() || max_tokens == 0)
+        return chunks;
+
+    std::string current;
+    std::size_t current_tokens = 0;
+    for (const auto& fragment : fragments)
+    {
+        const std::size_t fragment_tokens = count(fragment);
+        if (current_tokens != 0 && current_tokens + fragment_tokens > max_tokens)
+        {
+            chunks.push_back(std::move(current));
+            current.clear();
+            current_tokens = 0;
+        }
+        current += fragment;
+        current_tokens += fragment_tokens;
+    }
+    if (!current.empty())
+        chunks.push_back(std::move(current));
 
     return chunks;
 }
 
-}  // namespace cosyvoice_common
+}  // namespace cosyvoice_internal

@@ -235,17 +235,20 @@ bool cosyvoice_tts(cosyvoice_context_t ctx, const int* text, uint32_t text_len, 
     // Defensive guard: bail out before llm_prefill / llm_decode would refuse the request because
     // the prefill layout exceeds n_max_seq. Without this, llm_job throws and emits an error log
     // for every doomed call; rejecting up-front lets the caller know the input is too long.
+    //
+    // The guard only looks at the predicted *fresh* prefill length, not the current KV-cache
+    // length. llm_job internally truncates the cache back to either SOS or SOS+prompt_text
+    // before re-prefilling, so a large residual cache from a previous call (e.g. when callers
+    // synthesize chunked text via tts_job) is not a real budget consumer.
     cosyvoice_context_params_t params;
     ctx->get_context_params(&params);
-    const uint32_t kv_cache_len = ctx->llm_get_kv_cache_len();
     const uint32_t prompt_text_len = static_cast<uint32_t>(prompt->prompt_text.size());
     const uint32_t prompt_speech_len = prompt->llm_prompt_speech_tokens.second;
     // Worst-case prefill: SOS(1) + prompt_text + text + (task_token(1) + prompt_speech_tokens) when present.
     uint64_t prefill_len = 1ull + prompt_text_len + text_len;
     if (prompt_speech_len != 0)
         prefill_len += 1ull + prompt_speech_len;
-    const uint64_t budget = std::max<uint64_t>(kv_cache_len, prefill_len);
-    if (budget + 1 > params.n_max_seq)
+    if (prefill_len + 1 > params.n_max_seq)
     {
         result->data = nullptr;
         result->length = 0;
