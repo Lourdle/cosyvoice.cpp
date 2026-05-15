@@ -15,7 +15,7 @@ void cosyvoice_init_default_context_params(cosyvoice_context_params_t* params)
     params->inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
 
     params->n_batch = 256;
-    params->n_max_seq = 2048;
+    params->n_max_seq = 8192;
 
     std::random_device rd;
     if (rd.entropy() == 0)
