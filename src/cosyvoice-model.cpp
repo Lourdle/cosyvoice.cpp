@@ -1,5 +1,6 @@
 #include "cosyvoice-model.h"
 #include "cosyvoice-llm-kv-cache.h"
+#include "common.h"
 
 #include <cstring>
 #include <span>
@@ -15,7 +16,7 @@ void cosyvoice_init_default_context_params(cosyvoice_context_params_t* params)
     params->inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
 
     params->n_batch = 256;
-    params->n_max_seq = 8192;
+    params->n_max_seq = COSYVOICE_LLM_MAX_SEQ_LEN;
 
     std::random_device rd;
     if (rd.entropy() == 0)
