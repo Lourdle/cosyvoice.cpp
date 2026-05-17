@@ -32,7 +32,7 @@ struct server_options
     std::string single_prompt_speech;
     bool has_single_voice_arg = false;
 
-    uint32_t max_llm_len = 8192;
+    uint32_t max_llm_len = COSYVOICE_LLM_MAX_SEQ_LEN;
     uint32_t n_threads = 0;
     bool has_inference_buffer_policy = false;
     cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
@@ -87,7 +87,7 @@ static void print_usage(const char* argv0)
     printf("  --prompt-speech <file>                      Prompt speech file for single mapping mode.\n");
 
     printf("\nRuntime options:\n");
-    printf("  --max-llm-len <value>                       Maximum LLM sequence length. Default: 8192.\n");
+    printf("  --max-llm-len <value>                       Maximum LLM sequence length. Default: " COSYVOICE_LLM_MAX_SEQ_LEN_STR ".\n");
     printf("  --threads, -j <value>                       CPU thread count. Default: 0 (hardware concurrency).\n");
     printf("  --inference-buffer-policy <shared|balanced|dedicated>\n");
     printf("                                              Inference buffer policy. Default: balanced.\n");
