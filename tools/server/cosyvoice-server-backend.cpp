@@ -176,11 +176,29 @@ static bool build_pcm16_bytes(const float* data, uint32_t length, std::string* o
         return false;
     }
 
+    // Apply a short linear fade-in over the first ~20ms to suppress the
+    // audible click at the silence-to-speech boundary. CosyVoice's vocoder
+    // emits an abrupt amplitude jump on the very first sample (the model
+    // output starts mid-waveform rather than at zero crossing); listeners
+    // hear it as a soft "tk" before the first phoneme. 20ms is short enough
+    // to be inaudible as a fade but covers the typical click duration.
+    // 24kHz * 0.02s = 480 samples; for shorter outputs (test signals)
+    // ramp over whatever we have.
+    constexpr uint32_t kFadeSamples = 480;
+    const uint32_t fade_len = std::min<uint32_t>(kFadeSamples, length);
+
     const size_t total_bytes = static_cast<size_t>(length) * kBytesPerSample;
     output->resize(total_bytes);
     for (uint32_t i = 0; i < length; ++i)
     {
-        const auto sample = float_to_pcm16(data[i]);
+        float value = data[i];
+        if (i < fade_len)
+        {
+            const float ramp = static_cast<float>(i + 1)
+                             / static_cast<float>(fade_len + 1);
+            value *= ramp;
+        }
+        const auto sample = float_to_pcm16(value);
         (*output)[2 * i] = static_cast<char>(sample & 0xFF);
         (*output)[2 * i + 1] = static_cast<char>((sample >> 8) & 0xFF);
     }
@@ -725,9 +743,17 @@ static bool apply_generation_overrides(
         || request.has_min_token_text_ratio
         || request.has_max_token_text_ratio;
 
-    cosyvoice_generation_config_t cfg = runtime.default_generation_config;
+    // Only touch the generation config when the caller actually overrides
+    // something. cosyvoice_model::set_generation_config reallocates the
+    // nucleus_probs buffer and re-installs sampling state on every call;
+    // doing that between identical requests perturbs the sampler enough to
+    // tank throughput (measured ~3x slower than a fresh CLI invocation on
+    // the same input). The startup default was already installed once when
+    // the runtime was set up, so the no-override path needs no further
+    // configuration here.
     if (has_override)
     {
+        cosyvoice_generation_config_t cfg = runtime.default_generation_config;
         if (request.has_temperature)
             cfg.temperature = request.temperature;
         if (request.has_top_k)
@@ -742,14 +768,20 @@ static bool apply_generation_overrides(
             cfg.min_token_text_ratio = request.min_token_text_ratio;
         if (request.has_max_token_text_ratio)
             cfg.max_token_text_ratio = request.max_token_text_ratio;
+
+        if (!cosyvoice_set_generation_config(model_ctx, &cfg))
+        {
+            *error_message = "Invalid generation parameter values.";
+            return false;
+        }
     }
 
-    if (!cosyvoice_set_generation_config(model_ctx, &cfg))
-    {
-        *error_message = "Invalid generation parameter values.";
-        return false;
-    }
-
+    // The sampler seed must vary across requests when the caller didn't pin
+    // one — pinning a single seed across the lifetime of a shared context
+    // makes the sampler emit the same stop-token pattern for every text and
+    // truncates the audio (e.g. a 55-char Japanese sentence collapses to
+    // ~4.8s instead of the natural ~12s). Re-seeding here is the cheap part;
+    // it was the set_generation_config call above that did the harm.
     uint32_t effective_seed = 0;
     if (request.has_seed)
         effective_seed = request.seed;
