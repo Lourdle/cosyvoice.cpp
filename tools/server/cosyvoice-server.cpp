@@ -1,13 +1,10 @@
 #include "cosyvoice-server.h"
 #include "tool_common_cosyvoice.h"
 
-#include <chrono>
-#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
-#include <random>
 #include <string>
 #include <utility>
 
@@ -181,16 +178,6 @@ static std::string derive_served_model_name(const std::string& model_path)
     return model_path.substr(start, end - start);
 }
 
-static void seed_runtime_rng(server_runtime* runtime)
-{
-    uint32_t seed_rng_seed = static_cast<uint32_t>(
-        std::chrono::high_resolution_clock::now().time_since_epoch().count());
-    std::random_device rd;
-    if (rd.entropy() > 0.0)
-        seed_rng_seed ^= static_cast<uint32_t>(rd());
-    runtime->seed_rng.seed(seed_rng_seed);
-}
-
 static bool init_model_context(const server_options& options, server_runtime* runtime)
 {
     cosyvoice_context_params_t context_params;
@@ -299,7 +286,7 @@ static bool build_runtime(const server_options& options, server_runtime* runtime
 #endif
     runtime->log_level = get_log_level(options);
 
-    seed_runtime_rng(runtime);
+    runtime->seed_rng.seed(cosyvoice_generate_random_seed());
 
     cosyvoice_init_backend_from_path(options.backend_path.empty() ? nullptr : options.backend_path.c_str());
 
