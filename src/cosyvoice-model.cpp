@@ -30,9 +30,8 @@ void cosyvoice_init_default_context_params(cosyvoice_context_params_t* params)
 }
 
 cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_t& params)
-    : backend(backend), params(params), cpu_backend(backend),
-    ctx(ggml_init(ggml_init_params{ .mem_size = ggml_graph_overhead() * GGML_DEFAULT_GRAPH_SIZE, .no_alloc = true })),
-    ctx0(ggml_init(ggml_init_params{ .mem_size = ggml_graph_overhead() * (GGML_DEFAULT_GRAPH_SIZE + (params.flow_use_flash_attn ? 0 : GGML_DEFAULT_GRAPH_SIZE / 2)), .no_alloc = true })),
+    : backend(backend), params(params), cpu_backend(backend), ctx(nullptr),
+    ctx0(ggml_init(ggml_init_params{ .mem_size = ggml_graph_overhead() * kCosyVoiceGraphSize, .no_alloc = true })),
     gf(nullptr), llm_input(nullptr), llm_probs(nullptr), position_ids(nullptr), causal_mask(nullptr), kv_cache(nullptr),
     status(GGML_STATUS_SUCCESS), prompt_crc32(0), rand_noise_len(0)
 {
@@ -138,7 +137,7 @@ void cosyvoice_model::empty_buffer_cache()
         backends,
         nullptr,
         backend == cpu_backend ? 1 : 2,
-        GGML_DEFAULT_GRAPH_SIZE * 2,
+        kCosyVoiceSchedGraphSize,
         true,
         true
     ));
