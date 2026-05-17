@@ -6,7 +6,17 @@
 
 #include <ggml-backend.h>
 
+#include <chrono>
+#include <random>
 #include <thread>
+
+uint32_t cosyvoice_generate_random_seed()
+{
+    std::random_device rd;
+    if (rd.entropy() == 0)
+        return static_cast<uint32_t>(std::chrono::system_clock::now().time_since_epoch().count());
+    return rd();
+}
 
 #ifdef _WIN32
     #include <Windows.h>

@@ -169,6 +169,16 @@ typedef struct cosyvoice_context_params
 } cosyvoice_context_params_t;
 
 // ----------------------------------------------------------------------------
+// Random Seed Utility
+// ----------------------------------------------------------------------------
+
+/**
+ * @brief Generate a random 32-bit seed.
+ * @return A random uint32_t value.
+ */
+COSYVOICE_API uint32_t cosyvoice_generate_random_seed();
+
+// ----------------------------------------------------------------------------
 // Backend Initialization API
 // ----------------------------------------------------------------------------
 
