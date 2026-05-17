@@ -27,7 +27,7 @@
 
 struct cli_options
 {
-    uint32_t max_llm_len = 2048;
+    uint32_t max_llm_len = COSYVOICE_LLM_MAX_SEQ_LEN;
     float speed = 1.0f;
 #ifndef COSYVOICE_NO_ICU
     bool text_normalization_enabled = true;
@@ -139,7 +139,7 @@ static void print_usage(const char* argv0)
 #endif
     printf("  --mode <zero-shot|instruct|cross-lingual>   TTS mode. Default: auto-detect by --instruction.\n");
     printf("  --speed, -s <value>                         Speech speed. Default: 1.0.\n");
-    printf("  --max-llm-len <value>                       Maximum LLM sequence length. Default: 2048.\n");
+    printf("  --max-llm-len <value>                       Maximum LLM sequence length. Default: " COSYVOICE_LLM_MAX_SEQ_LEN_STR ".\n");
     printf("  --threads, -j <value>                       CPU thread count. Default: 0 (hardware concurrency).\n");
     printf("  --llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>\n");
     printf("                                              KV cache type. Default: q8_0.\n");
@@ -187,7 +187,7 @@ static void print_usage(const char* argv0)
     printf("  Frontend-only: --frontend-only --speech-tokenizer --campplus + audio input + --prompt-speech-output.\n");
 
     printf("\nDefaults and sources:\n");
-    printf("  CLI defaults: speed=1.0, max-llm-len=2048, threads=0 (hardware concurrency), llm-kv-cache-type=q8_0, mode=auto.\n");
+    printf("  CLI defaults: speed=1.0, max-llm-len=" COSYVOICE_LLM_MAX_SEQ_LEN_STR ", threads=0 (hardware concurrency), llm-kv-cache-type=q8_0, mode=auto.\n");
     printf("  Sampling defaults (temperature/top-k/top-p/win-size/tau-r/token-text ratios) come from model metadata unless overridden.\n");
 }
 

@@ -12,6 +12,15 @@
 #include <memory>
 #include <random>
 
+constexpr int kCosyVoiceGraphSize = GGML_DEFAULT_GRAPH_SIZE + 512;
+constexpr int kCosyVoiceSchedGraphSize = kCosyVoiceGraphSize + 256;
+
+inline
+ggml_cgraph* new_cgraph(ggml_context* ctx)
+{
+    return ggml_new_graph_custom(ctx, kCosyVoiceGraphSize, false);
+}
+
 struct ggml_backend_op_capabilities
 {
     bool concat_i32    : 1;

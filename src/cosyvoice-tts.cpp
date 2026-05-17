@@ -223,7 +223,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
     ggml_tensor* prompt_feat = ggml_new_tensor_2d(ctx0.get(), GGML_TYPE_F32, prompt->prompt_speech_feat.shape[1], prompt->prompt_speech_feat.shape[0]);
     ggml_tensor* embedding = ggml_new_tensor_2d(ctx0.get(), GGML_TYPE_F32, prompt->flow_embedding.shape[1], prompt->flow_embedding.shape[0]);
 
-    ggml_cgraph* gf = ggml_new_graph_custom(ctx0.get(), GGML_DEFAULT_GRAPH_SIZE * 3 / 2, false);
+    ggml_cgraph* gf = new_cgraph(ctx0.get());
     auto [mu, spks, conds, cut_len] = flow.build_cgraph_encode(ctx0.get(), token, prompt_token, prompt_feat, embedding, op_caps);
     auto ditctx = flow.decoder.prepare_context(ctx1.get(), mu, spks, conds);
     do
@@ -291,7 +291,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 
     ggml_reset(ctx0.get());
     ggml_backend_sched_reset(sched.get());
-    gf = ggml_new_graph(ctx0.get());
+    gf = new_cgraph(ctx0.get());
     feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 2, op_caps, cut_len, t_leaf, position_ids);
 
     ggml_build_forward_expand(gf, feat);
@@ -327,7 +327,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
     ggml_backend_tensor_copy_async(backend.get(), backend.get(), feat, ditctx.x);
     ggml_reset(ctx0.get());
     ggml_backend_sched_reset(sched.get());
-    gf = ggml_new_graph(ctx0.get());
+    gf = new_cgraph(ctx0.get());
     feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, static_cast<int>(flow.decoder.t_span.size() - 1), op_caps, cut_len, t_leaf, position_ids);
 
     ggml_build_forward_expand(gf, feat);
@@ -351,7 +351,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 
     ggml_reset(ctx0.get());
     ggml_backend_sched_reset(sched.get());
-    gf = ggml_new_graph(ctx0.get());
+    gf = new_cgraph(ctx0.get());
 
     if (std::abs(speed - 1.f) > FLT_EPSILON)
         speech_feat = ggml_interpolate(ctx0.get(), speech_feat,
