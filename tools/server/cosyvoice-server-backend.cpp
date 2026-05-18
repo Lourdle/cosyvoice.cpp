@@ -161,7 +161,7 @@ static inline int16_t float_to_pcm16(float value)
     return static_cast<int16_t>(rounded);
 }
 
-static bool build_pcm16_bytes(const float* data, uint32_t length, std::string* output, std::string* error)
+static bool build_pcm16_bytes(const float* data, uint32_t length, uint32_t sample_rate, std::string* output, std::string* error)
 {
     if (!data || length == 0)
     {
@@ -182,10 +182,12 @@ static bool build_pcm16_bytes(const float* data, uint32_t length, std::string* o
     // output starts mid-waveform rather than at zero crossing); listeners
     // hear it as a soft "tk" before the first phoneme. 20ms is short enough
     // to be inaudible as a fade but covers the typical click duration.
-    // 24kHz * 0.02s = 480 samples; for shorter outputs (test signals)
-    // ramp over whatever we have.
-    constexpr uint32_t kFadeSamples = 480;
-    const uint32_t fade_len = std::min<uint32_t>(kFadeSamples, length);
+    // Convert that duration to samples using the active runtime sample rate;
+    // for shorter outputs (test signals), ramp over whatever we have.
+    constexpr double kFadeDurationSeconds = 0.02;
+    const uint32_t fade_samples = static_cast<uint32_t>(std::ceil(
+        static_cast<double>(sample_rate) * kFadeDurationSeconds));
+    const uint32_t fade_len = std::min<uint32_t>(fade_samples, length);
 
     const size_t total_bytes = static_cast<size_t>(length) * kBytesPerSample;
     output->resize(total_bytes);
@@ -412,7 +414,7 @@ static bool build_audio_payload(response_audio_format format, const cosyvoice_ge
     switch (format)
     {
     case response_audio_format::pcm:
-        return build_pcm16_bytes(generated.data, generated.length, payload, error);
+        return build_pcm16_bytes(generated.data, generated.length, runtime.sample_rate, payload, error);
     case response_audio_format::wav:
 #ifdef COSYVOICE_NO_AUDIO
         return build_wav_bytes(generated.data, generated.length, runtime.sample_rate, payload, error);
