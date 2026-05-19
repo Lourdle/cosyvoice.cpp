@@ -4,7 +4,6 @@
 
 #include <cstring>
 #include <span>
-#include <chrono>
 
 void cosyvoice_init_default_context_params(cosyvoice_context_params_t* params)
 {
@@ -18,11 +17,7 @@ void cosyvoice_init_default_context_params(cosyvoice_context_params_t* params)
     params->n_batch = 256;
     params->n_max_seq = COSYVOICE_DEFAULT_LLM_MAX_SEQ_LEN;
 
-    std::random_device rd;
-    if (rd.entropy() == 0)
-        params->seed = static_cast<uint32_t>(std::chrono::system_clock::now().time_since_epoch().count());
-    else
-        params->seed = rd();
+    params->seed = cosyvoice_generate_random_seed();
     params->builtin_sampler_rng_policy = COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION;
 
     params->sampler = nullptr;

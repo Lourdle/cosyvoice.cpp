@@ -3,6 +3,9 @@
 #endif
 
 #include "tool_common_cosyvoice.h"
+#ifndef COSYVOICE_CLI_NO_PLAYBACK
+    #include "cli_audio_player.h"
+#endif
 
 #ifdef COSYVOICE_NO_AUDIO
     #define cosyvoice_audio_save_to_file cosyvoice_save_wav
@@ -12,18 +15,17 @@
 #include <ggml-backend.h>
 
 #include <cstdarg>
-#include <algorithm>
 #include <cctype>
 #include <chrono>
-#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <limits>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <thread>
 #include <format>
+#include <map>
 
 struct cli_options
 {
@@ -52,7 +54,11 @@ struct cli_options
     std::string instruction;
     std::string output;
     std::string mode = "auto";
+    bool interactive = false;
     std::string seed;
+    bool has_seed_policy = false;
+    enum class seed_policy_mode { auto_mode, fixed, random };
+    seed_policy_mode seed_policy = seed_policy_mode::auto_mode;
     uint32_t n_threads = 0;
     bool has_llm_kv_cache_type = false;
     cosyvoice_llm_kv_cache_type_t llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0;
@@ -100,6 +106,49 @@ static bool has_generation_overrides(const cli_options& options)
         || options.has_max_token_text_ratio;
 }
 
+static bool parse_seed_policy_arg(const std::string& value, cli_options::seed_policy_mode* out)
+{
+    const auto lowered = to_lower(value);
+    if (lowered == "auto")
+    {
+        *out = cli_options::seed_policy_mode::auto_mode;
+        return true;
+    }
+    if (lowered == "fixed")
+    {
+        *out = cli_options::seed_policy_mode::fixed;
+        return true;
+    }
+    if (lowered == "random")
+    {
+        *out = cli_options::seed_policy_mode::random;
+        return true;
+    }
+    return false;
+}
+
+static const char* seed_policy_to_string(cli_options::seed_policy_mode policy)
+{
+    switch (policy)
+    {
+    case cli_options::seed_policy_mode::auto_mode:
+        return "auto";
+    case cli_options::seed_policy_mode::fixed:
+        return "fixed";
+    case cli_options::seed_policy_mode::random:
+        return "random";
+    default:
+        return "unknown";
+    }
+}
+
+static cli_options::seed_policy_mode resolve_seed_policy_mode(const cli_options& options)
+{
+    if (options.has_seed_policy && options.seed_policy != cli_options::seed_policy_mode::auto_mode)
+        return options.seed_policy;
+    return options.seed.empty() ? cli_options::seed_policy_mode::random : cli_options::seed_policy_mode::fixed;
+}
+
 static cli_log_level get_log_level(const cli_options& options)
 {
     if (options.quiet)
@@ -115,12 +164,30 @@ static cli_log_level get_log_level(const cli_options& options)
     #define PROMPT_AUDIO_CMD "--prompt-audio <file>"
 #endif
 
+static void print_interactive_commands()
+{
+    printf("Interactive commands:\n");
+    printf("  /save <file> [code]          Save audio to file (default: last synthesized).\n");
+#ifndef COSYVOICE_CLI_NO_PLAYBACK
+    printf("  /play [code]                 Play audio (default: last synthesized).\n");
+#endif
+    printf("  /list                        List cached audio.\n");
+    printf("  /query [code]                Show audio info (default: last synthesized).\n");
+    printf("  /delete [code]               Delete cached audio (default: last synthesized).\n");
+    printf("  /clear                       Clear cached audio.\n");
+    printf("  /seed [value]                Show or set next seed.\n");
+    printf("  /seed-policy <fixed|random>  Show or set seed policy.\n");
+    printf("  /help                        Show command list.\n");
+    printf("  /exit                        Exit interactive mode.\n");
+}
+
 static void print_usage(const char* argv0)
 {
     const char* supported_formats = cosyvoice_audio_supported_encoding_formats();
     printf("cosyvoice-cli - command line TTS tool\n\n");
     printf("Usage:\n");
     printf("  %s --model <file.gguf> --prompt-speech <file> --text <text> --output <file>\n", argv0);
+    printf("  %s --interactive --model <file.gguf> --prompt-speech <file>\n", argv0);
 #ifndef COSYVOICE_NO_FRONTEND
     printf("  %s --frontend-only --speech-tokenizer <file.onnx> --campplus <file.onnx> %s --prompt-text <text> --prompt-speech-output <file>\n", argv0, PROMPT_AUDIO_CMD);
     printf("  %s --model <file.gguf> --speech-tokenizer <file.onnx> --campplus <file.onnx> %s --prompt-text <text> --text <text> --output <file>\n", argv0, PROMPT_AUDIO_CMD);
@@ -128,6 +195,7 @@ static void print_usage(const char* argv0)
 
     printf("\nCore options:\n");
     printf("  --help, -h                                  Show this help message and exit.\n");
+    printf("  --interactive                               Run in interactive mode.\n");
     printf("  --model, -m <file>                          CosyVoice model file.\n");
     printf("  --backend-path <dir>                        GGML backend directory. Default: load from the executable's directory.\n");
     printf("  --text, -t <text>                           Text to synthesize.\n");
@@ -143,7 +211,8 @@ static void print_usage(const char* argv0)
     printf("  --threads, -j <value>                       CPU thread count. Default: 0 (hardware concurrency).\n");
     printf("  --llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>\n");
     printf("                                              KV cache type. Default: q8_0.\n");
-    printf("  --seed <value>                              Random seed for sampling. Default: random.\n");
+    printf("  --seed <value>                              Fixed seed for sampling.\n");
+    printf("  --seed-policy <auto|fixed|random>           Seed strategy. Default: auto (fixed if --seed is set).\n");
 
     printf("\nSampling overrides:\n");
     printf("  --temperature <value>                       Sampling temperature (> 0).\n");
@@ -183,8 +252,11 @@ static void print_usage(const char* argv0)
 
     printf("\nRequired combinations:\n");
     printf("  TTS: --model --text --output + one prompt source.\n");
+    printf("  Interactive: (--interactive) + one prompt source, or omit --text and --output.\n");
     printf("  If --prompt-speech is not provided, frontend inputs are required.\n");
-    printf("  Frontend-only: --frontend-only --speech-tokenizer --campplus + audio input + --prompt-speech-output.\n");
+    printf("  Frontend-only: --frontend-only --speech-tokenizer --campplus + audio input + --prompt-speech-output.\n\n");
+
+    print_interactive_commands();
 
     printf("\nDefaults and sources:\n");
     printf("  CLI defaults: speed=1.0, max-llm-len=" COSYVOICE_DEFAULT_LLM_MAX_SEQ_LEN_STR ", threads=0 (hardware concurrency), llm-kv-cache-type=q8_0, mode=auto.\n");
@@ -322,6 +394,178 @@ static void print_kv_line_mib_delta(const char* key, size_t before, size_t after
     printf("  %s%-24s%s : %zu bytes (%.2f MiB), delta %+lld bytes\n", ANSI_DIM, key, ANSI_RESET, after, bytes_to_mib(after), delta);
 }
 
+struct cached_audio
+{
+    uint32_t seed = 0;
+    std::string text;
+    std::vector<float> pcm;
+};
+
+struct audio_cache
+{
+    std::map<uint32_t, cached_audio> items;
+    uint32_t next_id = 1;
+    uint32_t last_success_id = 0;
+};
+
+struct tts_seed_state
+{
+    bool fixed = false;
+    bool has_next_seed = false;
+    uint32_t next_seed = 0;
+};
+
+static double pcm_length_seconds(uint32_t sample_rate, size_t samples)
+{
+    if (sample_rate == 0)
+        return 0.0;
+    return static_cast<double>(samples) / static_cast<double>(sample_rate);
+}
+
+static uint32_t resolve_next_seed(tts_seed_state* seed_state)
+{
+    if (!seed_state)
+        return 0;
+    if (!seed_state->has_next_seed)
+    {
+        seed_state->next_seed = cosyvoice_generate_random_seed();
+        seed_state->has_next_seed = true;
+    }
+    return seed_state->next_seed;
+}
+
+static void update_tts_seed(cosyvoice_context_t ctx, tts_seed_state* seed_state, uint32_t* used_seed)
+{
+    if (!seed_state)
+        return;
+    const uint32_t seed_value = resolve_next_seed(seed_state);
+    seed_state->has_next_seed = true;
+    if (!seed_state->fixed)
+    {
+        seed_state->next_seed = cosyvoice_generate_random_seed();
+        seed_state->has_next_seed = true;
+    }
+    if (used_seed)
+        *used_seed = seed_value;
+    if (!cosyvoice_set_sampler_seed(ctx, seed_value))
+        print_warning_log("Warning: failed to apply sampler seed.\n");
+}
+
+static std::string preview_text_utf8(const std::string& text, size_t max_chars)
+{
+    if (max_chars == 0 || text.empty())
+        return {};
+
+    size_t count = 0;
+    size_t i = 0;
+    const auto size = text.size();
+    while (i < size && count < max_chars)
+    {
+        unsigned char c = static_cast<unsigned char>(text[i]);
+        size_t step = 1;
+        if ((c & 0x80u) == 0x00u)
+            step = 1;
+        else if ((c & 0xE0u) == 0xC0u)
+            step = 2;
+        else if ((c & 0xF0u) == 0xE0u)
+            step = 3;
+        else if ((c & 0xF8u) == 0xF0u)
+            step = 4;
+        if (i + step > size)
+            break;
+        i += step;
+        ++count;
+    }
+    std::string out = text.substr(0, i);
+    if (i < size)
+        out.append("...");
+    return out;
+}
+
+static std::vector<std::string> split_command_line(const std::string& line)
+{
+    std::vector<std::string> tokens;
+    std::string current;
+    bool in_quotes = false;
+
+    for (size_t i = 0; i < line.size(); ++i)
+    {
+        char ch = line[i];
+        if (ch == '"')
+        {
+            in_quotes = !in_quotes;
+            continue;
+        }
+        if (!in_quotes && std::isspace(static_cast<unsigned char>(ch)))
+        {
+            if (!current.empty())
+            {
+                tokens.emplace_back(current);
+                current.clear();
+            }
+            continue;
+        }
+        current.push_back(ch);
+    }
+    if (!current.empty())
+        tokens.emplace_back(current);
+    return tokens;
+}
+
+static const cached_audio* find_cached_audio(const audio_cache& cache, uint32_t id)
+{
+    auto it = cache.items.find(id);
+    return it != cache.items.end() ? &it->second : nullptr;
+}
+
+static uint32_t resolve_audio_id(const audio_cache& cache, const char* id_token, bool* ok)
+{
+    if (!id_token || !*id_token)
+    {
+        if (cache.last_success_id != 0)
+        {
+            if (ok) *ok = true;
+            return cache.last_success_id;
+        }
+        if (ok) *ok = false;
+        return 0;
+    }
+    uint32_t value = 0;
+    if (!parse_uint32_arg(id_token, &value))
+    {
+        if (ok) *ok = false;
+        return 0;
+    }
+    if (ok) *ok = true;
+    return value;
+}
+
+static cosyvoice_generated_speech generate_tts_audio(
+    cosyvoice_tts_context_t tts_ctx,
+    const cli_options& options,
+    const std::string& text,
+    std::string* error)
+{
+    bool ok = true;
+    cosyvoice_generated_speech result{};
+    if (options.mode == "cross-lingual")
+        ok = cosyvoice_tts_cross_lingual(tts_ctx, text.c_str(), options.speed, &result);
+    else if (options.mode == "zero-shot")
+        ok = cosyvoice_tts_zero_shot(tts_ctx, text.c_str(), options.speed, &result);
+    else
+        ok = cosyvoice_tts_instruct(tts_ctx, text.c_str(), options.instruction.c_str(), options.speed, &result);
+
+    if (!ok || !result.data || result.length == 0)
+    {
+        result = {};
+        ok = false;
+    }
+
+    if (!ok && error)
+        *error = "TTS generation failed.";
+    return result;
+}
+
 static const char* enabled_to_string(bool enabled)
 {
     return enabled ? "enabled" : "disabled";
@@ -347,7 +591,10 @@ static void print_preload_run_info(const cli_options& options, cli_log_level log
     print_kv_line_string("model", options.model.c_str());
     print_kv_line_string("mode", options.mode.c_str());
     print_kv_line_string("prompt_source", get_prompt_source(options));
-    print_kv_line_string("output", options.output.c_str());
+    if (options.interactive)
+        print_kv_line_string("output", "interactive");
+    else
+        print_kv_line_string("output", options.output.c_str());
     print_kv_line_float3("speed", options.speed);
     print_kv_line_u32("n_threads", options.n_threads ? options.n_threads : std::thread::hardware_concurrency());
 #ifndef COSYVOICE_NO_ICU
@@ -388,18 +635,6 @@ static void print_tts_runtime_info(
 
     print_section_title("Model");
     print_kv_line_u32("sample_rate", sample_rate);
-    if (!options.seed.empty())
-    {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%u (--seed)", context_params.seed);
-        print_kv_line_string("seed", buf);
-    }
-    else
-    {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%u (random)", context_params.seed);
-        print_kv_line_string("seed", buf);
-    }
     {
         char buf[64];
         snprintf(buf, sizeof(buf), "%s (%s)", llm_kv_cache_type_to_string(context_params.llm_kv_cache_type),
@@ -487,6 +722,217 @@ static void print_timing_info(const cli_timing_info& timing, bool include_tts_st
     print_kv_line_ms("total", timing.total_ms);
 }
 
+static void run_interactive_loop(
+    const cli_options& options,
+    cosyvoice_context_t ctx,
+    cosyvoice_tts_context_t tts_ctx,
+    tts_seed_state* seed_state,
+    uint32_t sample_rate)
+{
+    audio_cache cache;
+    std::string line;
+    if (seed_state && !seed_state->has_next_seed)
+    {
+        seed_state->next_seed = cosyvoice_generate_random_seed();
+        seed_state->has_next_seed = true;
+    }
+    printf("\nInteractive mode. Type text to synthesize, or /exit to quit.\n");
+    print_interactive_commands();
+
+    while (true)
+    {
+        printf("> ");
+        fflush(stdout);
+        if (!std::getline(std::cin, line))
+            break;
+        const auto trimmed = trim_copy(line);
+        if (trimmed.empty())
+            continue;
+
+        if (trimmed[0] == '/')
+        {
+            auto tokens = split_command_line(trimmed);
+            if (tokens.empty())
+                continue;
+
+            const auto& cmd = tokens[0];
+            if (cmd == "/exit")
+                break;
+            else if (cmd == "/help")
+                print_interactive_commands();
+            else if (cmd == "/clear")
+            {
+                cache.items.clear();
+                cache.next_id = 1;
+                cache.last_success_id = 0;
+                printf("Cleared cached audio.\n");
+            }
+            else if (cmd == "/seed")
+            {
+                if (tokens.size() > 1)
+                {
+                    uint32_t seed_value = 0;
+                    if (!parse_uint32_arg(tokens[1], &seed_value))
+                    {
+                        print_error_log("Error: invalid seed value.\n");
+                        continue;
+                    }
+                    seed_state->next_seed = seed_value;
+                    seed_state->has_next_seed = true;
+                }
+                printf("Next seed: %u\n", seed_state->next_seed);
+            }
+            else if (cmd == "/seed-policy")
+            {
+                if (tokens.size() > 1)
+                {
+                    cli_options::seed_policy_mode policy;
+                    if (!parse_seed_policy_arg(tokens[1], &policy))
+                    {
+                        print_error_log("Error: invalid seed policy value.\n");
+                        continue;
+                    }
+                    seed_state->fixed = (policy == cli_options::seed_policy_mode::fixed);
+                }
+                printf("Seed policy: %s\n", seed_state->fixed ? "fixed" : "random");
+            }
+            else if (cmd == "/list")
+            {
+                if (cache.items.empty())
+                {
+                    printf("No cached audio.\n");
+                    continue;
+                }
+                for (const auto& [id, item] : cache.items)
+                {
+                    const auto preview = preview_text_utf8(item.text, 16);
+                    const auto seconds = pcm_length_seconds(sample_rate, item.pcm.size());
+                    printf("%u | %.2fs | seed=%u | %s\n", id, seconds, item.seed, preview.c_str());
+                }
+            }
+            else if (cmd == "/query")
+            {
+                bool id_ok = false;
+                const char* id_token = tokens.size() > 1 ? tokens[1].c_str() : nullptr;
+                const uint32_t id = resolve_audio_id(cache, id_token, &id_ok);
+                if (!id_ok)
+                {
+                    print_error_log("Error: invalid or missing audio code.\n");
+                    continue;
+                }
+                const auto* item = find_cached_audio(cache, id);
+                if (!item)
+                {
+                    print_error_log("Error: audio code %u not found.\n", id);
+                    continue;
+                }
+                const auto seconds = pcm_length_seconds(sample_rate, item->pcm.size());
+                printf("code: %u\n", id);
+                printf("seed: %u\n", item->seed);
+                printf("samples: %zu\n", item->pcm.size());
+                printf("duration: %.2fs\n", seconds);
+                printf("text: %s\n", item->text.c_str());
+            }
+            else if (cmd == "/delete")
+            {
+                bool id_ok = false;
+                const char* id_token = tokens.size() > 1 ? tokens[1].c_str() : nullptr;
+                const uint32_t id = resolve_audio_id(cache, id_token, &id_ok);
+                if (!id_ok)
+                {
+                    print_error_log("Error: invalid or missing audio code.\n");
+                    continue;
+                }
+                auto it = cache.items.find(id);
+                if (it == cache.items.end())
+                {
+                    print_error_log("Error: audio code %u not found.\n", id);
+                    continue;
+                }
+                cache.items.erase(it);
+                if (cache.last_success_id == id)
+                    cache.last_success_id = cache.items.empty() ? 0 : cache.items.rbegin()->first;
+                printf("Deleted audio %u.\n", id);
+            }
+            else if (cmd == "/save")
+            {
+                if (tokens.size() < 2)
+                {
+                    print_error_log("Error: /save requires a filename.\n");
+                    continue;
+                }
+                const std::string& path = tokens[1];
+                bool id_ok = false;
+                const char* id_token = tokens.size() > 2 ? tokens[2].c_str() : nullptr;
+                const uint32_t id = resolve_audio_id(cache, id_token, &id_ok);
+                if (!id_ok)
+                {
+                    print_error_log("Error: invalid or missing audio code.\n");
+                    continue;
+                }
+                const auto* item = find_cached_audio(cache, id);
+                if (!item)
+                {
+                    print_error_log("Error: audio code %u not found.\n", id);
+                    continue;
+                }
+                if (!cosyvoice_audio_save_to_file(path.c_str(), item->pcm.data(), static_cast<uint32_t>(item->pcm.size()), sample_rate))
+                {
+                    print_error_log("Error: failed to save output audio file \"%s\".\n", path.c_str());
+                    continue;
+                }
+                printf("Saved audio %u to %s\n", id, path.c_str());
+            }
+#ifndef COSYVOICE_CLI_NO_PLAYBACK
+            else if (cmd == "/play")
+            {
+                bool id_ok = false;
+                const char* id_token = tokens.size() > 1 ? tokens[1].c_str() : nullptr;
+                const uint32_t id = resolve_audio_id(cache, id_token, &id_ok);
+                if (!id_ok)
+                {
+                    print_error_log("Error: invalid or missing audio code.\n");
+                    continue;
+                }
+                const auto* item = find_cached_audio(cache, id);
+                if (!item)
+                {
+                    print_error_log("Error: audio code %u not found.\n", id);
+                    continue;
+                }
+                std::string play_error;
+                if (!cli_audio_play_pcm_blocking(item->pcm.data(), static_cast<uint32_t>(item->pcm.size()), sample_rate, &play_error))
+                    print_error_log("Error: %s\n", play_error.c_str());
+            }
+#endif
+            else
+                print_error_log("Error: unknown command.\n");
+            continue;
+        }
+
+        uint32_t used_seed = 0;
+        update_tts_seed(ctx, seed_state, &used_seed);
+
+        std::string error;
+        auto pcm = generate_tts_audio(tts_ctx, options, trimmed, &error);
+        if (!pcm.data)
+        {
+            if (!error.empty())
+                print_error_log("Error: %s\n", error.c_str());
+            continue;
+        }
+        cached_audio entry;
+        entry.seed = used_seed;
+        entry.text = trimmed;
+        entry.pcm.insert(entry.pcm.end(), pcm.data, pcm.data + pcm.length);
+        const auto id = cache.next_id++;
+        cache.last_success_id = id;
+        const auto duration = pcm_length_seconds(sample_rate, entry.pcm.size());
+        cache.items.emplace(id, std::move(entry));
+        printf("Generated audio %u (%.2fs), seed=%u.\n", cache.last_success_id, duration, used_seed);
+    }
+}
+
 static bool validate_options(cli_options& options)
 {
     if (options.quiet && options.verbose)
@@ -513,6 +959,8 @@ static bool validate_options(cli_options& options)
         }
         if (!options.seed.empty())
             print_warning_log("Warning: --seed is ignored in frontend-only mode.\n");
+        if (options.has_seed_policy)
+            print_warning_log("Warning: --seed-policy is ignored in frontend-only mode.\n");
         if (options.n_threads != 0)
             print_warning_log("Warning: --threads is ignored in frontend-only mode.\n");
         if (has_generation_overrides(options))
@@ -544,21 +992,35 @@ static bool validate_options(cli_options& options)
     }
 #endif
 
+#ifndef COSYVOICE_NO_FRONTEND
+    if (options.interactive && options.frontend_only)
+    {
+        print_error_log("Error: --interactive cannot be used with --frontend-only.\n");
+        return false;
+    }
+#endif
+
     bool ok = true;
     if (options.model.empty())
     {
         print_error_log("Error: --model is required for TTS.\n");
         ok = false;
     }
-    if (options.text.empty())
+    if (options.interactive == false && options.text.empty() && options.output.empty())
+        options.interactive = true;
+
+    if (!options.interactive)
     {
-        print_error_log("Error: --text is required for TTS.\n");
-        ok = false;
-    }
-    if (options.output.empty())
-    {
-        print_error_log("Error: --output is required for TTS.\n");
-        ok = false;
+        if (options.text.empty())
+        {
+            print_error_log("Error: --text is required for TTS.\n");
+            ok = false;
+        }
+        if (options.output.empty())
+        {
+            print_error_log("Error: --output is required for TTS.\n");
+            ok = false;
+        }
     }
 
     const bool has_prompt_speech = !options.prompt_speech.empty();
@@ -755,6 +1217,8 @@ int tool_entry(int argc, char** argv)
             print_usage(argv[0]);
             return 0;
         }
+        else if (str_casecmp(arg, "--interactive") == 0)
+            options.interactive = true;
         else if (str_casecmp(arg, "--model") == 0 || str_casecmp(arg, "-m") == 0)
             options.model = get_arg_value();
         else if (str_casecmp(arg, "--backend-path") == 0)
@@ -800,15 +1264,15 @@ int tool_entry(int argc, char** argv)
             options.speech_tokenizer = get_arg_value();
         else if (str_casecmp(arg, "--campplus") == 0)
             options.campplus = get_arg_value();
-    #ifdef COSYVOICE_NO_AUDIO
+#ifdef COSYVOICE_NO_AUDIO
         else if (str_casecmp(arg, "--prompt-audio-16k") == 0)
             options.prompt_audio_16k = get_arg_value();
         else if (str_casecmp(arg, "--prompt-audio-24k") == 0)
             options.prompt_audio_24k = get_arg_value();
-    #else
+#else
         else if (str_casecmp(arg, "--prompt-audio") == 0)
             options.prompt_audio = get_arg_value();
-    #endif
+#endif
         else if (str_casecmp(arg, "--prompt-text") == 0)
             options.prompt_text = get_arg_value();
         else if (str_casecmp(arg, "--prompt-speech-output") == 0)
@@ -845,6 +1309,18 @@ int tool_entry(int argc, char** argv)
         }
         else if (str_casecmp(arg, "--seed") == 0)
             options.seed = get_arg_value();
+        else if (str_casecmp(arg, "--seed-policy") == 0)
+        {
+            auto value = get_arg_value();
+            cli_options::seed_policy_mode policy;
+            if (!parse_seed_policy_arg(value, &policy))
+            {
+                print_error_log("Error: invalid --seed-policy value \"%s\". Use auto, fixed, or random.\n", value);
+                return 1;
+            }
+            options.seed_policy = policy;
+            options.has_seed_policy = true;
+        }
         else if (str_casecmp(arg, "--temperature") == 0)
         {
             auto value = get_arg_value();
@@ -976,7 +1452,7 @@ int tool_entry(int argc, char** argv)
             print_error_log("Error: failed to load frontend models.\n");
             return 1;
         }
-    #ifdef COSYVOICE_NO_AUDIO
+#ifdef COSYVOICE_NO_AUDIO
         auto f = open_ifstream_utf8(options.prompt_audio_16k.c_str());
         if (!f)
         {
@@ -1061,7 +1537,7 @@ int tool_entry(int argc, char** argv)
             print_error_log("Error: failed to generate prompt_speech from frontend inputs.\n");
             return 1;
         }
-    #else
+#else
         float* prompt_audio_data = nullptr;
         uint32_t prompt_audio_length = 0;
         uint32_t prompt_audio_sample_rate = 0;
@@ -1078,7 +1554,7 @@ int tool_entry(int argc, char** argv)
             print_error_log("Error: failed to generate prompt_speech from frontend inputs.\n");
             return 1;
         }
-    #endif
+#endif
     }
 
     if (!options.prompt_speech_output.empty() && !cosyvoice_prompt_speech_save_to_file(prompt_speech.get(), options.prompt_speech_output.c_str()))
@@ -1105,8 +1581,29 @@ int tool_entry(int argc, char** argv)
     params.n_max_seq = options.max_llm_len;
     if (options.has_llm_kv_cache_type)
         params.llm_kv_cache_type = options.llm_kv_cache_type;
-    if (!options.seed.empty())
-        params.seed = stoul(options.seed);
+    tts_seed_state seed_state;
+    const bool has_seed_value = !options.seed.empty();
+    const cli_options::seed_policy_mode policy = resolve_seed_policy_mode(options);
+    seed_state.fixed = (policy == cli_options::seed_policy_mode::fixed);
+    if (has_seed_value)
+    {
+        uint32_t seed_value = 0;
+        if (!parse_uint32_arg(options.seed, &seed_value))
+        {
+            print_error_log("Error: invalid --seed value \"%s\". It should be a non-negative integer between 0 and %u.\n", options.seed.c_str(), UINT32_MAX);
+            return 1;
+        }
+        params.seed = seed_value;
+        seed_state.next_seed = seed_value;
+        seed_state.has_next_seed = true;
+    }
+    else if (seed_state.fixed)
+    {
+        const uint32_t seed_value = cosyvoice_generate_random_seed();
+        params.seed = seed_value;
+        seed_state.next_seed = seed_value;
+        seed_state.has_next_seed = true;
+    }
     stage_start = std::chrono::steady_clock::now();
     loading_spinner model_loading_spinner(log_level, "Loading model");
     model_loading_spinner.start();
@@ -1166,24 +1663,32 @@ int tool_entry(int argc, char** argv)
         cosyvoice_get_generation_config(ctx.get(), &generation_config);
     }
     const uint32_t sample_rate = cosyvoice_get_sample_rate(ctx.get());
-    cosyvoice_memory_usage_t memory_usage_before;
-    cosyvoice_get_memory_usage(ctx.get(), &memory_usage_before);
     print_tts_runtime_info(options, backend, effective_params, generation_config, sample_rate, log_level);
 
-    cosyvoice_generated_speech result = {};
+    tts_seed_state* seed_state_ptr = &seed_state;
+
+    if (options.interactive)
+    {
+        run_interactive_loop(options, ctx.get(), tts_ctx.get(), seed_state_ptr, sample_rate);
+        if (log_level != cli_log_level::quiet)
+            printf("\n-----------------------------------------------\n");
+        return 0;
+    }
+
+    cosyvoice_memory_usage_t memory_usage_before;
+    cosyvoice_get_memory_usage(ctx.get(), &memory_usage_before);
+
+    uint32_t used_seed = 0;
+    update_tts_seed(ctx.get(), seed_state_ptr, &used_seed);
+
     stage_start = std::chrono::steady_clock::now();
-    bool ok = false;
-    if (options.mode == "cross-lingual")
-        ok = cosyvoice_tts_cross_lingual(tts_ctx.get(), options.text.c_str(), options.speed, &result);
-    else if (options.mode == "zero-shot")
-        ok = cosyvoice_tts_zero_shot(tts_ctx.get(), options.text.c_str(), options.speed, &result);
-    else
-        ok = cosyvoice_tts_instruct(tts_ctx.get(), options.text.c_str(), options.instruction.c_str(), options.speed, &result);
+    std::string tts_error;
+    auto pcm = generate_tts_audio(tts_ctx.get(), options, options.text, &tts_error);
     timing.tts_generate_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
 
-    if (!ok && (!result.data || result.length == 0))
+    if (!pcm.data)
     {
-        print_error_log("Error: TTS generation failed.\n");
+        print_error_log("Error: %s\n", tts_error.empty() ? "TTS generation failed." : tts_error.c_str());
         return 1;
     }
     cosyvoice_memory_usage_t memory_usage_after;
@@ -1191,7 +1696,7 @@ int tool_entry(int argc, char** argv)
     print_memory_runtime_info(memory_usage_before, memory_usage_after, log_level);
 
     stage_start = std::chrono::steady_clock::now();
-    if (!cosyvoice_audio_save_to_file(options.output.c_str(), result.data, result.length, sample_rate))
+    if (!cosyvoice_audio_save_to_file(options.output.c_str(), pcm.data, pcm.length, sample_rate))
     {
         print_error_log("Error: failed to save output audio file \"%s\".\n", options.output.c_str());
         return 1;
@@ -1199,6 +1704,8 @@ int tool_entry(int argc, char** argv)
     timing.save_output_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
     timing.total_ms = elapsed_ms(total_start, std::chrono::steady_clock::now());
     print_timing_info(timing, true, log_level);
+    if (log_level != cli_log_level::quiet)
+        printf("Seed: %u\n", used_seed);
     if (log_level != cli_log_level::quiet)
         printf("\n-----------------------------------------------\n");
 

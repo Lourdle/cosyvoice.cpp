@@ -72,11 +72,11 @@ bool parse_float_arg(const std::string& value, float* result)
     return end != value.c_str() && end && *end == '\0';
 }
 
-bool parse_uint32_arg(const std::string& value, uint32_t* result)
+bool parse_uint32_arg(const char* value, uint32_t* result)
 {
     char* end = nullptr;
-    unsigned long long parsed = strtoull(value.c_str(), &end, 10);
-    if (end == value.c_str() || !end || *end != '\0' || parsed > UINT32_MAX)
+    unsigned long long parsed = strtoull(value, &end, 10);
+    if (end == value || !end || *end != '\0' || parsed > UINT32_MAX)
         return false;
     *result = static_cast<uint32_t>(parsed);
     return true;
@@ -130,6 +130,7 @@ int main(int argc, char** argv)
 {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
 
     std::vector<char*> utf8_argv;
     utf8_argv.reserve(argc);

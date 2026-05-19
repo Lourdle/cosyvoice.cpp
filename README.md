@@ -183,6 +183,7 @@ Project-level options:
 - `COSYVOICE_NO_AUDIO=ON/OFF` (default: `OFF`)
 - `COSYVOICE_NO_FRONTEND=ON/OFF` (default: `OFF`)
 - `COSYVOICE_NO_ICU=ON/OFF` (default: `OFF`)
+- `COSYVOICE_CLI_NO_PLAYBACK=ON/OFF` (default: unset, follows `COSYVOICE_NO_AUDIO`)
 - `COSYVOICE_AUDIO_BACKEND=MINIAUDIO/FFMPEG` (default: `MINIAUDIO`)
 
 Dependency path options:
@@ -201,6 +202,7 @@ GGML backend options are passed through from GGML CMake (for example `GGML_CUDA`
 | CPU-only | no backend flag required |
 | Core-only (no frontend / ICU) | `-DCOSYVOICE_NO_FRONTEND=ON -DCOSYVOICE_NO_ICU=ON` |
 | No-audio helper API | `-DCOSYVOICE_NO_AUDIO=ON` |
+| Disable CLI playback | `-DCOSYVOICE_CLI_NO_PLAYBACK=ON` |
 
 ## GGML Backend/Build Options
 This project vendors/uses GGML through CMake, so GGML backend switches can be passed from this root build.
@@ -213,6 +215,7 @@ cmake -S . -B build-cuda -DGGML_CUDA=ON
 
 Project options:
 - `COSYVOICE_NO_AUDIO=ON/OFF` (disable/enable audio helper APIs)
+- `COSYVOICE_CLI_NO_PLAYBACK=ON/OFF` (disable/enable CLI playback; if unset, follows `COSYVOICE_NO_AUDIO`)
 - `COSYVOICE_NO_FRONTEND=ON/OFF` (disable/enable ONNX frontend)
 - `COSYVOICE_NO_ICU=ON/OFF` (disable/enable ICU text normalization)
 - `BUILD_SHARED_LIBS=ON/OFF`
@@ -224,6 +227,9 @@ cmake -S . -B build-core -DCMAKE_BUILD_TYPE=Release -DCOSYVOICE_NO_FRONTEND=ON -
 
 # No-audio build (CLI output forced to WAV fallback path)
 cmake -S . -B build-noaudio -DCMAKE_BUILD_TYPE=Release -DCOSYVOICE_NO_AUDIO=ON
+
+# Disable CLI playback (audio helper APIs still available)
+cmake -S . -B build-noplay -DCMAKE_BUILD_TYPE=Release -DCOSYVOICE_CLI_NO_PLAYBACK=ON
 ```
 
 ## Using Custom Dependencies
