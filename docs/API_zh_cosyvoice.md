@@ -691,6 +691,22 @@ COSYVOICE_API bool cosyvoice_set_sampler_seed(cosyvoice_context_t ctx, uint32_t 
 
 即使使用自定义采样器，种子也会被保存。
 
+## cosyvoice_generate_random_seed
+
+### 语法
+
+```c
+COSYVOICE_API uint32_t cosyvoice_generate_random_seed();
+```
+
+### 说明
+
+生成 32 位随机种子。
+
+### 返回值
+
+适合用于 `cosyvoice_set_sampler_seed` 的伪确定性随机 32 位无符号整数。
+
 ## cosyvoice_prompt_speech_load_from_file
 
 ### 语法

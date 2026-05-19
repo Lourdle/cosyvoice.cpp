@@ -659,6 +659,22 @@ Sets seed used by sampler RNG.
 
 The seed value is stored even when a custom sampler is active and takes effect when built-in sampler is re-enabled.
 
+## cosyvoice_generate_random_seed
+
+### Syntax
+
+```c
+COSYVOICE_API uint32_t cosyvoice_generate_random_seed();
+```
+
+### Description
+
+Generates a random 32-bit seed.
+
+### Returns
+
+A deterministic-looking random 32-bit unsigned integer suitable for use with `cosyvoice_set_sampler_seed`.
+
 ## cosyvoice_prompt_speech_load_from_file
 
 ### Syntax
