@@ -266,10 +266,35 @@ cosyvoice-cli \
   --prompt-speech-output prompt_speech.gguf
 ```
 
+### D）交互模式（REPL）
+```bash
+cosyvoice-cli \
+  --model model.gguf \
+  --prompt-speech prompt_speech.gguf \
+  --interactive
+```
+
+当同时未提供 `--text` 和 `--output` 时，会自动进入交互模式。
+在 `> ` 提示符下输入文本即可合成，或使用斜杠命令：
+
+- `/play [code]`：播放缓存音频（需要音频支持；`COSYVOICE_CLI_NO_PLAYBACK=ON` 时不可用）。
+- `/save <file> [code]`：保存缓存音频到文件。
+- `/list`：列出缓存音频。
+- `/query [code]`：查看音频详情。
+- `/delete [code]`：删除缓存音频。
+- `/clear`：清空缓存。
+- `/seed [value]`：显示或设置下一次 seed。
+- `/seed-policy <fixed|random>`：显示或设置 seed 策略。
+- `/help`：显示命令列表。
+- `/exit`：退出交互模式。
+
+当省略 `[code]` 时，默认使用最近一次合成的音频。
+
 ### 参数说明
 
 核心参数：
 - `--help, -h`：显示帮助并退出。
+- `--interactive`：进入交互式 REPL 模式。
 - `--model, -m <file>`：TTS 使用的 CosyVoice 模型文件（`.gguf`）。
 - `--backend-path <dir>`：GGML backend 所在目录。如果不指定此选项，将默认加载程序所在目录的 GGML 后端。
 - `--text, -t <text>`：待合成文本。
@@ -346,6 +371,7 @@ cosyvoice-cli \
 | 使用已有 prompt_speech 做 TTS | `--model`、`--prompt-speech`、`--text`、`--output` |
 | 前端 + TTS 一体流程 | `--model`、`--speech-tokenizer`、`--campplus`、`--prompt-audio`（或 `--prompt-audio-16k` + `--prompt-audio-24k`）、`--text`、`--output` |
 | 仅前端 | `--frontend-only`、`--speech-tokenizer`、`--campplus`、音频输入、`--prompt-speech-output` |
+| 交互模式 | `--model`、一个提示源，无需 `--text`/`--output` |
 
 ### 默认值速查
 
@@ -370,6 +396,9 @@ cosyvoice-cli --model model.gguf --speech-tokenizer speech_tokenizer.onnx --camp
 
 # 仅前端（预先生成 prompt_speech）
 cosyvoice-cli --frontend-only --speech-tokenizer speech_tokenizer.onnx --campplus campplus.onnx --prompt-audio ref.wav --prompt-text "参考文本" --prompt-speech-output prompt_speech.gguf
+
+# 交互模式
+cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --interactive
 ```
 
 ### 参数校验与模式行为

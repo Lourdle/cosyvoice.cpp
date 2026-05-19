@@ -266,10 +266,35 @@ cosyvoice-cli \
   --prompt-speech-output prompt_speech.gguf
 ```
 
+### D) Interactive mode (REPL)
+```bash
+cosyvoice-cli \
+  --model model.gguf \
+  --prompt-speech prompt_speech.gguf \
+  --interactive
+```
+
+When neither `--text` nor `--output` is provided, interactive mode is enabled automatically.
+Type text at the `> ` prompt to synthesize, or use slash commands:
+
+- `/play [code]`: Play cached audio (requires audio support; disabled with `COSYVOICE_CLI_NO_PLAYBACK=ON`).
+- `/save <file> [code]`: Save cached audio to file.
+- `/list`: List cached audio.
+- `/query [code]`: Show audio details.
+- `/delete [code]`: Delete cached audio.
+- `/clear`: Clear cached audio.
+- `/seed [value]`: Show or set next seed.
+- `/seed-policy <fixed|random>`: Show or set seed policy.
+- `/help`: Show command list.
+- `/exit`: Exit interactive mode.
+
+The `[code]` parameter defaults to the last synthesized audio when omitted.
+
 ### Option Reference
 
 Core options:
 - `--help, -h`: Show help message and exit.
+- `--interactive`: Run in interactive REPL mode.
 - `--model, -m <file>`: CosyVoice model file (`.gguf`) used for TTS.
 - `--backend-path <dir>`: GGML backend directory. If omitted, the CLI will load the GGML backend from the executable's directory.
 - `--text, -t <text>`: Text to synthesize.
@@ -346,6 +371,7 @@ Required vs optional:
 | TTS with existing prompt_speech | `--model`, `--prompt-speech`, `--text`, `--output` |
 | End-to-end frontend + TTS | `--model`, `--speech-tokenizer`, `--campplus`, `--prompt-audio` (or `--prompt-audio-16k` + `--prompt-audio-24k`), `--text`, `--output` |
 | Frontend-only | `--frontend-only`, `--speech-tokenizer`, `--campplus`, audio input, `--prompt-speech-output` |
+| Interactive mode | `--model`, one prompt source, no `--text`/`--output` required |
 
 ### Defaults at a glance
 
@@ -370,6 +396,9 @@ cosyvoice-cli --model model.gguf --speech-tokenizer speech_tokenizer.onnx --camp
 
 # Frontend-only (prepare prompt_speech for later reuse)
 cosyvoice-cli --frontend-only --speech-tokenizer speech_tokenizer.onnx --campplus campplus.onnx --prompt-audio ref.wav --prompt-text "ref text" --prompt-speech-output prompt_speech.gguf
+
+# Interactive mode
+cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --interactive
 ```
 
 ### Validation and Mode Behavior
