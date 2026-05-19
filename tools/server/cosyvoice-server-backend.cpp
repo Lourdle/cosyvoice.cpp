@@ -161,7 +161,7 @@ static inline int16_t float_to_pcm16(float value)
     return static_cast<int16_t>(rounded);
 }
 
-static bool build_pcm16_bytes(const float* data, uint32_t length, uint32_t sample_rate, std::string* output, std::string* error)
+static bool build_pcm16_bytes(const float* data, uint32_t length, std::string* output, std::string* error)
 {
     if (!data || length == 0)
     {
@@ -176,31 +176,11 @@ static bool build_pcm16_bytes(const float* data, uint32_t length, uint32_t sampl
         return false;
     }
 
-    // Apply a short linear fade-in over the first ~20ms to suppress the
-    // audible click at the silence-to-speech boundary. CosyVoice's vocoder
-    // emits an abrupt amplitude jump on the very first sample (the model
-    // output starts mid-waveform rather than at zero crossing); listeners
-    // hear it as a soft "tk" before the first phoneme. 20ms is short enough
-    // to be inaudible as a fade but covers the typical click duration.
-    // Convert that duration to samples using the active runtime sample rate;
-    // for shorter outputs (test signals), ramp over whatever we have.
-    constexpr double kFadeDurationSeconds = 0.02;
-    const uint32_t fade_samples = static_cast<uint32_t>(std::ceil(
-        static_cast<double>(sample_rate) * kFadeDurationSeconds));
-    const uint32_t fade_len = std::min<uint32_t>(fade_samples, length);
-
     const size_t total_bytes = static_cast<size_t>(length) * kBytesPerSample;
     output->resize(total_bytes);
     for (uint32_t i = 0; i < length; ++i)
     {
-        float value = data[i];
-        if (i < fade_len)
-        {
-            const float ramp = static_cast<float>(i + 1)
-                             / static_cast<float>(fade_len + 1);
-            value *= ramp;
-        }
-        const auto sample = float_to_pcm16(value);
+        const auto sample = float_to_pcm16(data[i]);
         (*output)[2 * i] = static_cast<char>(sample & 0xFF);
         (*output)[2 * i + 1] = static_cast<char>((sample >> 8) & 0xFF);
     }
@@ -414,7 +394,7 @@ static bool build_audio_payload(response_audio_format format, const cosyvoice_ge
     switch (format)
     {
     case response_audio_format::pcm:
-        return build_pcm16_bytes(generated.data, generated.length, runtime.sample_rate, payload, error);
+        return build_pcm16_bytes(generated.data, generated.length, payload, error);
     case response_audio_format::wav:
 #ifdef COSYVOICE_NO_AUDIO
         return build_wav_bytes(generated.data, generated.length, runtime.sample_rate, payload, error);
@@ -1092,6 +1072,25 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
                 set_openai_error(res, 500, "TTS generation failed.", "server_error", nullptr, "generation_failed");
                 log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "generation_failed");
                 return;
+            }
+
+            // Apply a short linear fade-in over the first ~20ms to suppress the
+            // audible click at the silence-to-speech boundary. CosyVoice's vocoder
+            // emits an abrupt amplitude jump on the very first sample (the model
+            // output starts mid-waveform rather than at zero crossing); listeners
+            // hear it as a soft "tk" before the first phoneme. 20ms is short enough
+            // to be inaudible as a fade but covers the typical click duration.
+            // Convert that duration to samples using the active runtime sample rate;
+            // for shorter outputs (test signals), ramp over whatever we have.
+            constexpr double kFadeDurationSeconds = 0.02;
+            const uint32_t fade_samples = static_cast<uint32_t>(std::ceil(
+                static_cast<double>(runtime.sample_rate) * kFadeDurationSeconds));
+            const uint32_t fade_len = std::min<uint32_t>(fade_samples, generated.length);
+            for (uint32_t i = 0; i < fade_len; ++i)
+            {
+                const float ramp = static_cast<float>(i + 1)
+                    / static_cast<float>(fade_len + 1);
+                generated.data[i] *= ramp;
             }
 
             if (!build_audio_payload(format, generated, runtime, &payload, &encoding_error))
