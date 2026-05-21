@@ -1,6 +1,5 @@
 #include "cosyvoice-internal.h"
 #include "cosyvoice-frontend.h"
-#include "cosyvoice-tokenizer.h"
 #include "cosyvoice-audio.h"
 #include "fft.h"
 #include "common.h"
@@ -831,7 +830,7 @@ static cosyvoice_prompt_speech_t cosyvoice_frontend_prompt_speech_finalize(cosyv
     if (token_len * 2 != prompt_speech->feat.shape[0])
     {
         matrix new_speech_feat(2 * token_len, prompt_speech->feat.shape[1]);
-        for (uint32_t i = 0; i != prompt_speech->feat.shape[0]; ++i)
+        for (uint32_t i = 0; i != new_speech_feat.shape[0]; ++i)
             memcpy(new_speech_feat.data + i * new_speech_feat.stride, prompt_speech->feat.data + i * prompt_speech->feat.stride, new_speech_feat.stride * sizeof(float));
         prompt_speech->feat = new_speech_feat;
         prompt_speech->tokens.second = token_len;
