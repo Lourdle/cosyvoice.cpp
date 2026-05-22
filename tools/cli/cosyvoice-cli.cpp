@@ -635,6 +635,19 @@ static void print_tts_runtime_info(
 
     print_section_title("Model");
     print_kv_line_u32("sample_rate", sample_rate);
+    if (!options.interactive)
+        if (!options.seed.empty())
+        {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%u (--seed)", context_params.seed);
+            print_kv_line_string("seed", buf);
+        }
+        else
+        {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%u (random)", context_params.seed);
+            print_kv_line_string("seed", buf);
+        }
     {
         char buf[64];
         snprintf(buf, sizeof(buf), "%s (%s)", llm_kv_cache_type_to_string(context_params.llm_kv_cache_type),
@@ -703,18 +716,21 @@ static void print_frontend_runtime_info(const cli_options& options, cli_log_leve
 }
 #endif
 
-static void print_timing_info(const cli_timing_info& timing, bool include_tts_stages, cli_log_level log_level)
+static void print_timing_info(const cli_timing_info& timing, bool include_tts_stages, bool include_loading_stages, cli_log_level log_level)
 {
     if (log_level == cli_log_level::quiet)
         return;
 
     print_section_title("Timing");
-    if (log_level == cli_log_level::verbose)
-        print_kv_line_ms("backend_init", timing.backend_init_ms);
     print_kv_line_ms("prompt_prepare", timing.prompt_prepare_ms);
+    if (include_loading_stages)
+    {
+        if (log_level == cli_log_level::verbose)
+            print_kv_line_ms("backend_init", timing.backend_init_ms);
+        print_kv_line_ms("model_load", timing.model_load_ms);
+    }
     if (include_tts_stages)
     {
-        print_kv_line_ms("model_load", timing.model_load_ms);
         print_kv_line_ms("tts_generate", timing.tts_generate_ms);
         if (log_level == cli_log_level::verbose)
             print_kv_line_ms("save_output", timing.save_output_ms);
@@ -1426,12 +1442,8 @@ int tool_entry(int argc, char** argv)
         print_preload_run_info(options, log_level);
 #endif
 
-    auto stage_start = std::chrono::steady_clock::now();
-    cosyvoice_init_backend_from_path(options.backend_path.empty() ? nullptr : options.backend_path.c_str());
-    timing.backend_init_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
-
     cosyvoice_prompt_speech_handle prompt_speech;
-    stage_start = std::chrono::steady_clock::now();
+    auto stage_start = std::chrono::steady_clock::now();
     if (!options.prompt_speech.empty())
     {
         prompt_speech.reset(cosyvoice_prompt_speech_load_from_file(options.prompt_speech.c_str()));
@@ -1568,12 +1580,16 @@ int tool_entry(int argc, char** argv)
     {
         timing.total_ms = elapsed_ms(total_start, std::chrono::steady_clock::now());
         print_frontend_runtime_info(options, log_level);
-        print_timing_info(timing, false, log_level);
+        print_timing_info(timing, false, true, log_level);
         if (log_level != cli_log_level::quiet)
             printf("\n-----------------------------------------------\n");
         return 0;
     }
 #endif
+
+    stage_start = std::chrono::steady_clock::now();
+    cosyvoice_init_backend_from_path(options.backend_path.empty() ? nullptr : options.backend_path.c_str());
+    timing.backend_init_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
 
     cosyvoice_context_params_t params;
     cosyvoice_init_default_context_params(&params);
@@ -1670,6 +1686,8 @@ int tool_entry(int argc, char** argv)
     if (options.interactive)
     {
         run_interactive_loop(options, ctx.get(), tts_ctx.get(), seed_state_ptr, sample_rate);
+        timing.total_ms = elapsed_ms(total_start, std::chrono::steady_clock::now());
+        print_timing_info(timing, false, true, log_level);
         if (log_level != cli_log_level::quiet)
             printf("\n-----------------------------------------------\n");
         return 0;
@@ -1703,9 +1721,7 @@ int tool_entry(int argc, char** argv)
     }
     timing.save_output_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
     timing.total_ms = elapsed_ms(total_start, std::chrono::steady_clock::now());
-    print_timing_info(timing, true, log_level);
-    if (log_level != cli_log_level::quiet)
-        printf("Seed: %u\n", used_seed);
+    print_timing_info(timing, true, true, log_level);
     if (log_level != cli_log_level::quiet)
         printf("\n-----------------------------------------------\n");
 
