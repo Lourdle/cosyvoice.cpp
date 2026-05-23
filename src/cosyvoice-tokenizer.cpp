@@ -3,8 +3,68 @@
 #include "cosyvoice-tokenizer.h"
 #include "unicode.h"
 
+#include <format>
 #include <algorithm>
+#include <forward_list>
 #include <queue>
+#include <unordered_map>
+
+enum token_type {
+    TOKEN_TYPE_NORMAL = 1,
+    TOKEN_TYPE_CONTROL = 3,
+    TOKEN_TYPE_UNUSED = 5
+};
+
+struct token_data {
+    std::string text;
+    token_type type;
+};
+
+struct llm_tokenizer {
+    llm_tokenizer() = default;
+    virtual ~llm_tokenizer() = default;
+};
+
+struct pair_hash {
+    size_t operator()(const std::pair<std::string, std::string>& p) const {
+        return std::hash<std::string>{}(p.first) ^
+            (std::hash<std::string>{}(p.second) << 1);
+    }
+};
+
+enum class fragment_buffer_kind {
+    token,
+    raw_text
+};
+
+struct fragment_buffer_variant {
+    fragment_buffer_variant(int _token)
+        :
+        type(fragment_buffer_kind::token),
+        token(_token),
+        raw_text(),
+        offset(0),
+        length(0) {
+    }
+
+    fragment_buffer_variant(const std::string_view& _raw_text, int64_t _offset, int64_t _length)
+        :
+        type(fragment_buffer_kind::raw_text),
+        token((int)-1),
+        raw_text(_raw_text),
+        offset(_offset),
+        length(_length) {
+        GGML_ASSERT(_offset >= 0);
+        GGML_ASSERT(_length >= 1);
+        GGML_ASSERT(offset + length <= raw_text.length());
+    }
+
+    const fragment_buffer_kind type;
+    const int token;
+    const std::string_view raw_text;
+    const uint64_t offset;
+    const uint64_t length;
+};
 
 struct llm_symbol {
     using index = int;
@@ -17,7 +77,7 @@ struct llm_symbol {
 static_assert(std::is_trivially_copyable<llm_symbol>::value, "llm_symbol is not trivially copyable");
 
 template<typename T, typename Container = std::vector<T>, typename Compare = std::less<typename Container::value_type>>
-class llama_priority_queue : public std::priority_queue<T, Container, Compare> {
+class llm_priority_queue : public std::priority_queue<T, Container, Compare> {
 public:
     using std::priority_queue<T, Container, Compare>::priority_queue;
 
@@ -39,7 +99,7 @@ struct llm_bigram_bpe {
     };
 
     using queue_storage = std::vector<llm_bigram_bpe>;
-    using queue = llama_priority_queue<llm_bigram_bpe, queue_storage, comparator>;
+    using queue = llm_priority_queue<llm_bigram_bpe, queue_storage, comparator>;
     llm_symbol::index left;
     llm_symbol::index right;
     std::string text;
@@ -192,63 +252,20 @@ private:
     llm_bigram_bpe::queue    work_queue;
 };
 
-void cosyvoice_vocab::load(gguf_metadata_loader& loader) {
-    GGML_ASSERT(loader.get_string("tokenizer.model.type") == "BPE");
+struct cosyvoice_vocab::impl {
+    void partition_special_tokens(std::forward_list<fragment_buffer_variant>& buffer, bool parse_special) const;
 
-    const auto token_idx = gguf_find_key(loader, "tokenizer.vocab.tokens");
+    std::unordered_map<std::string, int> token_to_id;
+    std::vector<token_data>              id_to_token;
+    std::vector<int>                     cache_special_tokens;
+    std::unordered_map<std::pair<std::string, std::string>, int, pair_hash> bpe_ranks;
+    std::unique_ptr<llm_tokenizer>       tokenizer;
+};
 
-    const int* toktypes = nullptr;
-    const auto toktype_idx = gguf_find_key(loader, "tokenizer.vocab.token_types");
-    toktypes = (const int*)gguf_get_arr_data(loader, toktype_idx);
+cosyvoice_vocab::cosyvoice_vocab() : pimpl_(new impl()) {}
+cosyvoice_vocab::~cosyvoice_vocab() { delete pimpl_; };
 
-    auto n_tokens = gguf_get_arr_n(loader, token_idx);
-    id_to_token.resize(n_tokens);
-
-    for (int i = 0; i != n_tokens; i++) {
-        std::string word = gguf_get_arr_str(loader, token_idx, i);
-        if (word.empty())
-            word = std::format("[EMPTY_{}]", i);
-
-        token_to_id[word] = i;
-
-        auto& token_data = id_to_token[i];
-        token_data.text = std::move(word);
-        token_data.type = static_cast<token_type>(toktypes[i]);
-
-        if (token_data.type == TOKEN_TYPE_CONTROL)
-            cache_special_tokens.push_back(i);
-    }
-    GGML_ASSERT(id_to_token.size() == token_to_id.size());
-
-    const auto merges_keyidx = gguf_find_key(loader, "tokenizer.model.merges");
-    const auto n_merges = gguf_get_arr_n(loader, merges_keyidx);
-    for (int i = 0; i < n_merges; i++) {
-        const std::string_view word = gguf_get_arr_str(loader, merges_keyidx, i);
-
-        std::string_view first;
-        std::string_view second;
-
-        const size_t pos = word.find(' ', 1);
-
-        if (pos != std::string_view::npos) {
-            first = word.substr(0, pos);
-            second = word.substr(pos + 1);
-        }
-
-        bpe_ranks.emplace(std::make_pair(first, second), i);
-    }
-
-    tokenizer = std::make_unique<llm_tokenizer_bpe>(loader);
-
-    std::sort(cache_special_tokens.begin(), cache_special_tokens.end(),
-        [&](const int a, const int b) {
-            return id_to_token[a].text.size() > id_to_token[b].text.size();
-        }
-    );
-}
-
-void cosyvoice_vocab::partition_special_tokens(std::forward_list<fragment_buffer_variant>& buffer, bool parse_special) const {
-    // Scan each cached special token.
+void cosyvoice_vocab::impl::partition_special_tokens(std::forward_list<fragment_buffer_variant>& buffer, bool parse_special) const {
     for (const int special_id : cache_special_tokens) {
         const auto& data = id_to_token.at(special_id);
         const auto& text = data.text;
@@ -328,6 +345,61 @@ void cosyvoice_vocab::partition_special_tokens(std::forward_list<fragment_buffer
     }
 }
 
+void cosyvoice_vocab::load(gguf_metadata_loader& loader) {
+    GGML_ASSERT(loader.get_string("tokenizer.model.type") == "BPE");
+
+    const auto token_idx = gguf_find_key(loader, "tokenizer.vocab.tokens");
+
+    const int* toktypes = nullptr;
+    const auto toktype_idx = gguf_find_key(loader, "tokenizer.vocab.token_types");
+    toktypes = (const int*)gguf_get_arr_data(loader, toktype_idx);
+
+    auto n_tokens = gguf_get_arr_n(loader, token_idx);
+    pimpl_->id_to_token.resize(n_tokens);
+
+    for (int i = 0; i != n_tokens; i++) {
+        std::string word = gguf_get_arr_str(loader, token_idx, i);
+        if (word.empty())
+            word = std::format("[EMPTY_{}]", i);
+
+        pimpl_->token_to_id[word] = i;
+
+        auto& token_data = pimpl_->id_to_token[i];
+        token_data.text = std::move(word);
+        token_data.type = static_cast<token_type>(toktypes[i]);
+
+        if (token_data.type == TOKEN_TYPE_CONTROL)
+            pimpl_->cache_special_tokens.push_back(i);
+    }
+    GGML_ASSERT(pimpl_->id_to_token.size() == pimpl_->token_to_id.size());
+
+    const auto merges_keyidx = gguf_find_key(loader, "tokenizer.model.merges");
+    const auto n_merges = gguf_get_arr_n(loader, merges_keyidx);
+    for (int i = 0; i < n_merges; i++) {
+        const std::string_view word = gguf_get_arr_str(loader, merges_keyidx, i);
+
+        std::string_view first;
+        std::string_view second;
+
+        const size_t pos = word.find(' ', 1);
+
+        if (pos != std::string_view::npos) {
+            first = word.substr(0, pos);
+            second = word.substr(pos + 1);
+        }
+
+        pimpl_->bpe_ranks.emplace(std::make_pair(first, second), i);
+    }
+
+    pimpl_->tokenizer = std::make_unique<llm_tokenizer_bpe>(loader);
+
+    std::sort(pimpl_->cache_special_tokens.begin(), pimpl_->cache_special_tokens.end(),
+        [&](const int a, const int b) {
+            return pimpl_->id_to_token[a].text.size() > pimpl_->id_to_token[b].text.size();
+        }
+    );
+}
+
 void cosyvoice_vocab::tokenize(
     const std::string_view& raw_text,
     std::vector<int>& output,
@@ -338,10 +410,10 @@ void cosyvoice_vocab::tokenize(
 
     if (!raw_text.empty()) {
         fragment_buffer.emplace_front(raw_text, 0, raw_text.length());
-        partition_special_tokens(fragment_buffer, parse_special);
+        pimpl_->partition_special_tokens(fragment_buffer, parse_special);
     }
 
-    llm_tokenizer_bpe_session session(*this, *static_cast<llm_tokenizer_bpe*>(tokenizer.get()));
+    llm_tokenizer_bpe_session session(*this, *static_cast<llm_tokenizer_bpe*>(pimpl_->tokenizer.get()));
 
     for (const auto& fragment : fragment_buffer) {
         if (fragment.type == fragment_buffer_kind::raw_text) {
@@ -354,8 +426,8 @@ void cosyvoice_vocab::tokenize(
 }
 
 int cosyvoice_vocab::text_to_token(const std::string& text) const {
-    auto it = token_to_id.find(text);
-    if (it != token_to_id.end()) {
+    auto it = pimpl_->token_to_id.find(text);
+    if (it != pimpl_->token_to_id.end()) {
         return (*it).second;
     }
     return -1;
@@ -367,8 +439,8 @@ int cosyvoice_vocab::find_bpe_rank(const std::string& token_left, const std::str
     GGML_ASSERT(token_right.find(' ') == std::string::npos);
     GGML_ASSERT(token_right.find('\n') == std::string::npos);
 
-    auto it = bpe_ranks.find(std::make_pair(token_left, token_right));
-    if (it == bpe_ranks.end()) {
+    auto it = pimpl_->bpe_ranks.find(std::make_pair(token_left, token_right));
+    if (it == pimpl_->bpe_ranks.end()) {
         return -1;
     }
 
