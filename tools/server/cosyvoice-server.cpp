@@ -58,6 +58,9 @@ struct server_options
 #ifndef COSYVOICE_NO_ICU
     bool text_normalization_enabled = true;
 #endif
+    bool split_text_enabled = true;
+    bool fast_split_text_enabled = true;
+    bool fade_in_enabled = true;
     bool verbose = false;
     bool quiet = false;
 };
@@ -107,6 +110,13 @@ static void print_usage(const char* argv0)
     printf("\nText normalization:\n");
     printf("  --disable-text-normalization                Disable ICU text normalization in TTS context.\n");
 #endif
+
+    printf("\nText splitting:\n");
+    printf("  --disable-text-splitting                    Disable fragment splitting in TTS context.\n");
+    printf("  --disable-fast-split                        Disable fast token-based splitting in TTS context.\n");
+
+    printf("\nOutput postprocess:\n");
+    printf("  --disable-fade-in                           Disable the default 20ms fade-in on output audio.\n");
 
     printf("\nOpenAI-compatible endpoints:\n");
     printf("  GET  /healthz\n");
@@ -266,6 +276,9 @@ static bool load_voice_runtime(const server_options& options, const voice_prompt
 #ifndef COSYVOICE_NO_ICU
     cosyvoice_tts_context_set_text_normalization_enabled(voice.tts_context.get(), options.text_normalization_enabled);
 #endif
+    cosyvoice_tts_context_set_split_text_enabled(voice.tts_context.get(), options.split_text_enabled);
+    cosyvoice_tts_context_set_fast_split_text_enabled(voice.tts_context.get(), options.fast_split_text_enabled);
+    cosyvoice_tts_context_set_fade_in_enabled(voice.tts_context.get(), options.fade_in_enabled);
 
     runtime->voice_names.push_back(voice.name);
     runtime->voices.emplace(voice.name, std::move(voice));
@@ -284,6 +297,9 @@ static bool build_runtime(const server_options& options, server_runtime* runtime
 #ifndef COSYVOICE_NO_ICU
     runtime->text_normalization_enabled = options.text_normalization_enabled;
 #endif
+    runtime->split_text_enabled = options.split_text_enabled;
+    runtime->fast_split_text_enabled = options.fast_split_text_enabled;
+    runtime->fade_in_enabled = options.fade_in_enabled;
     runtime->log_level = get_log_level(options);
 
     runtime->seed_rng.seed(cosyvoice_generate_random_seed());
@@ -542,6 +558,12 @@ int tool_entry(int argc, char** argv)
             else if (str_casecmp(arg, "--disable-text-normalization") == 0)
                 options.text_normalization_enabled = false;
 #endif
+            else if (str_casecmp(arg, "--disable-text-splitting") == 0)
+                options.split_text_enabled = false;
+            else if (str_casecmp(arg, "--disable-fast-split") == 0)
+                options.fast_split_text_enabled = false;
+            else if (str_casecmp(arg, "--disable-fade-in") == 0)
+                options.fade_in_enabled = false;
             else
             {
                 const auto option = arg;

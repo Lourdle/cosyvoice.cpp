@@ -8,25 +8,18 @@
 #include "httplib.h"
 #include "nlohmann/json.hpp"
 
-#include <algorithm>
 #include <atomic>
-#include <cctype>
-#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <ctime>
 #include <limits>
 #include <memory>
 #include <mutex>
-#include <new>
 #include <random>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -1074,25 +1067,6 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
                 return;
             }
 
-            // Apply a short linear fade-in over the first ~20ms to suppress the
-            // audible click at the silence-to-speech boundary. CosyVoice's vocoder
-            // emits an abrupt amplitude jump on the very first sample (the model
-            // output starts mid-waveform rather than at zero crossing); listeners
-            // hear it as a soft "tk" before the first phoneme. 20ms is short enough
-            // to be inaudible as a fade but covers the typical click duration.
-            // Convert that duration to samples using the active runtime sample rate;
-            // for shorter outputs (test signals), ramp over whatever we have.
-            constexpr double kFadeDurationSeconds = 0.02;
-            const uint32_t fade_samples = static_cast<uint32_t>(std::ceil(
-                static_cast<double>(runtime.sample_rate) * kFadeDurationSeconds));
-            const uint32_t fade_len = std::min<uint32_t>(fade_samples, generated.length);
-            for (uint32_t i = 0; i < fade_len; ++i)
-            {
-                const float ramp = static_cast<float>(i + 1)
-                    / static_cast<float>(fade_len + 1);
-                generated.data[i] *= ramp;
-            }
-
             if (!build_audio_payload(format, generated, runtime, &payload, &encoding_error))
             {
                 set_openai_error(res, 500, encoding_error, "server_error", nullptr, "audio_encode_failed");
@@ -1136,6 +1110,9 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
 #else
     print_info_log(runtime.log_level, "  text_normalization : unavailable (COSYVOICE_NO_ICU)\n");
 #endif
+    print_info_log(runtime.log_level, "  text_splitting     : %s\n", runtime.split_text_enabled ? "enabled" : "disabled");
+    print_info_log(runtime.log_level, "  fast_split         : %s\n", runtime.fast_split_text_enabled ? "enabled" : "disabled");
+    print_info_log(runtime.log_level, "  fade_in            : %s\n", runtime.fade_in_enabled ? "enabled" : "disabled");
 #ifndef COSYVOICE_NO_AUDIO
     print_info_log(runtime.log_level, "  audio_encoder      : %s\n", runtime.audio_encoder ? "available" : "unavailable");
 #else

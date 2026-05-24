@@ -37,6 +37,9 @@ struct server_runtime
 #ifndef COSYVOICE_NO_ICU
     bool text_normalization_enabled = true;
 #endif
+    bool split_text_enabled = true;
+    bool fast_split_text_enabled = true;
+    bool fade_in_enabled = true;
     server_log_level log_level = server_log_level::concise;
     cosyvoice_context_handle model_context;
     uint32_t sample_rate = 0;
