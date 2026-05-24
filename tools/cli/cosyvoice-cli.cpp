@@ -34,6 +34,9 @@ struct cli_options
 #ifndef COSYVOICE_NO_ICU
     bool text_normalization_enabled = true;
 #endif
+    bool split_text_enabled = true;
+    bool fast_split_text_enabled = true;
+    bool fade_in_enabled = true;
     std::string model;
     std::string backend_path;
 #ifndef COSYVOICE_NO_FRONTEND
@@ -231,6 +234,13 @@ static void print_usage(const char* argv0)
     printf("\nText normalization:\n");
     printf("  --disable-text-normalization                Disable ICU text normalization before tokenization.\n");
 #endif
+
+    printf("\nText splitting:\n");
+    printf("  --disable-text-splitting                    Disable fragment splitting before synthesis.\n");
+    printf("  --disable-fast-split                        Disable fast token-based fragment synthesis.\n");
+
+    printf("\nOutput postprocess:\n");
+    printf("  --disable-fade-in                           Disable the default 20ms fade-in on output audio.\n");
 
 #ifndef COSYVOICE_NO_FRONTEND
     printf("\nFrontend options:\n");
@@ -602,6 +612,9 @@ static void print_preload_run_info(const cli_options& options, cli_log_level log
 #else
     print_kv_line_string("text_normalization", "unavailable (COSYVOICE_NO_ICU)");
 #endif
+    print_kv_line_string("text_splitting", enabled_to_string(options.split_text_enabled));
+    print_kv_line_string("fast_split", enabled_to_string(options.fast_split_text_enabled));
+    print_kv_line_string("fade_in", enabled_to_string(options.fade_in_enabled));
     print_kv_line_string("llm_kv_cache_type", llm_kv_cache_type_to_string(options.llm_kv_cache_type));
     if (log_level == cli_log_level::verbose)
     {
@@ -1312,6 +1325,12 @@ int tool_entry(int argc, char** argv)
         else if (str_casecmp(arg, "--disable-text-normalization") == 0)
             options.text_normalization_enabled = false;
 #endif
+        else if (str_casecmp(arg, "--disable-text-splitting") == 0)
+            options.split_text_enabled = false;
+        else if (str_casecmp(arg, "--disable-fast-split") == 0)
+            options.fast_split_text_enabled = false;
+        else if (str_casecmp(arg, "--disable-fade-in") == 0)
+            options.fade_in_enabled = false;
         else if (str_casecmp(arg, "--speed") == 0 || str_casecmp(arg, "-s") == 0)
         {
             auto value = get_arg_value();
@@ -1650,6 +1669,9 @@ int tool_entry(int argc, char** argv)
 #ifndef COSYVOICE_NO_ICU
     cosyvoice_tts_context_set_text_normalization_enabled(tts_ctx.get(), options.text_normalization_enabled);
 #endif
+    cosyvoice_tts_context_set_split_text_enabled(tts_ctx.get(), options.split_text_enabled);
+    cosyvoice_tts_context_set_fast_split_text_enabled(tts_ctx.get(), options.fast_split_text_enabled);
+    cosyvoice_tts_context_set_fade_in_enabled(tts_ctx.get(), options.fade_in_enabled);
     cosyvoice_context_params_t effective_params;
     cosyvoice_get_context_params(ctx.get(), &effective_params);
     cosyvoice_generation_config_t generation_config;
