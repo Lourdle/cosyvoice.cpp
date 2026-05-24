@@ -125,4 +125,27 @@ std::vector<std::string> reassemble_by_token_budget(
     return chunks;
 }
 
+std::vector<std::vector<int>> reassemble_by_token_budget(
+    std::vector<std::vector<int>>& fragment_tokens,
+    std::size_t max_tokens)
+{
+    std::vector<std::vector<int>> chunks;
+    if (fragment_tokens.empty() || max_tokens == 0)
+        return chunks;
+
+    std::vector<int> current;
+    for (auto& tokens : fragment_tokens)
+        if (current.size() != 0 && current.size() + tokens.size() > max_tokens)
+        {
+            current.swap(tokens);
+            chunks.push_back(std::move(tokens));
+        }
+        else
+            current.insert(current.end(), tokens.begin(), tokens.end());
+    if (!current.empty())
+        chunks.push_back(std::move(current));
+
+    return chunks;
+}
+
 }  // namespace cosyvoice_internal

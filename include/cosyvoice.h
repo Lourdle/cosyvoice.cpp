@@ -327,6 +327,14 @@ COSYVOICE_API void cosyvoice_prompt_speech_free(cosyvoice_prompt_speech_t prompt
 COSYVOICE_API void cosyvoice_prompt_free(cosyvoice_prompt_t prompt);
 
 // ----------------------------------------------------------------------------
+// TTS Context Flags
+// ----------------------------------------------------------------------------
+
+#define COSYVOICE_TTS_FLAG_TEXT_NORMALIZATION (1u << 0)
+#define COSYVOICE_TTS_FLAG_SPLIT_TEXT         (1u << 1)
+#define COSYVOICE_TTS_FLAG_FAST_SPLIT         (1u << 2)
+
+// ----------------------------------------------------------------------------
 // Text-to-Speech Generation API
 // ----------------------------------------------------------------------------
 
@@ -347,14 +355,51 @@ COSYVOICE_API void cosyvoice_tts_context_set_prompt(cosyvoice_tts_context_t ctx,
 
 /**
  * @brief Enable or disable frontend text normalization for this TTS context.
+ * @return True on success, false if normalization is unavailable (e.g. compiled without ICU).
  * @note Enabled by default.
  */
-COSYVOICE_API void cosyvoice_tts_context_set_text_normalization_enabled(cosyvoice_tts_context_t ctx, bool enabled);
+COSYVOICE_API bool cosyvoice_tts_context_set_text_normalization_enabled(cosyvoice_tts_context_t ctx, bool enabled);
 
 /**
  * @brief Query whether frontend text normalization is enabled for this TTS context.
  */
 COSYVOICE_API bool cosyvoice_tts_context_get_text_normalization_enabled(cosyvoice_tts_context_t ctx);
+
+/**
+ * @brief Enable or disable text splitting for this TTS context.
+ * @note Enabled by default.
+ */
+COSYVOICE_API bool cosyvoice_tts_context_set_split_text_enabled(cosyvoice_tts_context_t ctx, bool enabled);
+
+/**
+ * @brief Query whether text splitting is enabled for this TTS context.
+ */
+COSYVOICE_API bool cosyvoice_tts_context_get_split_text_enabled(cosyvoice_tts_context_t ctx);
+
+/**
+ * @brief Enable or disable fast text splitting for this TTS context.
+ * @note Enabled by default.
+ */
+COSYVOICE_API bool cosyvoice_tts_context_set_fast_split_text_enabled(cosyvoice_tts_context_t ctx, bool enabled);
+
+/**
+ * @brief Query whether fast text splitting is enabled for this TTS context.
+ */
+COSYVOICE_API bool cosyvoice_tts_context_get_fast_split_text_enabled(cosyvoice_tts_context_t ctx);
+
+/**
+ * @brief Get the current TTS context flags bitmask.
+ * @return A combination of COSYVOICE_TTS_FLAG_* values.
+ */
+COSYVOICE_API uint32_t cosyvoice_tts_context_get_flags(cosyvoice_tts_context_t ctx);
+
+/**
+ * @brief Set the TTS context flags bitmask.
+ * @details Unrecognized bits are silently masked out. Unavailable flags
+ *          (e.g. COSYVOICE_TTS_FLAG_TEXT_NORMALIZATION without ICU) are also removed.
+ * @return The effective flags after masking.
+ */
+COSYVOICE_API uint32_t cosyvoice_tts_context_set_flags(cosyvoice_tts_context_t ctx, uint32_t flags);
 
 /**
  * @brief Generate speech in zero-shot mode.

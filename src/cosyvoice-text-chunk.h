@@ -27,4 +27,10 @@ std::vector<std::string> reassemble_by_token_budget(
     std::size_t max_tokens,
     const token_count_fn& count);
 
+// Fast-split overload: merge pre-tokenized fragment vectors into chunks
+// directly by token count, returning token-ID vectors for each chunk.
+std::vector<std::vector<int>> reassemble_by_token_budget(
+    std::vector<std::vector<int>>& fragment_tokens,
+    std::size_t max_tokens);
+
 }  // namespace cosyvoice_internal

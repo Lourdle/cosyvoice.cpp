@@ -11,6 +11,8 @@
 #include <span>
 #include <vector>
 
+constexpr uint32_t COSYVOICE_TTS_FLAG_MASK = COSYVOICE_TTS_FLAG_TEXT_NORMALIZATION | COSYVOICE_TTS_FLAG_SPLIT_TEXT | COSYVOICE_TTS_FLAG_FAST_SPLIT;
+
 bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt)
 {
     if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
@@ -387,7 +389,13 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_prompt, std::string
 {
     cosyvoice_tts_context(cosyvoice_context_t ctx, cosyvoice_prompt_t prompt)
-        : cosyvoice_prompt(*prompt), ctx(ctx), text_normalization_enabled(true)
+        : cosyvoice_prompt(*prompt), ctx(ctx),
+        flags(
+#ifndef COSYVOICE_NO_ICU
+            COSYVOICE_TTS_FLAG_TEXT_NORMALIZATION |
+#endif
+            COSYVOICE_TTS_FLAG_SPLIT_TEXT | COSYVOICE_TTS_FLAG_FAST_SPLIT
+        )
     {
         const auto instruction_prefix = ctx->get_instruction_prefix();
         if (instruction_prefix)
@@ -413,14 +421,21 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
             instruction_cache.c_str());
 
         bool normalized = false;
-        if (text_normalization_enabled)
+        if (flags & COSYVOICE_TTS_FLAG_TEXT_NORMALIZATION)
             normalized = cosyvoice_frontend_util_text_normalize(*this, text, static_cast<uint32_t>(strlen(text)), nullptr);
         const char* effective_text = normalized ? c_str() : text;
+
+        // When splitting is disabled, do a single tokenize+synthesize pass.
+        if (!(flags & COSYVOICE_TTS_FLAG_SPLIT_TEXT))
+        {
+            ctx->tokenize(effective_text, this, true);
+            return cosyvoice_tts(ctx, get_tokens(), get_n_tokens(), speed, this, result);
+        }
 
         const auto fragments = cosyvoice_internal::split_into_fragments(effective_text);
         if (fragments.size() <= 1)
         {
-            cosyvoice_tokenize(ctx, effective_text, this, true);
+            ctx->tokenize(effective_text, this, true);
             return cosyvoice_tts(ctx, get_tokens(), get_n_tokens(), speed, this, result);
         }
 
@@ -444,20 +459,69 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
 
         if (params.n_max_seq <= o + 1u || !(r > 0.0f))
         {
-            cosyvoice_tokenize(ctx, effective_text, this, true);
+            ctx->tokenize(effective_text, this, true);
             return cosyvoice_tts(ctx, get_tokens(), get_n_tokens(), speed, this, result);
         }
         const auto max_text_tokens = static_cast<std::size_t>(
             static_cast<float>(params.n_max_seq - o - 1u) / (1.0f + r));
 
-        // Tokenize each fragment in a scratch buffer so we never disturb `this`'s tokens
-        // between the budget computation and the per-chunk synthesis pass.
+        if (max_text_tokens == 0)
+        {
+            ctx->tokenize(effective_text, this, true);
+            return cosyvoice_tts(ctx, get_tokens(), get_n_tokens(), speed, this, result);
+        }
+
+        // Fast-split path: tokenize each fragment once and merge token-ID vectors,
+        // avoiding re-tokenization of each assembled chunk.
+        if (flags & COSYVOICE_TTS_FLAG_FAST_SPLIT)
+        {
+            std::vector<std::vector<int>> fragment_tokens;
+            fragment_tokens.reserve(fragments.size());
+            {
+                cosyvoice_tokenization_result_impl tok;
+                for (const auto& fragment : fragments)
+                {
+                    tok.tokens.clear();
+                    ctx->tokenize(fragment.c_str(), &tok, true);
+                    fragment_tokens.push_back(tok.tokens);
+                }
+            }
+            auto chunk_token_list = cosyvoice_internal::reassemble_by_token_budget(
+                fragment_tokens, max_text_tokens);
+
+            if (chunk_token_list.size() <= 1)
+            {
+                const auto& t = chunk_token_list.empty() ? fragment_tokens[0] : chunk_token_list[0];
+                tokens = t;
+                return cosyvoice_tts(ctx, get_tokens(), get_n_tokens(), speed, this, result);
+            }
+
+            combined_pcm.clear();
+            for (auto& chunk_tokens : chunk_token_list)
+            {
+                tokens = std::move(chunk_tokens);
+                cosyvoice_generated_speech part = {};
+                if (!cosyvoice_tts(ctx, get_tokens(), get_n_tokens(), speed, this, &part)
+                    || !part.data || part.length == 0)
+                {
+                    result->data = nullptr;
+                    result->length = 0;
+                    return false;
+                }
+                combined_pcm.insert(combined_pcm.end(), part.data, part.data + part.length);
+            }
+            result->data = combined_pcm.data();
+            result->length = static_cast<uint32_t>(combined_pcm.size());
+            return true;
+        }
+
+        // Slow-split path: tokenize each fragment only for counting,
+        // reassemble text chunks, then re-tokenize each chunk.
         cosyvoice_tokenization_result_impl tokens_scratch;
         const auto token_count = [&](std::string_view fragment) -> std::size_t
         {
             tokens_scratch.tokens.clear();
-            const std::string copy(fragment);
-            cosyvoice_tokenize(ctx, copy.c_str(), &tokens_scratch, true);
+            ctx->tokenize(fragment.data(), static_cast<uint32_t>(fragment.size()), &tokens_scratch, true);
             return tokens_scratch.get_n_tokens();
         };
         const auto chunks = cosyvoice_internal::reassemble_by_token_budget(
@@ -465,7 +529,7 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
 
         if (chunks.size() <= 1)
         {
-            cosyvoice_tokenize(ctx, effective_text, this, true);
+            ctx->tokenize(effective_text, this, true);
             return cosyvoice_tts(ctx, get_tokens(), get_n_tokens(), speed, this, result);
         }
 
@@ -475,7 +539,7 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
         combined_pcm.clear();
         for (const auto& chunk : chunks)
         {
-            cosyvoice_tokenize(ctx, chunk.c_str(), this, true);
+            ctx->tokenize(chunk.c_str(), this, true);
             cosyvoice_generated_speech part = {};
             if (!cosyvoice_tts(ctx, get_tokens(), get_n_tokens(), speed, this, &part)
                 || !part.data || part.length == 0)
@@ -494,7 +558,7 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
     cosyvoice_context_t ctx;
     std::string instruction_cache;
     size_t prefix_len;
-    bool text_normalization_enabled;
+    uint32_t flags;
     std::vector<float> combined_pcm;
 };
 
@@ -513,14 +577,66 @@ void cosyvoice_tts_context_set_prompt(cosyvoice_tts_context_t ctx, cosyvoice_pro
     *static_cast<cosyvoice_prompt_t>(ctx) = *prompt;
 }
 
-void cosyvoice_tts_context_set_text_normalization_enabled(cosyvoice_tts_context_t ctx, bool enabled)
+bool cosyvoice_tts_context_set_text_normalization_enabled(cosyvoice_tts_context_t ctx, bool enabled)
 {
-    ctx->text_normalization_enabled = enabled;
+#ifdef COSYVOICE_NO_ICU
+    return !enabled;
+#else
+    if (enabled)
+        ctx->flags |= COSYVOICE_TTS_FLAG_TEXT_NORMALIZATION;
+    else
+        ctx->flags &= ~COSYVOICE_TTS_FLAG_TEXT_NORMALIZATION;
+    return true;
+#endif
 }
 
 bool cosyvoice_tts_context_get_text_normalization_enabled(cosyvoice_tts_context_t ctx)
 {
-    return ctx->text_normalization_enabled;
+    return (ctx->flags & COSYVOICE_TTS_FLAG_TEXT_NORMALIZATION) != 0;
+}
+
+bool cosyvoice_tts_context_set_split_text_enabled(cosyvoice_tts_context_t ctx, bool enabled)
+{
+    if (enabled)
+        ctx->flags |= COSYVOICE_TTS_FLAG_SPLIT_TEXT;
+    else
+        ctx->flags &= ~COSYVOICE_TTS_FLAG_SPLIT_TEXT;
+    return true;
+}
+
+bool cosyvoice_tts_context_get_split_text_enabled(cosyvoice_tts_context_t ctx)
+{
+    return (ctx->flags & COSYVOICE_TTS_FLAG_SPLIT_TEXT) != 0;
+}
+
+bool cosyvoice_tts_context_set_fast_split_text_enabled(cosyvoice_tts_context_t ctx, bool enabled)
+{
+    if (enabled)
+        ctx->flags |= COSYVOICE_TTS_FLAG_FAST_SPLIT;
+    else
+        ctx->flags &= ~COSYVOICE_TTS_FLAG_FAST_SPLIT;
+    return true;
+}
+
+bool cosyvoice_tts_context_get_fast_split_text_enabled(cosyvoice_tts_context_t ctx)
+{
+    return (ctx->flags & COSYVOICE_TTS_FLAG_FAST_SPLIT) != 0;
+}
+
+uint32_t cosyvoice_tts_context_get_flags(cosyvoice_tts_context_t ctx)
+{
+    return ctx->flags;
+}
+
+uint32_t cosyvoice_tts_context_set_flags(cosyvoice_tts_context_t ctx, uint32_t flags)
+{
+    flags &= COSYVOICE_TTS_FLAG_MASK
+#ifdef COSYVOICE_NO_ICU
+        & ~COSYVOICE_TTS_FLAG_TEXT_NORMALIZATION
+#endif
+        ;
+    ctx->flags = flags;
+    return ctx->flags;
 }
 
 bool cosyvoice_tts_zero_shot(cosyvoice_tts_context_t ctx, const char* text, float speed, cosyvoice_generated_speech_ptr result)
