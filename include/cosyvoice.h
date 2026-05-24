@@ -333,6 +333,7 @@ COSYVOICE_API void cosyvoice_prompt_free(cosyvoice_prompt_t prompt);
 #define COSYVOICE_TTS_FLAG_TEXT_NORMALIZATION (1u << 0)
 #define COSYVOICE_TTS_FLAG_SPLIT_TEXT         (1u << 1)
 #define COSYVOICE_TTS_FLAG_FAST_SPLIT         (1u << 2)
+#define COSYVOICE_TTS_FLAG_FADE_IN            (1u << 3)
 
 // ----------------------------------------------------------------------------
 // Text-to-Speech Generation API
@@ -386,6 +387,17 @@ COSYVOICE_API bool cosyvoice_tts_context_set_fast_split_text_enabled(cosyvoice_t
  * @brief Query whether fast text splitting is enabled for this TTS context.
  */
 COSYVOICE_API bool cosyvoice_tts_context_get_fast_split_text_enabled(cosyvoice_tts_context_t ctx);
+
+/**
+ * @brief Enable or disable output fade-in for this TTS context.
+ * @note Enabled by default.
+ */
+COSYVOICE_API bool cosyvoice_tts_context_set_fade_in_enabled(cosyvoice_tts_context_t ctx, bool enabled);
+
+/**
+ * @brief Query whether output fade-in is enabled for this TTS context.
+ */
+COSYVOICE_API bool cosyvoice_tts_context_get_fade_in_enabled(cosyvoice_tts_context_t ctx);
 
 /**
  * @brief Get the current TTS context flags bitmask.
