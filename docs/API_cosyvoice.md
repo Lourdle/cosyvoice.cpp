@@ -836,7 +836,7 @@ Calling this API resets cached instruction text associated with the session.
 ### Syntax
 
 ```c
-COSYVOICE_API void cosyvoice_tts_context_set_text_normalization_enabled(cosyvoice_tts_context_t ctx, bool enabled);
+COSYVOICE_API bool cosyvoice_tts_context_set_text_normalization_enabled(cosyvoice_tts_context_t ctx, bool enabled);
 ```
 
 ### Description
@@ -847,6 +847,10 @@ Enables or disables frontend text normalization for a TTS session.
 
 - `ctx`: TTS context handle.
 - `enabled`: `true` to enable text normalization; `false` to bypass normalization and tokenize raw input text directly.
+
+### Returns
+
+`true` on success, `false` if normalization is unavailable (for example when compiled without ICU).
 
 ### Remarks
 
@@ -871,6 +875,182 @@ Queries whether frontend text normalization is enabled for a TTS session.
 ### Returns
 
 `true` when text normalization is enabled; otherwise `false`.
+
+## cosyvoice_tts_context_set_split_text_enabled
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_tts_context_set_split_text_enabled(cosyvoice_tts_context_t ctx, bool enabled);
+```
+
+### Description
+
+Enables or disables fragment splitting for a TTS session.
+
+### Parameters
+
+- `ctx`: TTS context handle.
+- `enabled`: `true` to split text into fragments before synthesis; `false` to synthesize the full text in one pass.
+
+### Returns
+
+`true` on success.
+
+### Remarks
+
+Text splitting is enabled by default for newly created TTS contexts.
+
+## cosyvoice_tts_context_get_split_text_enabled
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_tts_context_get_split_text_enabled(cosyvoice_tts_context_t ctx);
+```
+
+### Description
+
+Queries whether fragment splitting is enabled for a TTS session.
+
+### Parameters
+
+- `ctx`: TTS context handle.
+
+### Returns
+
+`true` when text splitting is enabled; otherwise `false`.
+
+## cosyvoice_tts_context_set_fast_split_text_enabled
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_tts_context_set_fast_split_text_enabled(cosyvoice_tts_context_t ctx, bool enabled);
+```
+
+### Description
+
+Enables or disables fast token-based splitting for a TTS session.
+
+### Parameters
+
+- `ctx`: TTS context handle.
+- `enabled`: `true` to enable fast split; `false` to use the slower text reassembly path.
+
+### Returns
+
+`true` on success.
+
+### Remarks
+
+Fast split is enabled by default for newly created TTS contexts.
+
+## cosyvoice_tts_context_get_fast_split_text_enabled
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_tts_context_get_fast_split_text_enabled(cosyvoice_tts_context_t ctx);
+```
+
+### Description
+
+Queries whether fast token-based splitting is enabled for a TTS session.
+
+### Parameters
+
+- `ctx`: TTS context handle.
+
+### Returns
+
+`true` when fast split is enabled; otherwise `false`.
+
+## cosyvoice_tts_context_set_fade_in_enabled
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_tts_context_set_fade_in_enabled(cosyvoice_tts_context_t ctx, bool enabled);
+```
+
+### Description
+
+Enables or disables the default output fade-in for a TTS session.
+
+### Parameters
+
+- `ctx`: TTS context handle.
+- `enabled`: `true` to apply a 20 ms fade-in to generated output; `false` to return raw PCM without fade-in.
+
+### Returns
+
+`true` on success.
+
+### Remarks
+
+Fade-in is enabled by default for newly created TTS contexts.
+
+## cosyvoice_tts_context_get_fade_in_enabled
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_tts_context_get_fade_in_enabled(cosyvoice_tts_context_t ctx);
+```
+
+### Description
+
+Queries whether output fade-in is enabled for a TTS session.
+
+### Parameters
+
+- `ctx`: TTS context handle.
+
+### Returns
+
+`true` when fade-in is enabled; otherwise `false`.
+
+## cosyvoice_tts_context_get_flags
+
+### Syntax
+
+```c
+COSYVOICE_API uint32_t cosyvoice_tts_context_get_flags(cosyvoice_tts_context_t ctx);
+```
+
+### Description
+
+Gets the current TTS context flag bitmask.
+
+### Parameters
+
+- `ctx`: TTS context handle.
+
+### Returns
+
+A bitmask composed of `COSYVOICE_TTS_FLAG_*` values.
+
+## cosyvoice_tts_context_set_flags
+
+### Syntax
+
+```c
+COSYVOICE_API uint32_t cosyvoice_tts_context_set_flags(cosyvoice_tts_context_t ctx, uint32_t flags);
+```
+
+### Description
+
+Sets the TTS context flag bitmask.
+
+### Parameters
+
+- `ctx`: TTS context handle.
+- `flags`: Requested flag bitmask.
+
+### Returns
+
+The effective flags after masking unsupported bits.
 
 ## cosyvoice_tts_zero_shot
 

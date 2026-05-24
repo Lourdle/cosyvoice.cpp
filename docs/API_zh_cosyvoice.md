@@ -884,7 +884,7 @@ COSYVOICE_API void cosyvoice_tts_context_set_prompt(cosyvoice_tts_context_t ctx,
 ### 语法
 
 ```c
-COSYVOICE_API void cosyvoice_tts_context_set_text_normalization_enabled(cosyvoice_tts_context_t ctx, bool enabled);
+COSYVOICE_API bool cosyvoice_tts_context_set_text_normalization_enabled(cosyvoice_tts_context_t ctx, bool enabled);
 ```
 
 ### 说明
@@ -898,7 +898,7 @@ COSYVOICE_API void cosyvoice_tts_context_set_text_normalization_enabled(cosyvoic
 
 ### 返回值
 
-无返回值。
+成功返回 `true`，如果标准化不可用（例如编译时未启用 ICU）则返回 `false`。
 
 ### 备注
 
@@ -923,6 +923,182 @@ COSYVOICE_API bool cosyvoice_tts_context_get_text_normalization_enabled(cosyvoic
 ### 返回值
 
 开启时返回 `true`，关闭时返回 `false`。
+
+## cosyvoice_tts_context_set_split_text_enabled
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_tts_context_set_split_text_enabled(cosyvoice_tts_context_t ctx, bool enabled);
+```
+
+### 说明
+
+为指定 TTS 会话开启或关闭分片处理。
+
+### 参数
+
+- `ctx`：会话句柄。
+- `enabled`：`true` 表示先将文本切分为片段再合成；`false` 表示整段文本一次性合成。
+
+### 返回值
+
+成功返回 `true`。
+
+### 备注
+
+新创建的 TTS 会话默认开启分片处理。
+
+## cosyvoice_tts_context_get_split_text_enabled
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_tts_context_get_split_text_enabled(cosyvoice_tts_context_t ctx);
+```
+
+### 说明
+
+查询指定 TTS 会话当前是否开启分片处理。
+
+### 参数
+
+- `ctx`：会话句柄。
+
+### 返回值
+
+开启时返回 `true`，关闭时返回 `false`。
+
+## cosyvoice_tts_context_set_fast_split_text_enabled
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_tts_context_set_fast_split_text_enabled(cosyvoice_tts_context_t ctx, bool enabled);
+```
+
+### 说明
+
+为指定 TTS 会话开启或关闭快速分片处理。
+
+### 参数
+
+- `ctx`：会话句柄。
+- `enabled`：`true` 表示启用基于 token 的快速分片；`false` 表示使用较慢的文本重组路径。
+
+### 返回值
+
+成功返回 `true`。
+
+### 备注
+
+新创建的 TTS 会话默认开启快速分片处理。
+
+## cosyvoice_tts_context_get_fast_split_text_enabled
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_tts_context_get_fast_split_text_enabled(cosyvoice_tts_context_t ctx);
+```
+
+### 说明
+
+查询指定 TTS 会话当前是否开启快速分片处理。
+
+### 参数
+
+- `ctx`：会话句柄。
+
+### 返回值
+
+开启时返回 `true`，关闭时返回 `false`。
+
+## cosyvoice_tts_context_set_fade_in_enabled
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_tts_context_set_fade_in_enabled(cosyvoice_tts_context_t ctx, bool enabled);
+```
+
+### 说明
+
+为指定 TTS 会话开启或关闭默认输出淡入。
+
+### 参数
+
+- `ctx`：会话句柄。
+- `enabled`：`true` 表示对生成结果应用 20 ms 淡入；`false` 表示返回未经淡入处理的原始 PCM。
+
+### 返回值
+
+成功返回 `true`。
+
+### 备注
+
+新创建的 TTS 会话默认开启淡入。
+
+## cosyvoice_tts_context_get_fade_in_enabled
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_tts_context_get_fade_in_enabled(cosyvoice_tts_context_t ctx);
+```
+
+### 说明
+
+查询指定 TTS 会话当前是否开启输出淡入。
+
+### 参数
+
+- `ctx`：会话句柄。
+
+### 返回值
+
+开启时返回 `true`，关闭时返回 `false`。
+
+## cosyvoice_tts_context_get_flags
+
+### 语法
+
+```c
+COSYVOICE_API uint32_t cosyvoice_tts_context_get_flags(cosyvoice_tts_context_t ctx);
+```
+
+### 说明
+
+获取当前 TTS 会话的标志位掩码。
+
+### 参数
+
+- `ctx`：会话句柄。
+
+### 返回值
+
+由 `COSYVOICE_TTS_FLAG_*` 组成的位掩码。
+
+## cosyvoice_tts_context_set_flags
+
+### 语法
+
+```c
+COSYVOICE_API uint32_t cosyvoice_tts_context_set_flags(cosyvoice_tts_context_t ctx, uint32_t flags);
+```
+
+### 说明
+
+设置当前 TTS 会话的标志位掩码。
+
+### 参数
+
+- `ctx`：会话句柄。
+- `flags`：请求设置的标志位掩码。
+
+### 返回值
+
+返回过滤掉不支持标志后的实际生效值。
 
 ## cosyvoice_tts_zero_shot
 

@@ -52,6 +52,9 @@ Runtime tuning options:
 - `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>`: default `q8_0`.
 - `--seed <value>`: default per-request seed (used when request does not provide extension field `seed`).
 
+TTS postprocess options:
+- `--disable-fade-in`: disable the default 20 ms fade-in applied to generated output.
+
 Sampling default overrides (server-level):
 - `--temperature <value>` (`> 0`)
 - `--top-k <value>` (`>= 0`)
@@ -345,6 +348,9 @@ Prompt source options:
 Text normalization:
 - `--disable-text-normalization`: Disable ICU text normalization before tokenization.
 - This option exists only when ICU is enabled (`COSYVOICE_NO_ICU=OFF`).
+- `--disable-text-splitting`: Disable fragment splitting before synthesis.
+- `--disable-fast-split`: Disable fast token-based fragment synthesis.
+- `--disable-fade-in`: Disable the default 20 ms output fade-in.
 
 Runtime logs:
 - Basic request info (model path, mode, prompt source, output, speed, resolved CPU thread count, seed source) is shown before model loading.

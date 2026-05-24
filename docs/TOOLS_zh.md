@@ -52,6 +52,9 @@ quantize --help
 - `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>`：默认 `q8_0`。
 - `--seed <value>`：请求级默认 seed（当请求扩展字段未传 `seed` 时使用）。
 
+TTS 后处理参数：
+- `--disable-fade-in`：关闭默认的 20 ms 输出淡入。
+
 采样默认值覆盖（服务级）：
 - `--temperature <value>`（`> 0`）
 - `--top-k <value>`（`>= 0`）
@@ -345,6 +348,9 @@ cosyvoice-cli \
 文本规范化：
 - `--disable-text-normalization`：关闭分词前 ICU 文本规范化。
 - 该选项仅在启用 ICU 时可用（`COSYVOICE_NO_ICU=OFF`）。
+- `--disable-text-splitting`：关闭合成前的文本分片。
+- `--disable-fast-split`：关闭基于 token 的快速分片合成。
+- `--disable-fade-in`：关闭默认的 20 ms 输出淡入。
 
 运行日志：
 - 模型加载前会先打印基础请求信息（模型路径、模式、提示源、输出路径、语速、解析后的 CPU 线程数、seed 来源）。
