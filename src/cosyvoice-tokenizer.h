@@ -7,7 +7,7 @@
 
 class gguf_metadata_loader;
 
-class cosyvoice_vocab : public cosyvoice_object_ref_counter
+class cosyvoice_vocab : virtual public cosyvoice_object_ref_counter
 {
 public:
     cosyvoice_vocab();

@@ -329,7 +329,8 @@ void CosyVoice3LM::OnLoad(const gguf_loader& loader, const std::string& prefix, 
 
 void cosyvoice_model_3::load(gguf_loader& loader)
 {
-    switch (this->params.llm_kv_cache_type)
+    auto& kv_type = cv3_shared->kv_type;
+    switch (shared->params.llm_kv_cache_type)
     {
     case COSYVOICE_LLM_KV_CACHE_TYPE_F32:
         kv_type = GGML_TYPE_F32;
@@ -356,9 +357,13 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         throw std::invalid_argument("unexpected kv cache type");
     }
 
+    auto& flow = cv3_shared->flow;
+    auto& hift = cv3_shared->hift;
+    auto& llm = cv3_shared->llm;
+
     flow.OnLoad(loader, {});
     hift.OnLoad(loader, {});
-    llm.OnLoad(loader, {}, params);
+    llm.OnLoad(loader, {}, shared->params);
 
     auto tensors = llm.get_all_tensors();
     for (auto& kv : flow.get_all_tensors())
@@ -368,7 +373,7 @@ void cosyvoice_model_3::load(gguf_loader& loader)
 
     ggml_init_params params =
     {
-        .mem_size = (tensors.size() + 8) * ggml_tensor_overhead(),
+        .mem_size = (tensors.size() + 6 + 2) * ggml_tensor_overhead(),
         .mem_buffer = nullptr,
         .no_alloc = true
     };
@@ -383,57 +388,59 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     for (int i = 0; i != half_dim; ++i)
         emb_buffer[i] = std::exp(i * -emb) * 1000;
 
-    auto buft = ggml_backend_get_default_buffer_type(backend.get());
+    auto backend = worker->backend.get();
+    auto cpu_backend = worker->cpu_backend.get();
+    auto buft = ggml_backend_get_default_buffer_type(backend);
     auto alignment = ggml_backend_buft_get_alignment(buft);
 
     const int mel_dim = flow.decoder.estimator.mel_dim;
     size_t mem_size = get_aligned_size(sizeof(float) * half_dim, alignment)
         + get_aligned_size(sizeof(float) * (hift.nfft / 2 + 1), alignment)
-        + get_aligned_size(sizeof(int) * this->params.n_batch, alignment)
+        + get_aligned_size(sizeof(int) * shared->params.n_batch, alignment)
         + get_aligned_size(sizeof(float) * (hift.nfft / 2 + 1) * hift.nfft, alignment) * 2
-        + get_aligned_size((this->params.n_max_seq - 1) * this->params.n_batch * sizeof(ggml_fp16_t), alignment);
+        + get_aligned_size((shared->params.n_max_seq - 1) * shared->params.n_batch * sizeof(ggml_fp16_t), alignment);
     for (const auto& [name, tensor] : tensors)
         if (tensor != &llm.embed_tokens_weight
             && tensor != &llm.speech_embedding_weight)
             mem_size += get_aligned_size(ggml_backend_buft_get_alloc_size(buft, *tensor), alignment);
 
-    buffer.reset(ggml_backend_buft_alloc_buffer(buft, mem_size));
-    auto buffer_base = reinterpret_cast<char*>(ggml_backend_buffer_get_base(buffer.get()));
-    ctx.reset(ggml_init(params));
+    shared->buffer.reset(ggml_backend_buft_alloc_buffer(buft, mem_size));
+    auto buffer_base = reinterpret_cast<char*>(ggml_backend_buffer_get_base(shared->buffer.get()));
+    shared->ctx.reset(ggml_init(params));
 
     mem_size = ggml_backend_buft_get_alloc_size(ggml_backend_cpu_buffer_type(), llm.embed_tokens_weight)
         + ggml_backend_buft_get_alloc_size(ggml_backend_cpu_buffer_type(), llm.speech_embedding_weight)
         + sizeof(float) * hift.nfft;
-    cpu_buffer.reset(ggml_backend_buft_alloc_buffer(ggml_backend_get_default_buffer_type(cpu_backend.get()), mem_size));
-    auto cpu_buffer_base = reinterpret_cast<char*>(ggml_backend_buffer_get_base(cpu_buffer.get()));
+    shared->cpu_buffer.reset(ggml_backend_buft_alloc_buffer(ggml_backend_get_default_buffer_type(cpu_backend), mem_size));
+    auto cpu_buffer_base = reinterpret_cast<char*>(ggml_backend_buffer_get_base(shared->cpu_buffer.get()));
 
     auto set_tensor = [&](ggml_tensor* tensor, const void* data, size_t size)
     {
-        ggml_backend_tensor_set_async(backend.get(), tensor, data, 0, size);
+        ggml_backend_tensor_set_async(backend, tensor, data, 0, size);
         buffer_base += get_aligned_size(ggml_backend_buft_get_alloc_size(buft, tensor), alignment);
     };
     auto set_cpu_tensor = [&](ggml_tensor* tensor, const void* data, size_t size)
     {
         ggml_backend_tensor_set(tensor, data, 0, size);
-        cpu_buffer_base += ggml_backend_buft_get_alloc_size(ggml_backend_get_default_buffer_type(cpu_backend.get()), tensor);
+        cpu_buffer_base += ggml_backend_buft_get_alloc_size(ggml_backend_get_default_buffer_type(cpu_backend), tensor);
     };
-    flow.decoder.estimator.time_embed.time_embed.emb = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_F32, half_dim);
-    ggml_backend_tensor_alloc(buffer.get(), flow.decoder.estimator.time_embed.time_embed.emb, buffer_base);
+    flow.decoder.estimator.time_embed.time_embed.emb = ggml_new_tensor_1d(shared->ctx.get(), GGML_TYPE_F32, half_dim);
+    ggml_backend_tensor_alloc(shared->buffer.get(), flow.decoder.estimator.time_embed.time_embed.emb, buffer_base);
     set_tensor(flow.decoder.estimator.time_embed.time_embed.emb, emb_buffer.get(), sizeof(float) * half_dim);
 
     for (const auto& [name, tensor] : tensors)
     {
         size_t tensor_size = ggml_nbytes(*tensor);
-        auto new_tensor = ggml_new_tensor(ctx.get(), (*tensor)->type, GGML_MAX_DIMS, (*tensor)->ne);
+        auto new_tensor = ggml_new_tensor(shared->ctx.get(), (*tensor)->type, GGML_MAX_DIMS, (*tensor)->ne);
         if (tensor == &llm.embed_tokens_weight
             || tensor == &llm.speech_embedding_weight)
         {
-            ggml_backend_tensor_alloc(cpu_buffer.get(), new_tensor, cpu_buffer_base);
+            ggml_backend_tensor_alloc(shared->cpu_buffer.get(), new_tensor, cpu_buffer_base);
             set_cpu_tensor(new_tensor, ggml_get_data(*tensor), tensor_size);
         }
         else
         {
-            ggml_backend_tensor_alloc(buffer.get(), new_tensor, buffer_base);
+            ggml_backend_tensor_alloc(shared->buffer.get(), new_tensor, buffer_base);
             set_tensor(new_tensor, ggml_get_data(*tensor), tensor_size);
         }
 
@@ -442,92 +449,92 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         ggml_set_name(*tensor, name.c_str());
     }
 
-    noise_rng.seed(this->params.seed);
-    sampler_rng.seed(noise_rng());
+    worker->noise_rng.seed(shared->params.seed);
+    worker->sampler_rng.seed(worker->noise_rng());
 
-    hift.m_source.l_sin_gen.rand_ini = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_F32, hift.nb_harmonics + 1);
-    ggml_backend_tensor_alloc(buffer.get(), hift.m_source.l_sin_gen.rand_ini, buffer_base);
+    hift.m_source.l_sin_gen.rand_ini = ggml_new_tensor_1d(shared->ctx.get(), GGML_TYPE_F32, hift.nb_harmonics + 1);
+    ggml_backend_tensor_alloc(shared->buffer.get(), hift.m_source.l_sin_gen.rand_ini, buffer_base);
     buffer_base += get_aligned_size(hift.m_source.l_sin_gen.rand_ini->nb[1], alignment);
 
     auto rand_ini_buffer = std::make_unique<float[]>(hift.nb_harmonics + 1);
     rand_ini_buffer[0] = 0.f;
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
     for (auto& i : std::span(rand_ini_buffer.get() + 1, hift.nb_harmonics))
-        i = dist(noise_rng);
+        i = dist(worker->noise_rng);
     hift.set_rand_ini(rand_ini_buffer.get());
 
-    hift.window = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_F32, hift.nfft);
+    hift.window = ggml_new_tensor_1d(shared->ctx.get(), GGML_TYPE_F32, hift.nfft);
     ggml_set_param(hift.window);
     ggml_set_name(hift.window, "stft_window");
-    ggml_backend_tensor_alloc(cpu_buffer.get(), hift.window, cpu_buffer_base);
+    ggml_backend_tensor_alloc(shared->cpu_buffer.get(), hift.window, cpu_buffer_base);
     for (int i = 0; i != hift.nfft; ++i)
         reinterpret_cast<float*>(hift.window->data)[i] = (1.0f - std::cos(2.0f * 3.14159265358979323846f * i / hift.nfft)) / 2.f;
 
-    position_ids = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_I32, this->params.n_batch);
-    ggml_set_name(position_ids, "position_ids");
-    ggml_backend_tensor_alloc(buffer.get(), position_ids, buffer_base);
-    ggml_set_param(position_ids);
-    full_position_ids.reset(new int[this->params.n_max_seq]);
-    for (int i = 0; i != this->params.n_max_seq; ++i)
-        full_position_ids.get()[i] = i;
-    buffer_base += get_aligned_size(position_ids->nb[1], alignment);
+    worker->position_ids = ggml_new_tensor_1d(shared->ctx.get(), GGML_TYPE_I32, shared->params.n_batch);
+    ggml_set_name(worker->position_ids, "position_ids");
+    ggml_backend_tensor_alloc(shared->buffer.get(), worker->position_ids, buffer_base);
+    ggml_set_param(worker->position_ids);
+    worker->full_position_ids.reset(new int[shared->params.n_max_seq]);
+    for (int i = 0; i != shared->params.n_max_seq; ++i)
+        worker->full_position_ids.get()[i] = i;
+    buffer_base += get_aligned_size(worker->position_ids->nb[1], alignment);
 
     hift.fctx = create_fft_context(hift.nfft);
-    hift.ictx = create_istft_context(hift.nfft, ctx.get(),
+    hift.ictx = create_istft_context(hift.nfft, shared->ctx.get(),
         [&](ggml_tensor* tensor, void* data, size_t size)
         {
-            ggml_backend_tensor_alloc(buffer.get(), tensor, buffer_base);
+            ggml_backend_tensor_alloc(shared->buffer.get(), tensor, buffer_base);
             set_tensor(tensor, data, size);
             ggml_set_param(tensor);
-            ggml_backend_synchronize(backend.get());
+            ggml_backend_synchronize(backend);
         });
 
-    causal_mask_buffer.reset(new ggml_fp16_t[(this->params.n_max_seq - 1) * this->params.n_batch]);
-    causal_mask = ggml_new_tensor_2d(ctx.get(), GGML_TYPE_F16, this->params.n_max_seq - 1, this->params.n_batch);
-    ggml_set_name(causal_mask, "attention_mask");
-    ggml_set_param(causal_mask);
-    ggml_backend_tensor_alloc(buffer.get(), causal_mask, buffer_base);
+    worker->causal_mask_buffer.reset(new ggml_fp16_t[(shared->params.n_max_seq - 1) * shared->params.n_batch]);
+    worker->causal_mask = ggml_new_tensor_2d(shared->ctx.get(), GGML_TYPE_F16, shared->params.n_max_seq - 1, shared->params.n_batch);
+    ggml_set_name(worker->causal_mask, "attention_mask");
+    ggml_set_param(worker->causal_mask);
+    ggml_backend_tensor_alloc(shared->buffer.get(), worker->causal_mask, buffer_base);
 
     int64_t id = gguf_find_key(loader, "stop_token_ids");
     auto stop_tok_data = reinterpret_cast<const int*>(gguf_get_arr_data(loader, id));
     id = static_cast<int64_t>(gguf_get_arr_n(loader, id));
-    stop_tokens.insert(stop_tok_data, stop_tok_data + id);
+    cv3_shared->stop_tokens.insert(stop_tok_data, stop_tok_data + id);
 
-    config.temperature = 1.f;
-    config.max_token_text_ratio = 20.f;
-    config.min_token_text_ratio = 2.f;
+    shared->config.temperature = 1.f;
+    shared->config.max_token_text_ratio = 20.f;
+    shared->config.min_token_text_ratio = 2.f;
 
     id = gguf_find_key(loader, "cosyvoice.instruction_prefix");
     if (id != -1)
     {
         auto str = gguf_get_val_str(loader, id);
         auto len = strlen(str) + 1;
-        instruction_prefix.reset(new char[len]);
-        memcpy(instruction_prefix.get(), str, len);
+        shared->instruction_prefix.reset(new char[len]);
+        memcpy(shared->instruction_prefix.get(), str, len);
     }
 
-    auto& sampling = config.sampling;
+    auto& sampling = shared->config.sampling;
     LOAD_METADATA_NOPREFIX(sampling.top_k);
     LOAD_METADATA_NOPREFIX(sampling.top_p);
     LOAD_METADATA_NOPREFIX(sampling.win_size);
     LOAD_METADATA_NOPREFIX(sampling.tau_r);
 
-    nucleus_probs.reset(new float[sampling.top_k * 2 + 1]);
-    probs.reset(new float[llm.llm_decoder.weight->ne[1]]);
-    batch_buffer.reset(new char[this->params.n_batch * std::max(llm.embed_tokens_weight->nb[1], llm.speech_embedding_weight->nb[1])]);
+    worker->nucleus_probs.reset(new float[sampling.top_k * 2 + 1]);
+    worker->probs.reset(new float[llm.llm_decoder.weight->ne[1]]);
+    worker->batch_buffer.reset(new char[shared->params.n_batch * std::max(llm.embed_tokens_weight->nb[1], llm.speech_embedding_weight->nb[1])]);
 
-    if (this->params.llm_use_flash_attn)
-        if (this->params.llm_allow_kv_cache_fallback
+    if (shared->params.llm_use_flash_attn)
+        if (shared->params.llm_allow_kv_cache_fallback
             && ggml_is_quantized(kv_type))
         {
             auto cur_type = kv_type;
             while (cur_type != GGML_TYPE_F32)
             {
-                auto q = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attention_heads);
-                auto k = ggml_new_tensor_3d(ctx0.get(), kv_type, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
-                auto v = ggml_new_tensor_3d(ctx0.get(), kv_type, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
-                auto o = ggml_flash_attn_ext(ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
-                if (ggml_backend_supports_op(backend.get(), o))
+                auto q = ggml_new_tensor_3d(worker->ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attention_heads);
+                auto k = ggml_new_tensor_3d(worker->ctx0.get(), kv_type, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
+                auto v = ggml_new_tensor_3d(worker->ctx0.get(), kv_type, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
+                auto o = ggml_flash_attn_ext(worker->ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
+                if (ggml_backend_supports_op(backend, o))
                 {
                     kv_type = cur_type;
                     break;
@@ -535,29 +542,29 @@ void cosyvoice_model_3::load(gguf_loader& loader)
                 --reinterpret_cast<int&>(cur_type);
             }
 
-            this->params.llm_use_flash_attn = cur_type != GGML_TYPE_F32;
+            shared->params.llm_use_flash_attn = cur_type != GGML_TYPE_F32;
             switch (kv_type)
             {
             case GGML_TYPE_F32:
-                this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_F32;
+                shared->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_F32;
                 break;
             case GGML_TYPE_F16:
-                this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_F16;
+                shared->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_F16;
                 break;
             case GGML_TYPE_Q8_0:
-                this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0;
+                shared->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0;
                 break;
             case GGML_TYPE_Q5_1:
-                this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1;
+                shared->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1;
                 break;
             case GGML_TYPE_Q5_0:
-                this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0;
+                shared->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0;
                 break;
             case GGML_TYPE_Q4_1:
-                this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1;
+                shared->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1;
                 break;
             case GGML_TYPE_Q4_0:
-                this->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0;
+                shared->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0;
                 break;
             default:
                 throw std::invalid_argument("unexpected type");
@@ -565,56 +572,56 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         }
         else
         {
-            auto q = ggml_new_tensor_3d(ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attention_heads);
-            auto k = ggml_new_tensor_3d(ctx0.get(), kv_type, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
-            auto v = ggml_new_tensor_3d(ctx0.get(), kv_type, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
-            auto o = ggml_flash_attn_ext(ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
-            this->params.llm_use_flash_attn = ggml_backend_supports_op(backend.get(), o);
+            auto q = ggml_new_tensor_3d(worker->ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attention_heads);
+            auto k = ggml_new_tensor_3d(worker->ctx0.get(), kv_type, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
+            auto v = ggml_new_tensor_3d(worker->ctx0.get(), kv_type, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
+            auto o = ggml_flash_attn_ext(worker->ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
+            shared->params.llm_use_flash_attn = ggml_backend_supports_op(backend, o);
         }
     else if (ggml_is_quantized(kv_type))
         kv_type = GGML_TYPE_F16;
 
-    kv_cache = new cosyvoice_llm_kv_cache(
-        backend.get(),
-        kv_buffer,
+    worker->kv_cache.build_kv_cache(
+        backend,
+        worker->kv_buffer,
         static_cast<int>(llm.layers.size()),
         static_cast<int>(llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads),
         static_cast<int>(llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads),
         llm.num_attention_heads,
         llm.num_key_value_heads,
-        this->params.n_max_seq,
+        shared->params.n_max_seq,
         kv_type,
-        this->params.llm_use_flash_attn
+        shared->params.llm_use_flash_attn
     );
-    switch (this->params.inference_buffer_policy)
+    switch (shared->params.inference_buffer_policy)
     {
     case COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED:
     case COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED:
-        token2wav_buffer.reset(kv_buffer.get());
+        cv3_worker->token2wav_buffer.reset(worker->kv_buffer.get());
     case COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED:
         break;
     default:
         throw std::invalid_argument("unexpected policy");
     }
 
-    if (this->params.flow_use_flash_attn)
+    if (shared->params.flow_use_flash_attn)
     {
         int heads = flow.decoder.estimator.transformer_blocks[0].attn.heads;
-        auto q = ggml_new_tensor_4d(ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_q.weight->ne[1] / heads, 1, heads, 2);
-        auto k = ggml_new_tensor_4d(ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_k.weight->ne[1] / heads, 1, heads, 2);
-        auto v = ggml_new_tensor_4d(ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_v.weight->ne[1] / heads, 1, heads, 2);
-        auto o = ggml_flash_attn_ext(ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
-        this->params.flow_use_flash_attn = ggml_backend_supports_op(backend.get(), o);
+        auto q = ggml_new_tensor_4d(worker->ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_q.weight->ne[1] / heads, 1, heads, 2);
+        auto k = ggml_new_tensor_4d(worker->ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_k.weight->ne[1] / heads, 1, heads, 2);
+        auto v = ggml_new_tensor_4d(worker->ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_v.weight->ne[1] / heads, 1, heads, 2);
+        auto o = ggml_flash_attn_ext(worker->ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
+        shared->params.flow_use_flash_attn = ggml_backend_supports_op(backend, o);
     }
 
     for (auto& block : flow.decoder.estimator.transformer_blocks)
-        block.attn.fattn = this->params.flow_use_flash_attn;
+        block.attn.fattn = shared->params.flow_use_flash_attn;
 
-    orig_max_seq_len = this->params.n_max_seq;
+    cv3_worker->orig_max_seq_len = shared->params.n_max_seq;
 
     auto arch = loader.get_string("general.architecture");
-    architecture.reset(new char[arch.size() + 1]);
-    memcpy(architecture.get(), arch.data(), arch.size() + 1);
+    shared->architecture.reset(new char[arch.size() + 1]);
+    memcpy(shared->architecture.get(), arch.data(), arch.size() + 1);
 
-    ggml_backend_synchronize(backend.get());
+    ggml_backend_synchronize(backend);
 }

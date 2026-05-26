@@ -90,45 +90,50 @@ bool cosyvoice_model_3::llm_prefill(
     uint32_t n_tokens
 )
 {
+    auto kv_cache = &worker->kv_cache;
     auto total_len = n_tokens + kv_cache->cur_len;
-    if (total_len > params.n_max_seq - 1) return false;
-    if (n_tokens > params.n_batch) return false;
+    if (total_len > shared->params.n_max_seq - 1) return false;
+    if (n_tokens > shared->params.n_batch) return false;
 
-    auto causal_mask = n_tokens == 1 ? nullptr : this->causal_mask;
+    auto causal_mask = n_tokens == 1 ? nullptr : worker->causal_mask;
     if (causal_mask)
     {
         causal_mask->ne[0] = total_len;
         causal_mask->ne[1] = n_tokens;
         causal_mask->nb[1] = total_len * sizeof(ggml_fp16_t);
         causal_mask->nb[3] = causal_mask->nb[2] = causal_mask->ne[1] * causal_mask->nb[1];
-        build_causal_mask(causal_mask_buffer.get(), n_tokens, total_len);
+        build_causal_mask(worker->causal_mask_buffer.get(), n_tokens, total_len);
         ggml_backend_tensor_set_async(
-            backend.get(),
+            worker->backend.get(),
             causal_mask,
-            causal_mask_buffer.get(),
+            worker->causal_mask_buffer.get(),
             0,
             causal_mask->nb[2]
         );
     }
 
+    auto& position_ids = worker->position_ids;
     position_ids->ne[0] = n_tokens;
-    ggml_backend_tensor_set_async(backend.get(), position_ids, full_position_ids.get() + kv_cache->cur_len, 0, n_tokens * sizeof(int32_t));
-    
+    ggml_backend_tensor_set_async(worker->backend.get(), position_ids, worker->full_position_ids.get() + kv_cache->cur_len, 0, n_tokens * sizeof(int32_t));
+
+    auto& gf = worker->gf;
+    auto& llm_input = worker->llm_input;
+    auto& llm_probs = worker->llm_probs;
     if (gf && llm_input && !llm_probs
         && llm_input->type == type && n_tokens == llm_input->ne[1]
         && kv_cache->can_reuse(true))
     {
-        ggml_backend_tensor_set_async(backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
+        ggml_backend_tensor_set_async(worker->backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
         kv_cache->shift_kv_node_pos(n_tokens);
     }
     else
     {
-        auto ctx0 = this->ctx0.get();
+        auto ctx0 = worker->ctx0.get();
+        auto& llm = cv3_shared->llm;
         ggml_reset(ctx0);
-        ggml_backend_sched_reset(sched.get());
+        ggml_backend_sched_reset(worker->sched.get());
 
         gf = ggml_new_graph(ctx0);
-        this->gf = gf;
         llm_input = ggml_new_tensor_2d(
             ctx0,
             type,
@@ -177,34 +182,40 @@ bool cosyvoice_model_3::llm_prefill(
         kv_cache->update_cache(ctx0, gf, key_states, value_states, position_ids, static_cast<int>(llm.layers.size() - 1));
         kv_cache->cur_len += n_tokens;
 
-        set_graph_backend(gf, sched.get(), backend.get());
-        ggml_backend_sched_alloc_graph(sched.get(), gf);
-        ggml_backend_tensor_set_async(backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
+        set_graph_backend(gf, worker->sched.get(), worker->backend.get());
+        ggml_backend_sched_alloc_graph(worker->sched.get(), gf);
+        ggml_backend_tensor_set_async(worker->backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
     }
 
-    status = ggml_backend_sched_graph_compute(sched.get(), gf);
-    return status == GGML_STATUS_SUCCESS;
+    worker->status = ggml_backend_sched_graph_compute(worker->sched.get(), gf);
+    return worker->status == GGML_STATUS_SUCCESS;
 }
 
 bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
 {
-    if (kv_cache->cur_len + 1 > params.n_max_seq) return false;
+    auto kv_cache = &worker->kv_cache;
+    if (kv_cache->cur_len + 1 > shared->params.n_max_seq) return false;
 
+    auto& position_ids = worker->position_ids;
     position_ids->ne[0] = 1;
-    ggml_backend_tensor_set_async(backend.get(), position_ids, full_position_ids.get() + kv_cache->cur_len, 0, sizeof(int32_t));
+    ggml_backend_tensor_set_async(worker->backend.get(), position_ids, worker->full_position_ids.get() + kv_cache->cur_len, 0, sizeof(int32_t));
 
+    auto& gf = worker->gf;
+    auto& llm_input = worker->llm_input;
+    auto& llm_probs = worker->llm_probs;
     if (gf && llm_input && llm_probs
         && llm_input->type == type && 1 == llm_input->ne[1]
         && kv_cache->can_reuse(false))
     {
-        ggml_backend_tensor_set_async(backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
+        ggml_backend_tensor_set_async(worker->backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
         kv_cache->shift_kv_node_pos(1);
     }
     else
     {
-        auto ctx0 = this->ctx0.get();
+        auto ctx0 = worker->ctx0.get();
+        auto& llm = cv3_shared->llm;
         ggml_reset(ctx0);
-        ggml_backend_sched_reset(sched.get());
+        ggml_backend_sched_reset(worker->sched.get());
 
         gf = ggml_new_graph(ctx0);
         llm_input = ggml_new_tensor_1d(
@@ -231,34 +242,34 @@ bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
         hidden_states = llm.norm.build_cgraph(ctx0, hidden_states, llm.rms_norm_eps);
 
         auto logits = llm.llm_decoder.build_cgraph(ctx0, hidden_states);
-        auto probs = ggml_soft_max_ext(ctx0, logits, nullptr, 1.f / config.temperature, 0.f);
-        auto top_k = ggml_top_k(ctx0, probs, config.sampling.top_k);
+        auto probs = ggml_soft_max_ext(ctx0, logits, nullptr, 1.f / shared->config.temperature, 0.f);
+        auto top_k = ggml_top_k(ctx0, probs, shared->config.sampling.top_k);
 
         probs = ggml_reshape_2d(ctx0, probs, 1, probs->ne[0]);
         probs = ggml_get_rows(ctx0, probs, top_k);
         top_k = ggml_reshape_2d(ctx0, top_k, 1, top_k->ne[0]);
         top_k->type = GGML_TYPE_F32;
         probs = ggml_concat(ctx0, top_k, probs, 0);
-        this->llm_probs = probs;
+        llm_probs = probs;
 
         ggml_build_forward_expand(gf, probs);
-        set_graph_backend(gf, sched.get(), backend.get());
-        ggml_backend_sched_alloc_graph(sched.get(), gf);
-        ggml_backend_tensor_set_async(backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
+        set_graph_backend(gf, worker->sched.get(), worker->backend.get());
+        ggml_backend_sched_alloc_graph(worker->sched.get(), gf);
+        ggml_backend_tensor_set_async(worker->backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
     }
 
-    status = ggml_backend_sched_graph_compute_async(sched.get(), gf);
-    if (status == GGML_STATUS_SUCCESS)
+    worker->status = ggml_backend_sched_graph_compute_async(worker->sched.get(), gf);
+    if (worker->status == GGML_STATUS_SUCCESS)
     {
-        auto probs = reinterpret_cast<cosyvoice_llm_token_prob_t*>(nucleus_probs.get() + 1);
-        ggml_backend_tensor_get_async(backend.get(), llm_probs, probs, 0, ggml_nbytes(llm_probs));
+        auto probs = reinterpret_cast<cosyvoice_llm_token_prob_t*>(worker->nucleus_probs.get() + 1);
+        ggml_backend_tensor_get_async(worker->backend.get(), llm_probs, probs, 0, ggml_nbytes(llm_probs));
         ggml_backend_tensor_get_async(
-            backend.get(),
+            worker->backend.get(),
             llm_probs->src[1]->src[0]->src[0],
-            this->probs.get(),
+            worker->probs.get(),
             0,
-            sizeof(float) * llm.llm_decoder.weight->ne[1]);
-        ggml_backend_synchronize(backend.get());
+            sizeof(float) * cv3_shared->llm.llm_decoder.weight->ne[1]);
+        ggml_backend_synchronize(worker->backend.get());
         return true;
     }
     return false;
@@ -266,11 +277,11 @@ bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
 
 void cosyvoice_model_3::llm_prepare_probs(bool allow_stop_tokens)
 {
-    GGML_ASSERT(llm_probs);
+    GGML_ASSERT(worker->llm_probs);
 
-    auto probs = reinterpret_cast<cosyvoice_llm_token_prob_t*>(nucleus_probs.get() + 1);
-    int k = config.sampling.top_k;
-    const float top_p = config.sampling.top_p;
+    auto probs = reinterpret_cast<cosyvoice_llm_token_prob_t*>(worker->nucleus_probs.get() + 1);
+    int k = shared->config.sampling.top_k;
+    const float top_p = shared->config.sampling.top_p;
     std::sort(probs, probs + k, [](const cosyvoice_llm_token_prob_t& a, const cosyvoice_llm_token_prob_t& b)
         { return a.prob > b.prob; });
 
@@ -293,9 +304,9 @@ void cosyvoice_model_3::llm_prepare_probs(bool allow_stop_tokens)
 
     if (!allow_stop_tokens)
     {
-        auto raw_probs = this->probs.get();
+        auto raw_probs = worker->probs.get();
         auto vocab_size = static_cast<uint32_t>(get_speech_token_embed_weight()->ne[1]);
-        for (auto token_id : stop_tokens)
+        for (auto token_id : cv3_shared->stop_tokens)
             raw_probs[token_id] = 0;
 
         uint32_t i = 0;

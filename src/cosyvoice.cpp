@@ -132,11 +132,11 @@ cosyvoice_context_t cosyvoice_load_from_file_ext(
     ctx->cosyvoice_model_3::load(loader);
     ctx->cosyvoice_tokenizer::load(loader);
 
-    auto ggml_backend_set_n_threads = reinterpret_cast<ggml_backend_set_n_threads_t>(ggml_backend_reg_get_proc_address(ggml_backend_dev_backend_reg(ggml_backend_get_device(ctx->cpu_backend.get())), "ggml_backend_set_n_threads"));
+    auto ggml_backend_set_n_threads = reinterpret_cast<ggml_backend_set_n_threads_t>(ggml_backend_reg_get_proc_address(ggml_backend_dev_backend_reg(ggml_backend_get_device(ctx->worker->cpu_backend.get())), "ggml_backend_set_n_threads"));
     if (n_threads == 0)
         n_threads = std::thread::hardware_concurrency();
     if (n_threads != 0)
-        ggml_backend_set_n_threads(ctx->cpu_backend.get(), n_threads);
+        ggml_backend_set_n_threads(ctx->worker->cpu_backend.get(), n_threads);
 
     return ctx;
 }
