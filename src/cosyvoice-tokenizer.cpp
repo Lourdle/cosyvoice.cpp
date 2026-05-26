@@ -1,6 +1,5 @@
-#include "cosyvoice-internal.h"
-#include "cosyvoice-loader.h"
 #include "cosyvoice-tokenizer.h"
+#include "cosyvoice-loader.h"
 #include "unicode.h"
 
 #include <format>
@@ -263,7 +262,7 @@ struct cosyvoice_vocab::impl {
 };
 
 cosyvoice_vocab::cosyvoice_vocab() : pimpl_(new impl()) {}
-cosyvoice_vocab::~cosyvoice_vocab() { delete pimpl_; };
+cosyvoice_vocab::~cosyvoice_vocab() { if (get_ref_count() == 1) delete pimpl_; }
 
 void cosyvoice_vocab::impl::partition_special_tokens(std::forward_list<fragment_buffer_variant>& buffer, bool parse_special) const {
     for (const int special_id : cache_special_tokens) {

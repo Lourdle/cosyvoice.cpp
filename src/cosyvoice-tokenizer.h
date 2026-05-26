@@ -1,7 +1,5 @@
 #pragma once
-#include "cosyvoice.h"
-#include "cosyvoice-lowlevel.h"
-#include "cosyvoice-interface.h"
+#include "cosyvoice-internal.h"
 
 #include <string_view>
 #include <string>
@@ -9,9 +7,11 @@
 
 class gguf_metadata_loader;
 
-class cosyvoice_vocab {
+class cosyvoice_vocab : public cosyvoice_object_ref_counter
+{
 public:
     cosyvoice_vocab();
+    cosyvoice_vocab(cosyvoice_vocab&) = default;
     ~cosyvoice_vocab();
 
     void load(gguf_metadata_loader& loader);

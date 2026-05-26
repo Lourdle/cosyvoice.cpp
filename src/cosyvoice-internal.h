@@ -8,9 +8,11 @@
 #include "cosyvoice-lowlevel.h"
 #include "cosyvoice-interface.h"
 
+#include <vector>
 #include <utility>
 #include <memory>
 #include <random>
+#include <atomic>
 
 constexpr int kCosyVoiceGraphSize = GGML_DEFAULT_GRAPH_SIZE + 512;
 constexpr int kCosyVoiceSchedGraphSize = kCosyVoiceGraphSize + 256;
@@ -91,6 +93,18 @@ struct matrix
     size_t stride;
     float* data;
     std::shared_ptr<float[]> orig_data;
+};
+
+class cosyvoice_object_ref_counter
+{
+public:
+    cosyvoice_object_ref_counter() : ref_count(new std::atomic_uint32_t(1)) {}
+    cosyvoice_object_ref_counter(cosyvoice_object_ref_counter& ref_obj) : ref_count(ref_obj.ref_count) { ref_count->fetch_add(1, std::memory_order_relaxed); }
+    ~cosyvoice_object_ref_counter() { if (ref_count->fetch_sub(1, std::memory_order_acq_rel) == 1) delete ref_count; }
+
+    uint32_t get_ref_count() const { return ref_count->load(std::memory_order_relaxed); }
+private:
+    std::atomic_uint32_t* ref_count;
 };
 
 using tokens_t = std::pair<std::shared_ptr<int[]>, uint32_t>;
