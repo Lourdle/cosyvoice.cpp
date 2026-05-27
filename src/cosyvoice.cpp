@@ -153,6 +153,13 @@ cosyvoice_context_t cosyvoice_load_from_file_with_params(const char* filename, c
     return cosyvoice_load_from_file_ext(filename, params, nullptr, 0, 0);
 }
 
+cosyvoice_context_t cosyvoice_duplicate_context(cosyvoice_context_t ctx)
+{
+    if (auto cv3_ctx = dynamic_cast<cosyvoice_context_3*>(ctx); cv3_ctx)
+        return new cosyvoice_context_3(*cv3_ctx);
+    return nullptr;
+}
+
 void cosyvoice_free(cosyvoice_context_t ctx)
 {
     delete static_cast<cosyvoice_internal_context*>(ctx);

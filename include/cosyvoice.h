@@ -217,6 +217,11 @@ COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_with_params(
 );
 
 /**
+ * @brief Duplicate a loaded model context handle.
+ */
+COSYVOICE_API cosyvoice_context_t cosyvoice_duplicate_context(cosyvoice_context_t ctx);
+
+/**
  * @brief Destroy a model context and release all associated resources.
  */
 COSYVOICE_API void                cosyvoice_free(cosyvoice_context_t ctx);
