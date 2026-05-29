@@ -31,6 +31,7 @@ struct server_options
 
     uint32_t max_llm_len = COSYVOICE_DEFAULT_LLM_MAX_SEQ_LEN;
     uint32_t n_threads = 0;
+    uint32_t concurrency = 1;
     bool has_inference_buffer_policy = false;
     cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
 
@@ -89,6 +90,7 @@ static void print_usage(const char* argv0)
     printf("\nRuntime options:\n");
     printf("  --max-llm-len <value>                       Maximum LLM sequence length. Default: " COSYVOICE_DEFAULT_LLM_MAX_SEQ_LEN_STR ".\n");
     printf("  --threads, -j <value>                       CPU thread count. Default: 0 (hardware concurrency).\n");
+    printf("  --concurrency, -c <value>                   Concurrent request slots. Default: 1.\n");
     printf("  --inference-buffer-policy <shared|balanced|dedicated>\n");
     printf("                                              Inference buffer policy. Default: balanced.\n");
     printf("  --llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>\n");
@@ -190,7 +192,7 @@ static std::string derive_served_model_name(const std::string& model_path)
 
 static bool init_model_context(const server_options& options, server_runtime* runtime)
 {
-    cosyvoice_context_params_t context_params;
+    cosyvoice_context_params_v2_cpp context_params;
     cosyvoice_init_default_context_params(&context_params);
     context_params.inference_buffer_policy = options.inference_buffer_policy;
     context_params.n_max_seq = options.max_llm_len;
@@ -198,15 +200,16 @@ static bool init_model_context(const server_options& options, server_runtime* ru
         context_params.llm_kv_cache_type = options.llm_kv_cache_type;
     if (options.has_seed)
         context_params.seed = options.seed;
+    context_params.n_workers = options.concurrency;
 
-    runtime->model_context.reset(cosyvoice_load_from_file_ext(
+    runtime->model_slots.reserve(options.concurrency);
+    runtime->model_slots.emplace_back(cosyvoice_load_from_file_ext(
         options.model.c_str(),
         &context_params,
         nullptr,
-        options.n_threads,
-        0));
+        options.n_threads));
 
-    if (!runtime->model_context)
+    if (!runtime->model_slots.back())
     {
         fprintf(stderr, "Error: failed to load model file \"%s\".\n", options.model.c_str());
         return false;
@@ -215,9 +218,54 @@ static bool init_model_context(const server_options& options, server_runtime* ru
     return true;
 }
 
+static bool init_model_slots(const server_options& options, server_runtime* runtime)
+{
+
+
+    runtime->voice_sessions.reserve(options.concurrency);
+    for (uint32_t i = 0; i != options.concurrency; ++i)
+        runtime->voice_sessions.emplace_back();
+
+    auto build_sessions = [&](cosyvoice_context_t ctx, uint32_t slot_index) -> bool
+    {
+        auto& sessions = runtime->voice_sessions[slot_index];
+        for (const auto& [name, voice] : runtime->voices)
+        {
+            cosyvoice_tts_context_handle session(cosyvoice_tts_context_new(ctx, voice.prompt.get()));
+            if (!session)
+                return false;
+#ifndef COSYVOICE_NO_ICU
+            cosyvoice_tts_context_set_text_normalization_enabled(session.get(), options.text_normalization_enabled);
+#endif
+            cosyvoice_tts_context_set_split_text_enabled(session.get(), options.split_text_enabled);
+            cosyvoice_tts_context_set_fast_split_text_enabled(session.get(), options.fast_split_text_enabled);
+            cosyvoice_tts_context_set_fade_in_enabled(session.get(), options.fade_in_enabled);
+            sessions.emplace_back(name, std::move(session));
+        }
+        return true;
+    };
+
+    if (!build_sessions(runtime->model_slots.front().get(), 0))
+        return false;
+
+    for (uint32_t i = 1; i != options.concurrency; ++i)
+    {
+        auto slot = cosyvoice_duplicate_context(runtime->model_slots.front().get());
+        if (!slot)
+            return false;
+        if (!cosyvoice_set_worker_no(slot, i))
+            return false;
+        runtime->model_slots.emplace_back(slot);
+        if (!build_sessions(slot, i))
+            return false;
+    }
+
+    return true;
+}
+
 static bool apply_generation_defaults(const server_options& options, server_runtime* runtime)
 {
-    cosyvoice_get_generation_config(runtime->model_context.get(), &runtime->default_generation_config);
+    cosyvoice_get_default_generation_config(runtime->model_slots.front().get(), &runtime->default_generation_config);
     if (options.has_temperature)
         runtime->default_generation_config.temperature = options.temperature;
     if (options.has_top_k)
@@ -233,17 +281,16 @@ static bool apply_generation_defaults(const server_options& options, server_runt
     if (options.has_max_token_text_ratio)
         runtime->default_generation_config.max_token_text_ratio = options.max_token_text_ratio;
 
-    if (!cosyvoice_set_generation_config(runtime->model_context.get(), &runtime->default_generation_config))
-    {
-        fprintf(stderr, "Error: invalid server-level sampling defaults.\n");
-        return false;
-    }
-
-    cosyvoice_get_generation_config(runtime->model_context.get(), &runtime->default_generation_config);
+    for (auto& slot : runtime->model_slots)
+        if (!cosyvoice_set_generation_config(slot.get(), &runtime->default_generation_config))
+        {
+            fprintf(stderr, "Error: invalid server-level sampling defaults.\n");
+            return false;
+        }
     return true;
 }
 
-static bool load_voice_runtime(const server_options& options, const voice_prompt_option& mapping, server_runtime* runtime)
+static bool load_voice_runtime(const voice_prompt_option& mapping, server_runtime* runtime)
 {
     voice_runtime voice;
     voice.name = mapping.voice;
@@ -259,26 +306,12 @@ static bool load_voice_runtime(const server_options& options, const voice_prompt
         return false;
     }
 
-    voice.prompt.reset(cosyvoice_prompt_init_from_prompt_speech(runtime->model_context.get(), voice.prompt_speech.get()));
+    voice.prompt.reset(cosyvoice_prompt_init_from_prompt_speech(runtime->model_slots.front().get(), voice.prompt_speech.get()));
     if (!voice.prompt)
     {
         fprintf(stderr, "Error: failed to initialize prompt from prompt_speech for voice \"%s\".\n", mapping.voice.c_str());
         return false;
     }
-
-    voice.tts_context.reset(cosyvoice_tts_context_new(runtime->model_context.get(), voice.prompt.get()));
-    if (!voice.tts_context)
-    {
-        fprintf(stderr, "Error: failed to create TTS context for voice \"%s\".\n", mapping.voice.c_str());
-        return false;
-    }
-
-#ifndef COSYVOICE_NO_ICU
-    cosyvoice_tts_context_set_text_normalization_enabled(voice.tts_context.get(), options.text_normalization_enabled);
-#endif
-    cosyvoice_tts_context_set_split_text_enabled(voice.tts_context.get(), options.split_text_enabled);
-    cosyvoice_tts_context_set_fast_split_text_enabled(voice.tts_context.get(), options.fast_split_text_enabled);
-    cosyvoice_tts_context_set_fade_in_enabled(voice.tts_context.get(), options.fade_in_enabled);
 
     runtime->voice_names.push_back(voice.name);
     runtime->voices.emplace(voice.name, std::move(voice));
@@ -293,6 +326,7 @@ static bool build_runtime(const server_options& options, server_runtime* runtime
     runtime->port = options.port;
     runtime->has_seed = options.has_seed;
     runtime->seed = options.seed;
+    runtime->concurrency = options.concurrency;
     runtime->inference_buffer_policy = options.inference_buffer_policy;
 #ifndef COSYVOICE_NO_ICU
     runtime->text_normalization_enabled = options.text_normalization_enabled;
@@ -316,22 +350,25 @@ static bool build_runtime(const server_options& options, server_runtime* runtime
         runtime->served_model_name = options.served_model_name;
     else
     {
-        auto arch = cosyvoice_get_architecture(runtime->model_context.get());
+        auto arch = cosyvoice_get_architecture(runtime->model_slots.front().get());
         if (!arch || !*arch)
             runtime->served_model_name = derive_served_model_name(options.model);
         else
             runtime->served_model_name = arch;
     }
     
-    runtime->sample_rate = cosyvoice_get_sample_rate(runtime->model_context.get());
+    runtime->sample_rate = cosyvoice_get_sample_rate(runtime->model_slots.front().get());
 
 #ifndef COSYVOICE_NO_AUDIO
     runtime->audio_encoder.reset(cosyvoice_audio_encoder_create(runtime->sample_rate));
 #endif
 
     for (const auto& mapping : options.voice_prompts)
-        if (!load_voice_runtime(options, mapping, runtime))
+        if (!load_voice_runtime(mapping, runtime))
             return false;
+
+    if (!init_model_slots(options, runtime))
+        return false;
 
     return true;
 }
@@ -441,6 +478,17 @@ int tool_entry(int argc, char** argv)
                     return 1;
                 }
                 options.n_threads = n_threads;
+            }
+            else if (str_casecmp(arg, "--concurrency") == 0 || str_casecmp(arg, "-c") == 0)
+            {
+                const auto value = get_arg_value();
+                uint32_t concurrency;
+                if (!parse_uint32_arg(value, &concurrency) || concurrency == 0)
+                {
+                    fprintf(stderr, "Error: invalid --concurrency value \"%s\".\n", value);
+                    return 1;
+                }
+                options.concurrency = concurrency;
             }
             else if (str_casecmp(arg, "--seed") == 0)
             {

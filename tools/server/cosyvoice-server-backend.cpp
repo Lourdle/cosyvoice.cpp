@@ -709,46 +709,26 @@ static bool apply_generation_overrides(
     uint32_t* applied_seed,
     std::string* error_message)
 {
-    bool has_override =
-        request.has_temperature
-        || request.has_top_k
-        || request.has_top_p
-        || request.has_win_size
-        || request.has_tau_r
-        || request.has_min_token_text_ratio
-        || request.has_max_token_text_ratio;
+    cosyvoice_generation_config_t cfg = runtime.default_generation_config;
+    if (request.has_temperature)
+        cfg.temperature = request.temperature;
+    if (request.has_top_k)
+        cfg.sampling.top_k = request.top_k;
+    if (request.has_top_p)
+        cfg.sampling.top_p = request.top_p;
+    if (request.has_win_size)
+        cfg.sampling.win_size = request.win_size;
+    if (request.has_tau_r)
+        cfg.sampling.tau_r = request.tau_r;
+    if (request.has_min_token_text_ratio)
+        cfg.min_token_text_ratio = request.min_token_text_ratio;
+    if (request.has_max_token_text_ratio)
+        cfg.max_token_text_ratio = request.max_token_text_ratio;
 
-    // Only touch the generation config when the caller actually overrides
-    // something. cosyvoice_model::set_generation_config reallocates the
-    // nucleus_probs buffer and re-installs sampling state on every call;
-    // doing that between identical requests perturbs the sampler enough to
-    // tank throughput (measured ~3x slower than a fresh CLI invocation on
-    // the same input). The startup default was already installed once when
-    // the runtime was set up, so the no-override path needs no further
-    // configuration here.
-    if (has_override)
+    if (!cosyvoice_set_generation_config(model_ctx, &cfg))
     {
-        cosyvoice_generation_config_t cfg = runtime.default_generation_config;
-        if (request.has_temperature)
-            cfg.temperature = request.temperature;
-        if (request.has_top_k)
-            cfg.sampling.top_k = request.top_k;
-        if (request.has_top_p)
-            cfg.sampling.top_p = request.top_p;
-        if (request.has_win_size)
-            cfg.sampling.win_size = request.win_size;
-        if (request.has_tau_r)
-            cfg.sampling.tau_r = request.tau_r;
-        if (request.has_min_token_text_ratio)
-            cfg.min_token_text_ratio = request.min_token_text_ratio;
-        if (request.has_max_token_text_ratio)
-            cfg.max_token_text_ratio = request.max_token_text_ratio;
-
-        if (!cosyvoice_set_generation_config(model_ctx, &cfg))
-        {
-            *error_message = "Invalid generation parameter values.";
-            return false;
-        }
+        *error_message = "Invalid generation parameter values.";
+        return false;
     }
 
     // The sampler seed must vary across requests when the caller didn't pin
@@ -889,6 +869,9 @@ static void log_request_done(
 int cosyvoice_server_backend_run(server_runtime& runtime)
 {
     httplib::Server server;
+    server.new_task_queue = [&runtime]() {
+        return new httplib::ThreadPool(runtime.concurrency, runtime.concurrency);
+    };
 
     server.set_exception_handler([&](const httplib::Request& req, httplib::Response& res, std::exception_ptr ep)
     {
@@ -1039,40 +1022,54 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
             return;
         }
 
+        const uint32_t slot = get_or_assign_thread_slot(runtime);
+        if (slot >= runtime.concurrency)
+        {
+            set_openai_error(res, 503, "Server is overloaded.", "server_error", nullptr, "server_overloaded");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, 0, res.body.size(), "server_overloaded");
+            return;
+        }
+
+        auto model_ctx = get_slot_model_context(runtime, slot);
+        auto voice_ctx = get_slot_voice_session(runtime, slot, request.voice);
+        if (!voice_ctx)
+        {
+            set_openai_error(res, 400, "Unknown voice for current slot.", "invalid_request_error", "voice", "invalid_voice");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "voice_mismatch");
+            return;
+        }
+
         cosyvoice_generated_speech generated = {};
         std::string payload;
         std::string encoding_error;
         std::string generation_error;
         uint32_t applied_seed = 0;
 
+        if (!apply_generation_overrides(request, runtime, model_ctx, &applied_seed, &generation_error))
         {
-            std::lock_guard<std::mutex> lock(runtime.infer_mutex);
-            if (!apply_generation_overrides(request, runtime, runtime.model_context.get(), &applied_seed, &generation_error))
-            {
-                set_openai_error(res, 400, generation_error, "invalid_request_error", nullptr, "invalid_generation_params");
-                log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "generation_override");
-                return;
-            }
+            set_openai_error(res, 400, generation_error, "invalid_request_error", nullptr, "invalid_generation_params");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "generation_override");
+            return;
+        }
 
-            bool ok = false;
-            if (request.has_instructions)
-                ok = cosyvoice_tts_instruct(voice_it->second.tts_context.get(), request.input.c_str(), request.instructions.c_str(), request.speed, &generated);
-            else
-                ok = cosyvoice_tts_zero_shot(voice_it->second.tts_context.get(), request.input.c_str(), request.speed, &generated);
+        bool ok = false;
+        if (request.has_instructions)
+            ok = cosyvoice_tts_instruct(voice_ctx, request.input.c_str(), request.instructions.c_str(), request.speed, &generated);
+        else
+            ok = cosyvoice_tts_zero_shot(voice_ctx, request.input.c_str(), request.speed, &generated);
 
-            if (!ok || !generated.data || generated.length == 0)
-            {
-                set_openai_error(res, 500, "TTS generation failed.", "server_error", nullptr, "generation_failed");
-                log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "generation_failed");
-                return;
-            }
+        if (!ok || !generated.data || generated.length == 0)
+        {
+            set_openai_error(res, 500, "TTS generation failed.", "server_error", nullptr, "generation_failed");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "generation_failed");
+            return;
+        }
 
-            if (!build_audio_payload(format, generated, runtime, &payload, &encoding_error))
-            {
-                set_openai_error(res, 500, encoding_error, "server_error", nullptr, "audio_encode_failed");
-                log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "audio_encode_failed");
-                return;
-            }
+        if (!build_audio_payload(format, generated, runtime, &payload, &encoding_error))
+        {
+            set_openai_error(res, 500, encoding_error, "server_error", nullptr, "audio_encode_failed");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "audio_encode_failed");
+            return;
         }
 
         res.status = 200;
@@ -1098,6 +1095,7 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
     print_info_log(runtime.log_level, "  served_model_name  : %s\n", runtime.served_model_name.c_str());
     print_info_log(runtime.log_level, "  bind               : %s:%u\n", runtime.host.c_str(), static_cast<unsigned>(runtime.port));
     print_info_log(runtime.log_level, "  sample_rate        : %u\n", runtime.sample_rate);
+    print_info_log(runtime.log_level, "  concurrency        : %u\n", runtime.concurrency);
     print_info_log(runtime.log_level, "  api_key_required   : %s\n", runtime.api_key.empty() ? "no" : "yes");
     print_info_log(runtime.log_level, "  voices             : %s\n", join_voice_names(runtime.voice_names).c_str());
     print_info_log(runtime.log_level, "  buffer_policy      : %s\n", inference_buffer_policy_to_string(runtime.inference_buffer_policy));
