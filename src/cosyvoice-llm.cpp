@@ -242,8 +242,8 @@ bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
         hidden_states = llm.norm.build_cgraph(ctx0, hidden_states, llm.rms_norm_eps);
 
         auto logits = llm.llm_decoder.build_cgraph(ctx0, hidden_states);
-        auto probs = ggml_soft_max_ext(ctx0, logits, nullptr, 1.f / shared->config.temperature, 0.f);
-        auto top_k = ggml_top_k(ctx0, probs, shared->config.sampling.top_k);
+        auto probs = ggml_soft_max_ext(ctx0, logits, nullptr, 1.f / worker->config.temperature, 0.f);
+        auto top_k = ggml_top_k(ctx0, probs, worker->config.sampling.top_k);
 
         probs = ggml_reshape_2d(ctx0, probs, 1, probs->ne[0]);
         probs = ggml_get_rows(ctx0, probs, top_k);
@@ -280,8 +280,8 @@ void cosyvoice_model_3::llm_prepare_probs(bool allow_stop_tokens)
     GGML_ASSERT(worker->llm_probs);
 
     auto probs = reinterpret_cast<cosyvoice_llm_token_prob_t*>(worker->nucleus_probs.get() + 1);
-    int k = shared->config.sampling.top_k;
-    const float top_p = shared->config.sampling.top_p;
+    int k = worker->config.sampling.top_k;
+    const float top_p = worker->config.sampling.top_p;
     std::sort(probs, probs + k, [](const cosyvoice_llm_token_prob_t& a, const cosyvoice_llm_token_prob_t& b)
         { return a.prob > b.prob; });
 
@@ -358,10 +358,11 @@ int cosyvoice_llm_sampler(
     const cosyvoice_sampling_params_t* sampling_params,
     int* accepted_tokens,
     uint32_t n_accepted_tokens,
-    std::mt19937* rng)
+    cosyvoice_worker_context* workers,
+    uint32_t worker_no)
 {
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-    float fallback_random = dist(*rng);
+    float fallback_random = dist(workers[worker_no].sampler_rng);
     float nucleus_random = fallback_random;
     for (int i = 0; i != k; ++i)
     {

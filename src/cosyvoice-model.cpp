@@ -3,6 +3,43 @@
 
 #include <cstring>
 #include <span>
+#include <mutex>
+
+static float* cosyvoice_default_noise_callback(
+    cosyvoice_noise_callback_stage_t stage,
+    uint32_t                         length,
+    float* noise,
+    cosyvoice_model_shared* shared
+)
+{
+    switch (stage)
+    {
+    case COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_FLOW:
+    case COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_HIFT:
+    {
+        std::shared_lock read_lock(shared->noise_mutex);
+        if (length <= shared->rand_noise_len && shared->rand_noise)
+            return shared->rand_noise.get();
+    }
+    {
+        std::unique_lock write_lock(shared->noise_mutex);
+        if (length > shared->rand_noise_len)
+        {
+            std::unique_ptr<float[]> new_noise(new float[length]);
+            if (shared->rand_noise)
+                memcpy(new_noise.get(), shared->rand_noise.get(), shared->rand_noise_len * sizeof(float));
+
+            std::normal_distribution<float> dist(0.0f, 1.0f);
+            for (auto& i : std::span(new_noise.get() + shared->rand_noise_len, length - shared->rand_noise_len))
+                i = dist(shared->noise_rng);
+            shared->rand_noise.swap(new_noise);
+            shared->rand_noise_len = length;
+        }
+        return shared->rand_noise.get();
+    }
+    }
+    return nullptr;
+}
 
 void cosyvoice_init_default_context_params(cosyvoice_context_params_t* params)
 {
@@ -23,27 +60,55 @@ void cosyvoice_init_default_context_params(cosyvoice_context_params_t* params)
     params->sampler_ctx = nullptr;
 }
 
-cosyvoice_model_shared::cosyvoice_model_shared(const cosyvoice_context_params_t& params)
-    : params(params), ctx(nullptr) {}
+cosyvoice_model_shared::cosyvoice_model_shared(const cosyvoice_context_params_v2_cpp& params)
+    : params(params), ctx(nullptr), rand_noise_len(0), noise_callback(nullptr), noise_callback_ctx(nullptr) {}
 
 cosyvoice_worker_context::cosyvoice_worker_context(ggml_backend_t backend)
     : backend(backend), cpu_backend(backend),
     ctx0(ggml_init(ggml_init_params{ .mem_size = ggml_graph_overhead() * kCosyVoiceGraphSize, .no_alloc = true })),
     gf(nullptr), llm_input(nullptr), llm_probs(nullptr), position_ids(nullptr), causal_mask(nullptr), kv_cache(),
-    status(GGML_STATUS_SUCCESS), prompt_crc32(0), rand_noise_len(0) {}
+    status(GGML_STATUS_SUCCESS), prompt_crc32(0), sampler_seed(0), sampler(nullptr), sampler_ctx(nullptr), builtin_sampler_rng_policy(COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION) {}
 
-cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_t& params)
-    : shared(new cosyvoice_model_shared(params)), worker(new cosyvoice_worker_context(backend))
+cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_v2_cpp& params)
+    : shared(new cosyvoice_model_shared(params)), workers(reinterpret_cast<cosyvoice_worker_context*>(malloc(sizeof(cosyvoice_worker_context) * params.n_workers)))
 {
-    if (GGML_BACKEND_DEVICE_TYPE_CPU != ggml_backend_dev_type(ggml_backend_get_device(backend)))
+    auto dev = ggml_backend_get_device(backend);
+    bool dev_is_cpu = ggml_backend_dev_type(dev) == GGML_BACKEND_DEVICE_TYPE_CPU;
+
+    shared->noise_rng.seed(shared->params.seed);
+    shared->noise_callback = reinterpret_cast<cosyvoice_noise_callback_t>(cosyvoice_default_noise_callback);
+    shared->noise_callback_ctx = shared;
+
+    auto init_worker = [&](cosyvoice_worker_context* cur)
     {
-        worker->cpu_backend.release();
-        worker->cpu_backend.reset(ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr));
+        worker = new (cur) cosyvoice_worker_context(backend);
+        if (!dev_is_cpu)
+        {
+            worker->cpu_backend.release();
+            worker->cpu_backend.reset(ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr));
+        }
+        empty_buffer_cache();
+        worker->config.temperature = 1.f;
+        worker->config.max_token_text_ratio = 20.f;
+        worker->config.min_token_text_ratio = 2.f;
+        worker->builtin_sampler_rng_policy = shared->params.builtin_sampler_rng_policy;
+        worker->sampler_seed = shared->noise_rng();
+        worker->sampler_rng.seed(worker->sampler_seed);
+        worker->sampler = reinterpret_cast<cosyvoice_sampler_t>(cosyvoice_llm_sampler);
+        worker->sampler_ctx = workers;
+    };
+
+    init_worker(workers);
+    for (size_t i = 1; i != params.n_workers; ++i)
+    {
+        backend = ggml_backend_dev_init(dev, nullptr);
+        init_worker(workers + i);
     }
 
-    empty_buffer_cache();
     set_sampler(params.sampler, params.sampler_ctx);
-    set_noise_callback(nullptr, nullptr);
+    worker->config.temperature = 1.f;
+    worker->config.max_token_text_ratio = 20.f;
+    worker->config.min_token_text_ratio = 2.f;
 
     auto ctx0 = worker->ctx0.get();
     auto& op_caps = shared->op_caps;
@@ -75,19 +140,20 @@ cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context
         a = ggml_im2col(ctx0, w, a, 1, 0, 0, 0, 1, 0, false, GGML_TYPE_F16);
         op_caps.im2col_f16 = ggml_backend_supports_op(backend, a);
     }
+
+    worker = workers;
 }
 
 bool cosyvoice_model::using_builtin_sampler() const
 {
-    return shared->params.sampler == reinterpret_cast<cosyvoice_sampler_t>(cosyvoice_llm_sampler);
+    return worker->sampler == reinterpret_cast<cosyvoice_sampler_t>(cosyvoice_llm_sampler);
 }
 
 bool cosyvoice_model::reset_builtin_sampler_rng()
 {
     if (using_builtin_sampler())
     {
-        worker->sampler_rng.seed(shared->params.seed);
-        worker->noise_rng.seed(worker->sampler_rng());
+        worker->sampler_rng.seed(worker->sampler_seed);
         return true;
     }
     return false;
@@ -95,13 +161,18 @@ bool cosyvoice_model::reset_builtin_sampler_rng()
 
 cosyvoice_builtin_sampler_rng_policy_t cosyvoice_model::get_builtin_sampler_rng_policy()
 {
-    return shared->params.builtin_sampler_rng_policy;
+    return worker->builtin_sampler_rng_policy;
 }
 
 bool cosyvoice_model::set_sampler_seed(uint32_t seed)
 {
-    shared->params.seed = seed;
+    worker->sampler_seed = seed;
     return reset_builtin_sampler_rng();
+}
+
+uint32_t cosyvoice_model::get_sampler_seed()
+{
+    return worker->sampler_seed;
 }
 
 bool cosyvoice_model::set_builtin_sampler_rng_policy(cosyvoice_builtin_sampler_rng_policy_t policy)
@@ -111,7 +182,7 @@ bool cosyvoice_model::set_builtin_sampler_rng_policy(cosyvoice_builtin_sampler_r
         {
         case COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION:
         case COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_CONTINUE_ACROSS_SESSIONS:
-            shared->params.builtin_sampler_rng_policy = policy;
+            worker->builtin_sampler_rng_policy = policy;
             return true;
         }
     return false;
@@ -121,18 +192,25 @@ cosyvoice_model::~cosyvoice_model()
 {
     if (get_ref_count() == 1)
     {
-        if (worker->backend == worker->cpu_backend)
-            worker->cpu_backend.release();
-
-        switch (shared->params.inference_buffer_policy)
+        for (uint32_t i = 0; i != shared->params.n_workers; ++i)
         {
-        case COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED:
-        case COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED:
-            worker->kv_buffer.release();
+            auto worker = workers + i;
+
+            if (worker->backend == worker->cpu_backend)
+                worker->cpu_backend.release();
+
+            switch (shared->params.inference_buffer_policy)
+            {
+            case COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED:
+            case COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED:
+                worker->kv_buffer.release();
+            }
+
+            worker->~cosyvoice_worker_context();
         }
 
         delete shared;
-        delete worker;
+        free(workers);
     }
 }
 
@@ -148,8 +226,11 @@ void cosyvoice_model::empty_buffer_cache()
         true
     ));
 
-    worker->rand_noise.reset();
-    worker->rand_noise_len = 0;
+    {
+        std::unique_lock lock(shared->noise_mutex);
+        shared->rand_noise.reset();
+        shared->rand_noise_len = 0;
+    }
 
     worker->kv_cache.clear_offloaded_cache();
 }
@@ -194,9 +275,26 @@ void cosyvoice_model_3::get_memory_usage(cosyvoice_memory_usage_t* usage)
     usage->buffers = ggml_backend_sched_get_buffer_size(worker->sched.get(), worker->backend.get());
     usage->cpu_buffers = ggml_backend_sched_get_buffer_size(worker->sched.get(), worker->cpu_backend.get());
     usage->offloaded_kv_cache = worker->kv_cache.get_offloaded_cache_size();
-    usage->random_noise = sizeof(float) * worker->rand_noise_len;
+    usage->random_noise = sizeof(float) * shared->rand_noise_len;
     usage->kv_cache = worker->kv_buffer.get() ? ggml_backend_buffer_get_size(worker->kv_buffer.get()) : 0;
     usage->token2wav = cv3_worker->token2wav_buffer.get() ? ggml_backend_buffer_get_size(cv3_worker->token2wav_buffer.get()) : 0;
+}
+
+void cosyvoice_model_3::get_total_memory_usage(cosyvoice_memory_usage_t* usage)
+{
+    usage->parameters = ggml_backend_buffer_get_size(shared->buffer.get());
+    for (uint32_t i = 0; i != shared->params.n_workers; ++i)
+    {
+        auto worker = workers + i;
+        auto cv3_worker = cv3_workers + i;
+
+        usage->buffers = ggml_backend_sched_get_buffer_size(worker->sched.get(), worker->backend.get());
+        usage->cpu_buffers = ggml_backend_sched_get_buffer_size(worker->sched.get(), worker->cpu_backend.get());
+        usage->offloaded_kv_cache = worker->kv_cache.get_offloaded_cache_size();
+        usage->random_noise = sizeof(float) * shared->rand_noise_len;
+        usage->kv_cache = worker->kv_buffer.get() ? ggml_backend_buffer_get_size(worker->kv_buffer.get()) : 0;
+        usage->token2wav = cv3_worker->token2wav_buffer.get() ? ggml_backend_buffer_get_size(cv3_worker->token2wav_buffer.get()) : 0;
+    }
 }
 
 void cosyvoice_model_3::reset_shared_buffer(ggml_backend_buffer* new_buffer)
@@ -213,15 +311,18 @@ void cosyvoice_model_3::reset_shared_buffer(ggml_backend_buffer* new_buffer)
 cosyvoice_3_worker_context::cosyvoice_3_worker_context() :
     ctx1(ggml_init(ggml_init_params{ .mem_size = ggml_tensor_overhead() * 4, .no_alloc = true })) {}
 
-cosyvoice_model_3::cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_context_params_t& params)
-    : cosyvoice_model(backend, params), cv3_shared(new cosyvoice_model_3_shared), cv3_worker(new cosyvoice_3_worker_context()) {}
+cosyvoice_model_3::cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_context_params_v2_cpp& params)
+    : cosyvoice_model(backend, params), cv3_shared(new cosyvoice_model_3_shared), cv3_workers(new cosyvoice_3_worker_context[params.n_workers]())
+{
+    cv3_worker = cv3_workers;
+}
 
 cosyvoice_model_3::~cosyvoice_model_3()
 {
     if (get_ref_count() == 1)
     {
         delete cv3_shared;
-        delete cv3_worker;
+        delete[] cv3_workers;
     }
 }
 
@@ -260,9 +361,14 @@ uint32_t cosyvoice_model_3::get_sample_rate()
     return cv3_shared->hift.sampling_rate;
 }
 
-void cosyvoice_model::get_generation_config(cosyvoice_generation_config_t* config)
+void cosyvoice_model::get_default_generation_config(cosyvoice_generation_config_t* config)
 {
     *config = shared->config;
+}
+
+void cosyvoice_model::get_generation_config(cosyvoice_generation_config_t* config)
+{
+    *config = worker->config;
 }
 
 bool cosyvoice_model::set_generation_config(const cosyvoice_generation_config_t* config)
@@ -281,7 +387,7 @@ bool cosyvoice_model::set_generation_config(const cosyvoice_generation_config_t*
         || config->sampling.tau_r < 0.f)
         return false;
 
-    shared->config = *config;
+    worker->config = *config;
     worker->nucleus_probs.reset(new float[config->sampling.top_k * 2 + 1]);
     return true;
 }
@@ -294,6 +400,8 @@ const char* cosyvoice_model::get_instruction_prefix()
 void cosyvoice_model::get_context_params(cosyvoice_context_params_t* params)
 {
     *params = shared->params;
+    params->seed = worker->sampler_seed;
+    params->builtin_sampler_rng_policy = worker->builtin_sampler_rng_policy;
     get_sampler(&params->sampler, &params->sampler_ctx);
 }
 
@@ -322,83 +430,60 @@ void cosyvoice_model::set_sampler(cosyvoice_sampler_t sampler, void* sampler_ctx
     {
         shared->params.sampler = sampler;
         shared->params.sampler_ctx = sampler_ctx;
-
     }
     else
     {
         shared->params.sampler = reinterpret_cast<cosyvoice_sampler_t>(cosyvoice_llm_sampler);
-        shared->params.sampler_ctx = &worker->sampler_rng;
+        shared->params.sampler_ctx = workers;
         reset_builtin_sampler_rng();
     }
-}
-
-static float* cosyvoice_default_noise_callback(
-    cosyvoice_noise_callback_stage_t stage,
-    uint32_t                         length,
-    float*                           noise,
-    cosyvoice_worker_context*        worker
-)
-{
-    switch (stage)
-    {
-    case COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_FLOW:
-    case COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_HIFT:
-        if (length > worker->rand_noise_len)
-        {
-            auto new_noise = std::make_unique<float[]>(length);
-            memcpy(new_noise.get(), worker->rand_noise.get(), worker->rand_noise_len * sizeof(float));
-
-            std::normal_distribution<float> dist(0.0f, 1.0f);
-            for (auto& i : std::span(new_noise.get() + worker->rand_noise_len, length - worker->rand_noise_len))
-                i = dist(worker->noise_rng);
-            new_noise.swap(worker->rand_noise);
-            worker->rand_noise_len = length;
-        }
-        return worker->rand_noise.get();
-    }
-    return nullptr;
 }
 
 void cosyvoice_model::set_noise_callback(cosyvoice_noise_callback_t callback, void* callback_ctx)
 {
     if (callback)
     {
-        worker->noise_callback = callback;
-        worker->noise_callback_ctx = callback_ctx;
+        std::unique_lock lock(shared->noise_mutex);
+        shared->noise_callback = callback;
+        shared->noise_callback_ctx = callback_ctx;
     }
     else
     {
-        worker->noise_callback = reinterpret_cast<cosyvoice_noise_callback_t>(cosyvoice_default_noise_callback);
-        worker->noise_callback_ctx = worker;
+        std::unique_lock lock(shared->noise_mutex);
+        shared->noise_callback = reinterpret_cast<cosyvoice_noise_callback_t>(cosyvoice_default_noise_callback);
+        shared->noise_callback_ctx = shared;
     }
 }
 
 void cosyvoice_model::get_noise_callback(cosyvoice_noise_callback_t* callback, void** callback_ctx)
 {
-    if (worker->noise_callback == reinterpret_cast<cosyvoice_noise_callback_t>(cosyvoice_default_noise_callback))
+    std::shared_lock lock(shared->noise_mutex);
+    if (shared->noise_callback == reinterpret_cast<cosyvoice_noise_callback_t>(cosyvoice_default_noise_callback))
     {
         *callback = nullptr;
         *callback_ctx = nullptr;
     }
     else
     {
-        *callback = worker->noise_callback;
-        *callback_ctx = worker->noise_callback_ctx;
+        *callback = shared->noise_callback;
+        *callback_ctx = shared->noise_callback_ctx;
     }
 }
+
 
 int cosyvoice_model::llm_sample_token()
 {
     GGML_ASSERT(worker->llm_probs);
-    return shared->params.sampler(
+    return shared->params.sampler_ext(
         reinterpret_cast<cosyvoice_llm_token_prob_t*>(worker->nucleus_probs.get() + 1),
         *reinterpret_cast<int*>(worker->nucleus_probs.get()),
         worker->probs.get(),
         static_cast<uint32_t>(get_speech_token_embed_weight()->ne[1]),
-        &shared->config.sampling,
+        &worker->config.sampling,
         worker->tokens.data(),
         static_cast<uint32_t>(worker->tokens.size()),
-        shared->params.sampler_ctx);
+        shared->params.sampler_ctx,
+        static_cast<uint32_t>(worker - workers));
 }
 
 void cosyvoice_model::llm_accept_token(int token)
@@ -424,6 +509,16 @@ const int* cosyvoice_model::llm_get_accepted_tokens()
 ggml_status cosyvoice_model::get_last_status()
 {
     return worker->status;
+}
+
+uint32_t cosyvoice_model::get_worker_no()
+{
+    return static_cast<uint32_t>(worker - workers);
+}
+
+uint32_t cosyvoice_model::get_n_workers()
+{
+    return shared->params.n_workers;
 }
 
 uint32_t cosyvoice_model::llm_get_kv_cache_len()

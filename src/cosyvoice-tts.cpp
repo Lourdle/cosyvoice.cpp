@@ -130,8 +130,8 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
         if (offset != 0 && !llm_prefill(speech_type, batch_buffer.get(), offset))
             throw std::runtime_error("Failed to prefill LLM KV cache.\n");
 
-        const auto min_len = static_cast<uint32_t>(text_len * shared->config.min_token_text_ratio);
-        const auto max_len = static_cast<uint32_t>(text_len * shared->config.max_token_text_ratio);
+        const auto min_len = static_cast<uint32_t>(text_len * worker->config.min_token_text_ratio);
+        const auto max_len = static_cast<uint32_t>(text_len * worker->config.max_token_text_ratio);
         llm_clear_accepted_tokens();
         for (uint32_t n = 0; n != max_len; ++n)
         {
@@ -273,7 +273,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
     } while (false);
 
     uint32_t noise_len = static_cast<uint32_t>(ggml_nelements(ditctx.x));
-    float* noise_buffer = worker->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_FLOW, noise_len, nullptr, worker->noise_callback_ctx);
+    float* noise_buffer = shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_FLOW, noise_len, nullptr, shared->noise_callback_ctx);
     ggml_backend_tensor_set_async(backend.get(), ditctx.x, noise_buffer, 0, ggml_nbytes(ditctx.x));
 
     ggml_tensor* t_leaf;
@@ -297,7 +297,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
     ggml_backend_tensor_set_async(backend.get(), embedding, prompt->flow_embedding.data, 0, embedding->nb[2]);
 
     worker->status = ggml_backend_sched_graph_compute(sched.get(), gf);
-    worker->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_FLOW, noise_len, noise_buffer, worker->noise_callback_ctx);
+    shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_FLOW, noise_len, noise_buffer, shared->noise_callback_ctx);
     if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED)
         llm_set_kv_cache_len(0); // Reset the visible KV length when sharing the buffer.
     if (worker->status != GGML_STATUS_SUCCESS)
@@ -393,13 +393,13 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
             node->op = GGML_OP_NONE;
 
     noise_len = static_cast<uint32_t>(ggml_nelements(noise));
-    noise_buffer = worker->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_HIFT, noise_len, nullptr, worker->noise_callback_ctx);
+    noise_buffer = shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_HIFT, noise_len, nullptr, shared->noise_callback_ctx);
     ggml_backend_tensor_set_async(backend.get(), noise, noise_buffer, 0, noise->nb[2]);
 
     result->data = reinterpret_cast<float*>(generated_speech->data);
     result->length = static_cast<uint32_t>(generated_speech->ne[0]);
     worker->status = ggml_backend_sched_graph_compute(sched.get(), gf);
-    worker->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_HIFT, noise_len, noise_buffer, worker->noise_callback_ctx);
+    shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_HIFT, noise_len, noise_buffer, shared->noise_callback_ctx);
     if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
     {
         ggml_backend_sched_reset(sched.get());

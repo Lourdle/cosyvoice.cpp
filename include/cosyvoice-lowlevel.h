@@ -65,6 +65,13 @@ typedef float* (*cosyvoice_noise_callback_t)(
 );
 
 // ----------------------------------------------------------------------------
+// Context Parameters Versioning
+// ----------------------------------------------------------------------------
+
+#define COSYVOICE_CONTEXT_PARAMS_VERSION     (0ul)
+#define COSYVOICE_CONTEXT_PARAMS_V2_VERSION  (1ul)
+
+// ----------------------------------------------------------------------------
 // Logging Utilities
 // ----------------------------------------------------------------------------
 
@@ -93,8 +100,47 @@ COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_ext(
     const cosyvoice_context_params_t* params,
     ggml_backend_t                    backend,
     uint32_t                          n_threads,
-    uint32_t                          reserved
+    uint32_t                          params_version
 );
+
+#ifdef __cplusplus
+}
+
+namespace cosyvoice::internal_utils
+{
+template<typename T, typename U>
+struct _is_same { static constexpr bool value = false; };
+template<typename T>
+struct _is_same<T, T> { static constexpr bool value = true; };
+}
+
+/**
+ * @brief C++ wrapper for `cosyvoice_load_from_file_ext` that deduces the context parameter version from the type of `params`.
+ * @note This overload is only available in C++ and requires the full definition of all context parameter types.
+ */
+template<typename params_t>
+inline cosyvoice_context_t cosyvoice_load_from_file_ext(
+    const char*                       filename,
+    const params_t*                   params,
+    ggml_backend_t                    backend,
+    uint32_t                          n_threads
+)
+{
+    using namespace cosyvoice::internal_utils;
+
+    if constexpr (_is_same<params_t, cosyvoice_context_params_t>::value)
+        return cosyvoice_load_from_file_ext(filename, params, backend, n_threads, COSYVOICE_CONTEXT_PARAMS_VERSION);
+    else if constexpr (_is_same<params_t, cosyvoice_context_params_v2_t>::value)
+        return cosyvoice_load_from_file_ext(filename, &params->base_params, backend, n_threads, COSYVOICE_CONTEXT_PARAMS_V2_VERSION);
+    else
+    {
+        static_assert(_is_same<params_t, cosyvoice_context_params_v2_cpp>::value, "Unsupported context parameter type");
+        return cosyvoice_load_from_file_ext(filename, params, backend, n_threads, COSYVOICE_CONTEXT_PARAMS_V2_VERSION);
+    }
+}
+
+extern "C" {
+#endif
 
 /**
  * @brief Get the status code of the last backend operation.
@@ -293,26 +339,26 @@ COSYVOICE_API uint32_t cosyvoice_tokenize_ext(
 );
 
 // ----------------------------------------------------------------------------
-// Noise Management
+// Shared Noise Management
 // ----------------------------------------------------------------------------
 
 /**
- * @brief Register a callback for inspecting or overriding random-noise buffers.
+ * @brief Register a shared callback for inspecting or overriding random-noise buffers.
  */
 COSYVOICE_API void     cosyvoice_set_noise_callback(cosyvoice_context_t ctx, cosyvoice_noise_callback_t callback, void* callback_ctx);
 
 /**
- * @brief Get the currently registered noise callback and its context.
+ * @brief Get the currently registered shared noise callback and its context.
  */
 COSYVOICE_API void     cosyvoice_get_noise_callback(cosyvoice_context_t ctx, cosyvoice_noise_callback_t* callback, void** callback_ctx);
 
 /**
- * @brief Get the required length of the HiFT initialization noise buffer.
+ * @brief Get the required length of the shared HiFT initialization-noise buffer.
  */
 COSYVOICE_API uint32_t cosyvoice_get_hift_rand_ini_len(cosyvoice_context_t ctx);
 
 /**
- * @brief Override the HiFT initialization noise buffer.
+ * @brief Override the shared HiFT initialization-noise buffer.
  */
 COSYVOICE_API void     cosyvoice_set_hift_rand_ini(cosyvoice_context_t ctx, const float* data);
 

@@ -11,7 +11,7 @@
 #include <vector>
 #include <utility>
 #include <memory>
-#include <random>
+#include <string>
 #include <atomic>
 
 constexpr int kCosyVoiceGraphSize = GGML_DEFAULT_GRAPH_SIZE + 512;
@@ -151,6 +151,8 @@ bool cosyvoice_frontend_util_text_normalize(
     const char* locale
 );
 
+struct cosyvoice_worker_context;
+
 int cosyvoice_llm_sampler(
     cosyvoice_llm_token_prob_t* nucleus_probs,
     int k,
@@ -159,7 +161,8 @@ int cosyvoice_llm_sampler(
     const cosyvoice_sampling_params_t* sampling_params,
     int* accepted_tokens,
     uint32_t n_accepted_tokens,
-    std::mt19937* rng
+    cosyvoice_worker_context* workers,
+    uint32_t worker_no
 );
 
 void cosyvoice_call_ggml_log_callback(

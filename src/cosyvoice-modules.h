@@ -3,7 +3,6 @@
 #include "cosyvoice-internal.h"
 #include "ggml-fft.h"
 
-#include <functional>
 #include <array>
 #include <memory>
 #include <vector>
@@ -408,8 +407,6 @@ struct CosyVoice3LM : Module
     std::vector<Qwen2DecoderLayer> layers;
     Qwen2RMSNorm norm;
     Linear llm_decoder;
-
-    ggml_tensor* position_ids;
 
     int num_attention_heads;
     int num_key_value_heads;

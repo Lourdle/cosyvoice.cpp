@@ -19,6 +19,7 @@ uint32_t cosyvoice_generate_random_seed()
 }
 
 #ifdef _WIN32
+    #define NOMINMAX
     #include <Windows.h>
 
 static void debug_output(const char* text)
@@ -52,7 +53,7 @@ struct cosyvoice_internal_context : cosyvoice_context
 
 struct cosyvoice_context_3 : cosyvoice_internal_context, cosyvoice_tokenizer, cosyvoice_model_3
 {
-    cosyvoice_context_3(const cosyvoice_context_params_t& params, ggml_backend_t backend) :
+    cosyvoice_context_3(const cosyvoice_context_params_v2_cpp& params, ggml_backend_t backend) :
         cosyvoice_model_3(backend, params) {}
 };
 
@@ -117,12 +118,18 @@ cosyvoice_context_t cosyvoice_load_from_file_ext(
     const cosyvoice_context_params_t* params,
     ggml_backend_t backend,
     uint32_t n_threads,
-    uint32_t reserved)
+    uint32_t version)
 {
     gguf_loader loader(filename);
     if (!loader) return nullptr;
 
-    auto ctx = new cosyvoice_context_3(*params,
+    cosyvoice_context_params_v2_t params_v2{ .base_params = *params };
+    if (version == COSYVOICE_CONTEXT_PARAMS_V2_VERSION)
+        params_v2.n_workers = std::max(1u, reinterpret_cast<const cosyvoice_context_params_v2_t*>(params)->n_workers);
+    else
+        params_v2.n_workers = 1;
+
+    auto ctx = new cosyvoice_context_3(reinterpret_cast<const cosyvoice_context_params_v2_cpp&>(params_v2),
 #ifndef GGML_SHARED
         ggml_backend_init_best()
 #else
@@ -134,7 +141,7 @@ cosyvoice_context_t cosyvoice_load_from_file_ext(
 
     auto ggml_backend_set_n_threads = reinterpret_cast<ggml_backend_set_n_threads_t>(ggml_backend_reg_get_proc_address(ggml_backend_dev_backend_reg(ggml_backend_get_device(ctx->worker->cpu_backend.get())), "ggml_backend_set_n_threads"));
     if (n_threads == 0)
-        n_threads = std::thread::hardware_concurrency();
+        n_threads = std::max<uint32_t>(1, std::thread::hardware_concurrency() / params_v2.n_workers);
     if (n_threads != 0)
         ggml_backend_set_n_threads(ctx->worker->cpu_backend.get(), n_threads);
 
@@ -150,7 +157,12 @@ cosyvoice_context_t cosyvoice_load_from_file(const char* filename)
 
 cosyvoice_context_t cosyvoice_load_from_file_with_params(const char* filename, const cosyvoice_context_params_t* params)
 {
-    return cosyvoice_load_from_file_ext(filename, params, nullptr, 0, 0);
+    return cosyvoice_load_from_file_ext(filename, params, nullptr, 0);
+}
+
+cosyvoice_context_t cosyvoice_load_from_file_with_params_v2(const char* filename, const cosyvoice_context_params_v2_t* params)
+{
+    return cosyvoice_load_from_file_ext(filename, params, nullptr, 0);
 }
 
 cosyvoice_context_t cosyvoice_duplicate_context(cosyvoice_context_t ctx)
@@ -290,6 +302,11 @@ void cosyvoice_get_memory_usage(cosyvoice_context_t ctx, cosyvoice_memory_usage_
     ctx->get_memory_usage(usage);
 }
 
+void cosyvoice_get_total_memory_usage(cosyvoice_context_t ctx, cosyvoice_memory_usage_t* usage)
+{
+    return ctx->get_total_memory_usage(usage);
+}
+
 void cosyvoice_empty_buffer_cache(cosyvoice_context_t ctx)
 {
     ctx->empty_buffer_cache();
@@ -345,6 +362,11 @@ cosyvoice_tokenizer_context_t cosyvoice_get_tokenizer(cosyvoice_context_t ctx)
     return ctx;
 }
 
+void cosyvoice_get_default_generation_config(cosyvoice_context_t ctx, cosyvoice_generation_config_t* config)
+{
+    return ctx->get_default_generation_config(config);
+}
+
 void cosyvoice_get_generation_config(cosyvoice_context_t ctx, cosyvoice_generation_config_t* config)
 {
     ctx->get_generation_config(config);
@@ -363,6 +385,21 @@ uint32_t cosyvoice_get_sample_rate(cosyvoice_context_t ctx)
 void cosyvoice_get_context_params(cosyvoice_context_t ctx, cosyvoice_context_params_t* params)
 {
     ctx->get_context_params(params);
+}
+
+uint32_t cosyvoice_get_n_workers(cosyvoice_context_t ctx)
+{
+    return ctx->get_n_workers();
+}
+
+uint32_t cosyvoice_get_worker_no(cosyvoice_context_t ctx)
+{
+    return ctx->get_worker_no();
+}
+
+bool cosyvoice_set_worker_no(cosyvoice_context_t ctx, uint32_t worker_no)
+{
+    return ctx->set_worker_no(worker_no);
 }
 
 const char* cosyvoice_get_architecture(cosyvoice_context_t ctx)
@@ -388,6 +425,11 @@ cosyvoice_builtin_sampler_rng_policy_t cosyvoice_get_builtin_sampler_rng_policy(
 bool cosyvoice_set_sampler_seed(cosyvoice_context_t ctx, uint32_t seed)
 {
     return ctx->set_sampler_seed(seed);
+}
+
+uint32_t cosyvoice_get_sampler_seed(cosyvoice_context_t ctx)
+{
+    return ctx->get_sampler_seed();
 }
 
 bool cosyvoice_set_builtin_sampler_rng_policy(cosyvoice_context_t ctx, cosyvoice_builtin_sampler_rng_policy_t policy)

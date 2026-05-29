@@ -373,7 +373,7 @@ void cosyvoice_model_3::load(gguf_loader& loader)
 
     ggml_init_params params =
     {
-        .mem_size = (tensors.size() + 6 + 2) * ggml_tensor_overhead(),
+        .mem_size = (tensors.size() + 6 + 2 * shared->params.n_workers) * ggml_tensor_overhead(),
         .mem_buffer = nullptr,
         .no_alloc = true
     };
@@ -396,9 +396,9 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     const int mel_dim = flow.decoder.estimator.mel_dim;
     size_t mem_size = get_aligned_size(sizeof(float) * half_dim, alignment)
         + get_aligned_size(sizeof(float) * (hift.nfft / 2 + 1), alignment)
-        + get_aligned_size(sizeof(int) * shared->params.n_batch, alignment)
         + get_aligned_size(sizeof(float) * (hift.nfft / 2 + 1) * hift.nfft, alignment) * 2
-        + get_aligned_size((shared->params.n_max_seq - 1) * shared->params.n_batch * sizeof(ggml_fp16_t), alignment);
+        + (get_aligned_size(sizeof(int) * shared->params.n_batch, alignment)
+            + get_aligned_size((shared->params.n_max_seq - 1) * shared->params.n_batch * sizeof(ggml_fp16_t), alignment)) * shared->params.n_workers;
     for (const auto& [name, tensor] : tensors)
         if (tensor != &llm.embed_tokens_weight
             && tensor != &llm.speech_embedding_weight)
@@ -449,35 +449,12 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         ggml_set_name(*tensor, name.c_str());
     }
 
-    worker->noise_rng.seed(shared->params.seed);
-    worker->sampler_rng.seed(worker->noise_rng());
-
-    hift.m_source.l_sin_gen.rand_ini = ggml_new_tensor_1d(shared->ctx.get(), GGML_TYPE_F32, hift.nb_harmonics + 1);
-    ggml_backend_tensor_alloc(shared->buffer.get(), hift.m_source.l_sin_gen.rand_ini, buffer_base);
-    buffer_base += get_aligned_size(hift.m_source.l_sin_gen.rand_ini->nb[1], alignment);
-
-    auto rand_ini_buffer = std::make_unique<float[]>(hift.nb_harmonics + 1);
-    rand_ini_buffer[0] = 0.f;
-    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-    for (auto& i : std::span(rand_ini_buffer.get() + 1, hift.nb_harmonics))
-        i = dist(worker->noise_rng);
-    hift.set_rand_ini(rand_ini_buffer.get());
-
     hift.window = ggml_new_tensor_1d(shared->ctx.get(), GGML_TYPE_F32, hift.nfft);
     ggml_set_param(hift.window);
     ggml_set_name(hift.window, "stft_window");
     ggml_backend_tensor_alloc(shared->cpu_buffer.get(), hift.window, cpu_buffer_base);
     for (int i = 0; i != hift.nfft; ++i)
         reinterpret_cast<float*>(hift.window->data)[i] = (1.0f - std::cos(2.0f * 3.14159265358979323846f * i / hift.nfft)) / 2.f;
-
-    worker->position_ids = ggml_new_tensor_1d(shared->ctx.get(), GGML_TYPE_I32, shared->params.n_batch);
-    ggml_set_name(worker->position_ids, "position_ids");
-    ggml_backend_tensor_alloc(shared->buffer.get(), worker->position_ids, buffer_base);
-    ggml_set_param(worker->position_ids);
-    worker->full_position_ids.reset(new int[shared->params.n_max_seq]);
-    for (int i = 0; i != shared->params.n_max_seq; ++i)
-        worker->full_position_ids.get()[i] = i;
-    buffer_base += get_aligned_size(worker->position_ids->nb[1], alignment);
 
     hift.fctx = create_fft_context(hift.nfft);
     hift.ictx = create_istft_context(hift.nfft, shared->ctx.get(),
@@ -489,20 +466,43 @@ void cosyvoice_model_3::load(gguf_loader& loader)
             ggml_backend_synchronize(backend);
         });
 
-    worker->causal_mask_buffer.reset(new ggml_fp16_t[(shared->params.n_max_seq - 1) * shared->params.n_batch]);
-    worker->causal_mask = ggml_new_tensor_2d(shared->ctx.get(), GGML_TYPE_F16, shared->params.n_max_seq - 1, shared->params.n_batch);
-    ggml_set_name(worker->causal_mask, "attention_mask");
-    ggml_set_param(worker->causal_mask);
-    ggml_backend_tensor_alloc(shared->buffer.get(), worker->causal_mask, buffer_base);
+    for (uint32_t i = 0; i != shared->params.n_workers; ++i)
+    {
+        auto worker = workers + i;
+
+        worker->position_ids = ggml_new_tensor_1d(shared->ctx.get(), GGML_TYPE_I32, shared->params.n_batch);
+        ggml_set_name(worker->position_ids, std::format("position_ids.{}", i).c_str());
+        ggml_backend_tensor_alloc(shared->buffer.get(), worker->position_ids, buffer_base);
+        ggml_set_param(worker->position_ids);
+        worker->full_position_ids.reset(new int[shared->params.n_max_seq]);
+        for (int i = 0; i != shared->params.n_max_seq; ++i)
+            worker->full_position_ids.get()[i] = i;
+        buffer_base += get_aligned_size(worker->position_ids->nb[1], alignment);
+
+        worker->causal_mask_buffer.reset(new ggml_fp16_t[(shared->params.n_max_seq - 1) * shared->params.n_batch]);
+        worker->causal_mask = ggml_new_tensor_2d(shared->ctx.get(), GGML_TYPE_F16, shared->params.n_max_seq - 1, shared->params.n_batch);
+        ggml_set_name(worker->causal_mask, std::format("attention_mask.{}", i).c_str());
+        ggml_set_param(worker->causal_mask);
+        ggml_backend_tensor_alloc(shared->buffer.get(), worker->causal_mask, buffer_base);
+        buffer_base += get_aligned_size(worker->causal_mask->nb[0] * worker->causal_mask->nb[1], alignment);
+    }
+
+    shared->noise_rng.seed(shared->params.seed);
+
+    hift.m_source.l_sin_gen.rand_ini = ggml_new_tensor_1d(shared->ctx.get(), GGML_TYPE_F32, hift.nb_harmonics + 1);
+    ggml_backend_tensor_alloc(shared->buffer.get(), hift.m_source.l_sin_gen.rand_ini, buffer_base);
+
+    auto rand_ini_buffer = std::make_unique<float[]>(hift.nb_harmonics + 1);
+    rand_ini_buffer[0] = 0.f;
+    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+    for (auto& i : std::span(rand_ini_buffer.get() + 1, hift.nb_harmonics))
+        i = dist(shared->noise_rng);
+    hift.set_rand_ini(rand_ini_buffer.get());
 
     int64_t id = gguf_find_key(loader, "stop_token_ids");
     auto stop_tok_data = reinterpret_cast<const int*>(gguf_get_arr_data(loader, id));
     id = static_cast<int64_t>(gguf_get_arr_n(loader, id));
     cv3_shared->stop_tokens.insert(stop_tok_data, stop_tok_data + id);
-
-    shared->config.temperature = 1.f;
-    shared->config.max_token_text_ratio = 20.f;
-    shared->config.min_token_text_ratio = 2.f;
 
     id = gguf_find_key(loader, "cosyvoice.instruction_prefix");
     if (id != -1)
@@ -513,15 +513,18 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         memcpy(shared->instruction_prefix.get(), str, len);
     }
 
+    shared->config.temperature = 1.f;
+    shared->config.max_token_text_ratio = 20.f;
+    shared->config.min_token_text_ratio = 2.f;
+
     auto& sampling = shared->config.sampling;
     LOAD_METADATA_NOPREFIX(sampling.top_k);
     LOAD_METADATA_NOPREFIX(sampling.top_p);
     LOAD_METADATA_NOPREFIX(sampling.win_size);
     LOAD_METADATA_NOPREFIX(sampling.tau_r);
 
-    worker->nucleus_probs.reset(new float[sampling.top_k * 2 + 1]);
-    worker->probs.reset(new float[llm.llm_decoder.weight->ne[1]]);
-    worker->batch_buffer.reset(new char[shared->params.n_batch * std::max(llm.embed_tokens_weight->nb[1], llm.speech_embedding_weight->nb[1])]);
+    for (uint32_t i = 0; i != shared->params.n_workers; ++i)
+        workers[i].config = shared->config;
 
     if (shared->params.llm_use_flash_attn)
         if (shared->params.llm_allow_kv_cache_fallback
@@ -581,27 +584,24 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     else if (ggml_is_quantized(kv_type))
         kv_type = GGML_TYPE_F16;
 
-    worker->kv_cache.build_kv_cache(
-        backend,
-        worker->kv_buffer,
-        static_cast<int>(llm.layers.size()),
-        static_cast<int>(llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads),
-        static_cast<int>(llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads),
-        llm.num_attention_heads,
-        llm.num_key_value_heads,
-        shared->params.n_max_seq,
-        kv_type,
-        shared->params.llm_use_flash_attn
-    );
-    switch (shared->params.inference_buffer_policy)
+    for (auto& worker : std::span(workers, shared->params.n_workers))
     {
-    case COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED:
-    case COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED:
-        cv3_worker->token2wav_buffer.reset(worker->kv_buffer.get());
-    case COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED:
-        break;
-    default:
-        throw std::invalid_argument("unexpected policy");
+        worker.nucleus_probs.reset(new float[sampling.top_k * 2 + 1]);
+        worker.probs.reset(new float[llm.llm_decoder.weight->ne[1]]);
+        worker.batch_buffer.reset(new char[shared->params.n_batch * std::max(llm.embed_tokens_weight->nb[1], llm.speech_embedding_weight->nb[1])]);
+
+        worker.kv_cache.build_kv_cache(
+            backend,
+            worker.kv_buffer,
+            static_cast<int>(llm.layers.size()),
+            static_cast<int>(llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads),
+            static_cast<int>(llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads),
+            llm.num_attention_heads,
+            llm.num_key_value_heads,
+            shared->params.n_max_seq,
+            kv_type,
+            shared->params.llm_use_flash_attn
+        );
     }
 
     if (shared->params.flow_use_flash_attn)
@@ -617,11 +617,37 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     for (auto& block : flow.decoder.estimator.transformer_blocks)
         block.attn.fattn = shared->params.flow_use_flash_attn;
 
-    cv3_worker->orig_max_seq_len = shared->params.n_max_seq;
+    for (uint32_t i = 0; i < shared->params.n_workers; ++i)
+    {
+        auto cv3_worker = cv3_workers + i;
+        auto worker = workers + i;
+
+        switch (shared->params.inference_buffer_policy)
+        {
+        case COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED:
+        case COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED:
+            cv3_worker->token2wav_buffer.reset(worker->kv_buffer.get());
+        case COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED:
+            break;
+        default:
+            throw std::invalid_argument("unexpected policy");
+        }
+        cv3_worker->orig_max_seq_len = shared->params.n_max_seq;
+    }
 
     auto arch = loader.get_string("general.architecture");
     shared->architecture.reset(new char[arch.size() + 1]);
     memcpy(shared->architecture.get(), arch.data(), arch.size() + 1);
 
     ggml_backend_synchronize(backend);
+}
+
+bool cosyvoice_model_3::set_worker_no(uint32_t worker_no)
+{
+    if (worker_no >= shared->params.n_workers)
+        return false;
+
+    worker = workers + worker_no;
+    cv3_worker = cv3_workers + worker_no;
+    return true;
 }

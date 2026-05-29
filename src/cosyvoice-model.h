@@ -9,19 +9,28 @@
 
 #include <set>
 #include <random>
+#include <memory>
+#include <shared_mutex>
 
 struct cosyvoice_model_shared
 {
-    cosyvoice_model_shared(const cosyvoice_context_params_t& params);
+    cosyvoice_model_shared(const cosyvoice_context_params_v2_cpp& params);
 
     ggml_context_ptr ctx;
 
     ggml_backend_buffer_ptr buffer;
     ggml_backend_buffer_ptr cpu_buffer;
 
-    cosyvoice_context_params_t params;
-    cosyvoice_generation_config_t config;
+    cosyvoice_context_params_v2_cpp params;
     ggml_backend_op_capabilities op_caps;
+
+    std::mt19937 noise_rng;
+    std::shared_mutex noise_mutex;
+    std::unique_ptr<float[]> rand_noise;
+    uint32_t rand_noise_len;
+    cosyvoice_generation_config_t config;
+    cosyvoice_noise_callback_t noise_callback;
+    void* noise_callback_ctx;
 
     std::unique_ptr<char[]> architecture;
     std::unique_ptr<char[]> instruction_prefix;
@@ -30,6 +39,7 @@ struct cosyvoice_model_shared
 struct cosyvoice_worker_context
 {
     cosyvoice_worker_context(ggml_backend_t backend);
+    ~cosyvoice_worker_context() = default;
 
     ggml_backend_ptr backend;
     ggml_backend_ptr cpu_backend;
@@ -53,24 +63,27 @@ struct cosyvoice_worker_context
 
     ggml_status status;
     uint32_t prompt_crc32;
+    uint32_t sampler_seed;
+    cosyvoice_generation_config_t config;
+    cosyvoice_sampler_t sampler;
+    void* sampler_ctx;
+    cosyvoice_builtin_sampler_rng_policy_t builtin_sampler_rng_policy;
 
-    uint32_t rand_noise_len;
-    std::unique_ptr<float[]> rand_noise;
     std::unique_ptr<char[]> batch_buffer;
     std::unique_ptr<float[]> nucleus_probs;
     std::unique_ptr<float[]> probs;
     ggml_backend_buffer_ptr kv_buffer;
-
-    cosyvoice_noise_callback_t noise_callback;
-    void* noise_callback_ctx;
 };
 
 struct cosyvoice_model : virtual cosyvoice_model_context, virtual cosyvoice_object_ref_counter
 {
-    cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_t& params);
+    cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_v2_cpp& params);
     ~cosyvoice_model();
 
     virtual void load(gguf_loader& loader) = 0;
+
+    uint32_t get_worker_no();
+    uint32_t get_n_workers();
 
     uint32_t llm_get_kv_cache_len();
     bool llm_set_kv_cache_len(uint32_t len);
@@ -91,6 +104,7 @@ struct cosyvoice_model : virtual cosyvoice_model_context, virtual cosyvoice_obje
         uint32_t                   instruction_length
     );
 
+    void get_default_generation_config(cosyvoice_generation_config_t* config);
     void get_generation_config(cosyvoice_generation_config_t* config);
     bool set_generation_config(const cosyvoice_generation_config_t* config);
     const char* get_instruction_prefix();
@@ -104,11 +118,13 @@ struct cosyvoice_model : virtual cosyvoice_model_context, virtual cosyvoice_obje
     cosyvoice_builtin_sampler_rng_policy_t get_builtin_sampler_rng_policy();
     bool set_builtin_sampler_rng_policy(cosyvoice_builtin_sampler_rng_policy_t policy);
     bool set_sampler_seed(uint32_t seed);
+    uint32_t get_sampler_seed();
 
     void set_noise_callback(cosyvoice_noise_callback_t callback, void* callback_ctx);
     void get_noise_callback(cosyvoice_noise_callback_t* callback, void** callback_ctx);
 
     cosyvoice_model_shared* shared;
+    cosyvoice_worker_context* workers;
     cosyvoice_worker_context* worker;
 };
 
@@ -126,6 +142,7 @@ struct cosyvoice_model_3_shared
 struct cosyvoice_3_worker_context
 {
     cosyvoice_3_worker_context();
+    ~cosyvoice_3_worker_context() = default;
 
     ggml_context_ptr ctx1;
     ggml_backend_buffer_ptr token2wav_buffer;
@@ -135,10 +152,12 @@ struct cosyvoice_3_worker_context
 
 struct cosyvoice_model_3 : cosyvoice_model
 {
-    cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_context_params_t& params);
+    cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_context_params_v2_cpp& params);
     ~cosyvoice_model_3();
 
     void load(gguf_loader& loader);
+
+    bool set_worker_no(uint32_t worker_no);
 
     bool llm_decode(ggml_type type, const void* data);
     void llm_prepare_probs(bool allow_stop_tokens);
@@ -159,8 +178,10 @@ struct cosyvoice_model_3 : cosyvoice_model
 
     void empty_buffer_cache();
     void get_memory_usage(cosyvoice_memory_usage_t* usage);
+    void get_total_memory_usage(cosyvoice_memory_usage_t* usage);
     void reset_shared_buffer(ggml_backend_buffer* new_buffer);
 
     cosyvoice_model_3_shared* cv3_shared;
+    cosyvoice_3_worker_context* cv3_workers;
     cosyvoice_3_worker_context* cv3_worker;
 };

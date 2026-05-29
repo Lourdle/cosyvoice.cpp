@@ -142,6 +142,31 @@ typedef int (*cosyvoice_sampler_t)(
     void*                              sampler_ctx
 );
 
+/**
+ * @brief Extended custom token sampler callback that includes the worker number for multi-worker contexts.
+ * @param nucleus_probs Candidate tokens after nucleus filtering.
+ * @param k Number of items in `nucleus_probs`.
+ * @param probs Full probability buffer for the current vocabulary distribution.
+ * @param size Number of entries in `probs`.
+ * @param sampling_params Active sampling parameters.
+ * @param accepted_tokens Tokens already accepted in the current sequence.
+ * @param n_accepted_tokens Number of accepted tokens.
+ * @param sampler_ctx User context passed to the callback.
+ * @param worker_no The index of the worker.
+ * @return The selected token id.
+ */
+typedef int (*cosyvoice_sampler_ext_t)(
+    cosyvoice_llm_token_prob_t*        nucleus_probs,
+    int                                k,
+    float*                             probs,
+    uint32_t                           size,
+    const cosyvoice_sampling_params_t* sampling_params,
+    int*                               accepted_tokens,
+    uint32_t                           n_accepted_tokens,
+    void*                              sampler_ctx,
+    uint32_t                           worker_no
+);
+
 // ----------------------------------------------------------------------------
 // Context Parameters
 // ----------------------------------------------------------------------------
@@ -164,9 +189,26 @@ typedef struct cosyvoice_context_params
     cosyvoice_builtin_sampler_rng_policy_t builtin_sampler_rng_policy; ///< Controls how the built-in sampler RNG evolves across LLM sessions. Ignored when `sampler` is not null.
 
     // Sampling overrides
-    cosyvoice_sampler_t sampler;     ///< Optional custom sampler. Pass null to use the built-in sampler.
-    void*               sampler_ctx; ///<User context for `sampler`. Ignored when using the built-in sampler.
+    union
+    {
+        cosyvoice_sampler_t sampler;
+        cosyvoice_sampler_ext_t sampler_ext;
+    }; ///< Optional custom sampler. Pass null to use the built-in sampler.
+    void* sampler_ctx; ///< User context for `sampler`. Ignored when using the built-in sampler.
 } cosyvoice_context_params_t;
+
+typedef struct cosyvoice_context_params_v2
+{
+    cosyvoice_context_params_t base_params; ///< Base context parameters for backward compatibility.
+    uint32_t n_workers;                      ///< Number of workers to use for inference.
+} cosyvoice_context_params_v2_t;
+
+#ifdef __cplusplus
+struct cosyvoice_context_params_v2_cpp : cosyvoice_context_params_t
+{
+    uint32_t n_workers; ///< Number of workers to use for inference.
+};
+#endif
 
 // ----------------------------------------------------------------------------
 // Random Seed Utility
@@ -217,7 +259,16 @@ COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_with_params(
 );
 
 /**
+ * @brief Load a model context from a GGUF file using extended context parameters with concurrency support.
+ */
+COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_with_params_v2(
+    const char*                          filename,
+    const cosyvoice_context_params_v2_t* params
+);
+
+/**
  * @brief Duplicate a loaded model context handle.
+ * @note The duplicate shares the loaded model resources with the original context. It starts with the same active worker binding as the original context, and can then be rebound independently with `cosyvoice_set_worker_no()`.
  */
 COSYVOICE_API cosyvoice_context_t cosyvoice_duplicate_context(cosyvoice_context_t ctx);
 
@@ -235,6 +286,25 @@ COSYVOICE_API void                cosyvoice_get_context_params(
 );
 
 /**
+ * @brief Get the total number of worker slots available for a model context.
+ */
+COSYVOICE_API uint32_t			  cosyvoice_get_n_workers(cosyvoice_context_t ctx);
+
+/**
+ * @brief Get the current active worker slot number for a model context.
+ */
+COSYVOICE_API uint32_t            cosyvoice_get_worker_no(cosyvoice_context_t ctx);
+
+/**
+ * @brief Set the active worker slot number for a model context.
+ * @note Use this on a duplicated context to bind that context instance to a specific worker.
+ */
+COSYVOICE_API bool                cosyvoice_set_worker_no(
+    cosyvoice_context_t ctx,
+    uint32_t worker_no
+);
+
+/**
  * @brief Retrieve the architecture of the loaded model.
  */
 COSYVOICE_API const char*         cosyvoice_get_architecture(cosyvoice_context_t ctx);
@@ -244,7 +314,15 @@ COSYVOICE_API const char*         cosyvoice_get_architecture(cosyvoice_context_t
 // ----------------------------------------------------------------------------
 
 /**
- * @brief Retrieve the current generation configuration.
+ * @brief Retrieve the default generation configuration loaded from the model file.
+*/
+COSYVOICE_API void     cosyvoice_get_default_generation_config(
+    cosyvoice_context_t            ctx,
+    cosyvoice_generation_config_t* config
+);
+
+/**
+ * @brief Retrieve the current generation configuration of the active worker.
  */
 COSYVOICE_API void     cosyvoice_get_generation_config(
     cosyvoice_context_t            ctx,
@@ -252,12 +330,7 @@ COSYVOICE_API void     cosyvoice_get_generation_config(
 );
 
 /**
- * @brief Retrieve the output sample rate of the loaded model.
- */
-COSYVOICE_API uint32_t cosyvoice_get_sample_rate(cosyvoice_context_t ctx);
-
-/**
- * @brief Set the generation config. This overrides the default config loaded from the model file.
+ * @brief Set the generation config for the active worker. This overrides the default config loaded from the model file.
  * @note This function does not change the sample rate; any sample-rate field in the config is ignored.
  * @return True if the configuration is valid, otherwise false.
  */
@@ -266,40 +339,52 @@ COSYVOICE_API bool     cosyvoice_set_generation_config(
     const cosyvoice_generation_config_t* config
 );
 
+/**
+ * @brief Retrieve the output sample rate of the loaded model.
+ */
+COSYVOICE_API uint32_t cosyvoice_get_sample_rate(cosyvoice_context_t ctx);
+
 // ----------------------------------------------------------------------------
 // Sampler API
 // ----------------------------------------------------------------------------
 
 /**
  * @brief Set a custom sampler for token sampling based on LLM logits.
+ * @note The sampler is stored on the active worker.
  * @note If the sampler is null, the default nucleus sampler is used.
  */
 COSYVOICE_API void cosyvoice_set_sampler(cosyvoice_context_t ctx, cosyvoice_sampler_t sampler, void* sampler_ctx);
 
 /**
- * @brief Get the current sampler and its context.
+ * @brief Get the current active worker's sampler and its context.
  */
 COSYVOICE_API void cosyvoice_get_sampler(cosyvoice_context_t ctx, cosyvoice_sampler_t* sampler, void** sampler_ctx);
 
 /**
- * @brief Get the RNG policy used by the built-in sampler.
+ * @brief Get the RNG policy used by the active worker's built-in sampler.
  */
 COSYVOICE_API cosyvoice_builtin_sampler_rng_policy_t cosyvoice_get_builtin_sampler_rng_policy(cosyvoice_context_t ctx);
 
 /**
- * @brief Set the RNG policy used by the built-in sampler.
+ * @brief Set the RNG policy used by the active worker's built-in sampler.
  * @return True if `policy` is valid and the built-in sampler is active; false if `policy` is invalid or a custom sampler is in use.
  */
 COSYVOICE_API bool cosyvoice_set_builtin_sampler_rng_policy(cosyvoice_context_t ctx, cosyvoice_builtin_sampler_rng_policy_t policy);
 
 /**
- * @brief Set the seed used by the sampler RNG.
+ * @brief Set the seed used by the sampler RNG of the active worker.
+ * @note This applies to the active worker only.
  * @note The seed is always stored, even when a custom sampler is active.
  *       If the function returns false, the stored seed will still take effect
  *       after switching back to the built-in sampler.
  * @return True when the built-in sampler is currently active; otherwise false.
  */
 COSYVOICE_API bool cosyvoice_set_sampler_seed(cosyvoice_context_t ctx, uint32_t seed);
+
+/**
+ * @brief Get the seed used by the built-in sampler on the active worker.
+ */
+COSYVOICE_API uint32_t cosyvoice_get_sampler_seed(cosyvoice_context_t ctx);
 
 // ----------------------------------------------------------------------------
 // Prompt API
@@ -470,19 +555,24 @@ COSYVOICE_API bool cosyvoice_save_wav(const char* filename, const float* data, u
  */
 typedef struct cosyvoice_memory_usage
 {
-    size_t parameters;         ///< Memory used for model parameters. On the main device.
-    size_t kv_cache;           ///< Memory used for KV cache. On the main device.
-    size_t token2wav;          ///< Memory used for token2wav intermediates. On the main device.
-    size_t buffers;            ///< Memory used for internal buffers. On the main device.
-    size_t cpu_buffers;        ///< Memory used for CPU buffers. On CPU.
-    size_t offloaded_kv_cache; ///< Memory offloaded for KV cache. On CPU.
-    size_t random_noise;       ///< Memory used for random noise buffers. On CPU.
+    size_t parameters;         ///< Memory used for model parameters. Shared across workers, on the main device.
+    size_t kv_cache;           ///< Memory used for the active worker's KV cache. On the main device.
+    size_t token2wav;          ///< Memory used for the active worker's token2wav intermediates. On the main device.
+    size_t buffers;            ///< Memory used for the active worker's internal buffers. On the main device.
+    size_t cpu_buffers;        ///< Memory used for the active worker's CPU buffers. On CPU.
+    size_t offloaded_kv_cache; ///< Memory offloaded for the active worker's KV cache. On CPU.
+    size_t random_noise;       ///< Memory used for shared random-noise buffers. On CPU.
 } cosyvoice_memory_usage_t;
 
 /**
- * @brief Retrieve a memory usage snapshot for the current context.
+ * @brief Retrieve a memory usage snapshot for the active worker in the current context.
  */
 COSYVOICE_API void cosyvoice_get_memory_usage(cosyvoice_context_t ctx, cosyvoice_memory_usage_t* usage);
+
+/**
+ * @brief Retrieve the total memory usage across all workers in the current context.
+ */
+COSYVOICE_API void cosyvoice_get_total_memory_usage(cosyvoice_context_t ctx, cosyvoice_memory_usage_t* usage);
 
 /**
  * @brief Release reusable inference buffers cached by the context.
