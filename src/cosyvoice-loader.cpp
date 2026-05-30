@@ -586,7 +586,9 @@ void cosyvoice_model_3::load(gguf_loader& loader)
 
     for (auto& worker : std::span(workers, shared->params.n_workers))
     {
-        worker.nucleus_probs.reset(new float[sampling.top_k * 2 + 1]);
+        worker.nucleus_probs_capacity = static_cast<uint32_t>(sampling.top_k * 2);
+        worker.nucleus_probs.reset(new float[worker.nucleus_probs_capacity]);
+        worker.nucleus_probs_len = 0;
         worker.probs.reset(new float[llm.llm_decoder.weight->ne[1]]);
         worker.batch_buffer.reset(new char[shared->params.n_batch * std::max(llm.embed_tokens_weight->nb[1], llm.speech_embedding_weight->nb[1])]);
 

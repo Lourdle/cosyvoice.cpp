@@ -71,6 +71,8 @@ struct cosyvoice_worker_context
 
     std::unique_ptr<char[]> batch_buffer;
     std::unique_ptr<float[]> nucleus_probs;
+    uint32_t nucleus_probs_capacity;
+    int nucleus_probs_len;
     std::unique_ptr<float[]> probs;
     ggml_backend_buffer_ptr kv_buffer;
 };

@@ -67,7 +67,7 @@ cosyvoice_worker_context::cosyvoice_worker_context(ggml_backend_t backend)
     : backend(backend), cpu_backend(backend),
     ctx0(ggml_init(ggml_init_params{ .mem_size = ggml_graph_overhead() * kCosyVoiceGraphSize, .no_alloc = true })),
     gf(nullptr), llm_input(nullptr), llm_probs(nullptr), position_ids(nullptr), causal_mask(nullptr), kv_cache(),
-    status(GGML_STATUS_SUCCESS), prompt_crc32(0), sampler_seed(0), sampler(nullptr), sampler_ctx(nullptr), builtin_sampler_rng_policy(COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION) {}
+    status(GGML_STATUS_SUCCESS), prompt_crc32(0), sampler_seed(0), sampler(nullptr), sampler_ctx(nullptr), builtin_sampler_rng_policy(COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION), nucleus_probs_capacity(0), nucleus_probs_len(0) {}
 
 cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_v2_cpp& params)
     : shared(new cosyvoice_model_shared(params)), workers(reinterpret_cast<cosyvoice_worker_context*>(malloc(sizeof(cosyvoice_worker_context) * params.n_workers)))
@@ -388,7 +388,13 @@ bool cosyvoice_model::set_generation_config(const cosyvoice_generation_config_t*
         return false;
 
     worker->config = *config;
-    worker->nucleus_probs.reset(new float[config->sampling.top_k * 2 + 1]);
+    auto required_capacity = static_cast<uint32_t>(config->sampling.top_k * 2);
+    if (worker->nucleus_probs_capacity < required_capacity)
+    {
+        worker->nucleus_probs.reset(new float[required_capacity]);
+        worker->nucleus_probs_capacity = required_capacity;
+    }
+    worker->nucleus_probs_len = 0;
     return true;
 }
 
@@ -475,8 +481,8 @@ int cosyvoice_model::llm_sample_token()
 {
     GGML_ASSERT(worker->llm_probs);
     return shared->params.sampler_ext(
-        reinterpret_cast<cosyvoice_llm_token_prob_t*>(worker->nucleus_probs.get() + 1),
-        *reinterpret_cast<int*>(worker->nucleus_probs.get()),
+        reinterpret_cast<cosyvoice_llm_token_prob_t*>(worker->nucleus_probs.get()),
+        worker->nucleus_probs_len,
         worker->probs.get(),
         static_cast<uint32_t>(get_speech_token_embed_weight()->ne[1]),
         &worker->config.sampling,

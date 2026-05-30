@@ -261,7 +261,7 @@ bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
     worker->status = ggml_backend_sched_graph_compute_async(worker->sched.get(), gf);
     if (worker->status == GGML_STATUS_SUCCESS)
     {
-        auto probs = reinterpret_cast<cosyvoice_llm_token_prob_t*>(worker->nucleus_probs.get() + 1);
+        auto probs = reinterpret_cast<cosyvoice_llm_token_prob_t*>(worker->nucleus_probs.get());
         ggml_backend_tensor_get_async(worker->backend.get(), llm_probs, probs, 0, ggml_nbytes(llm_probs));
         ggml_backend_tensor_get_async(
             worker->backend.get(),
@@ -279,7 +279,7 @@ void cosyvoice_model_3::llm_prepare_probs(bool allow_stop_tokens)
 {
     GGML_ASSERT(worker->llm_probs);
 
-    auto probs = reinterpret_cast<cosyvoice_llm_token_prob_t*>(worker->nucleus_probs.get() + 1);
+    auto probs = reinterpret_cast<cosyvoice_llm_token_prob_t*>(worker->nucleus_probs.get());
     int k = worker->config.sampling.top_k;
     const float top_p = worker->config.sampling.top_p;
     std::sort(probs, probs + k, [](const cosyvoice_llm_token_prob_t& a, const cosyvoice_llm_token_prob_t& b)
@@ -298,7 +298,7 @@ void cosyvoice_model_3::llm_prepare_probs(bool allow_stop_tokens)
         }
     }
 
-    reinterpret_cast<int*>(probs)[-1] = k;
+    worker->nucleus_probs_len = k;
     for (int i = 0; i != k; ++i)
         probs[i].prob /= p;
 
