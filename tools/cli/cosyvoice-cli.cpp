@@ -16,6 +16,7 @@
 
 #include <cstdarg>
 #include <cctype>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -26,6 +27,12 @@
 #include <thread>
 #include <format>
 #include <map>
+
+#ifdef _WIN32
+    #include <Windows.h>
+#else
+    #include <signal.h>
+#endif
 
 struct cli_options
 {
@@ -91,12 +98,60 @@ enum class cli_log_level
 };
 
 static bool g_quiet_logs = false;
+static std::atomic_bool g_interactive_exit_requested = false;
 static constexpr const char* ANSI_RESET = "\033[0m";
 static constexpr const char* ANSI_RED = "\033[31m";
 static constexpr const char* ANSI_YELLOW = "\033[93m";
 static constexpr const char* ANSI_BOLD_CYAN = "\033[1;36m";
 static constexpr const char* ANSI_BOLD_BLUE = "\033[1;34m";
 static constexpr const char* ANSI_DIM = "\033[2m";
+
+#ifdef _WIN32
+static BOOL WINAPI handle_console_ctrl(DWORD ctrl_type)
+{
+    if (ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT)
+    {
+        g_interactive_exit_requested.store(true, std::memory_order_relaxed);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+#else
+static void handle_sigint(int)
+{
+    g_interactive_exit_requested.store(true, std::memory_order_relaxed);
+}
+#endif
+
+class interactive_ctrl_c_guard
+{
+public:
+    interactive_ctrl_c_guard()
+    {
+        g_interactive_exit_requested.store(false, std::memory_order_relaxed);
+#ifdef _WIN32
+        SetConsoleCtrlHandler(handle_console_ctrl, TRUE);
+#else
+        previous_sigint_handler = signal(SIGINT, handle_sigint);
+#endif
+    }
+
+    ~interactive_ctrl_c_guard()
+    {
+#ifdef _WIN32
+        SetConsoleCtrlHandler(handle_console_ctrl, FALSE);
+#else
+        signal(SIGINT, previous_sigint_handler);
+#endif
+    }
+
+private:
+#ifndef _WIN32
+    using sig_handler_t = void (*)(int);
+    sig_handler_t previous_sigint_handler = SIG_DFL;
+#endif
+};
 
 static bool has_generation_overrides(const cli_options& options)
 {
@@ -181,7 +236,7 @@ static void print_interactive_commands()
     printf("  /seed [value]                Show or set next seed.\n");
     printf("  /seed-policy <fixed|random>  Show or set seed policy.\n");
     printf("  /help                        Show command list.\n");
-    printf("  /exit                        Exit interactive mode.\n");
+    printf("  /exit                        Exit interactive mode. Ctrl+C also exits.\n");
 }
 
 static void print_usage(const char* argv0)
@@ -765,11 +820,15 @@ static void run_interactive_loop(
         seed_state->next_seed = cosyvoice_generate_random_seed();
         seed_state->has_next_seed = true;
     }
-    printf("\nInteractive mode. Type text to synthesize, or /exit to quit.\n");
+    printf("\nInteractive mode. Type text to synthesize, /exit to quit, or press Ctrl+C to quit.\n");
     print_interactive_commands();
+    interactive_ctrl_c_guard ctrl_c_guard;
 
     while (true)
     {
+        if (g_interactive_exit_requested.load(std::memory_order_relaxed))
+            break;
+
         printf("> ");
         fflush(stdout);
         if (!std::getline(std::cin, line))
