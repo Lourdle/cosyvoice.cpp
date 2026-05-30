@@ -290,7 +290,7 @@ cosyvoice-cli \
 - `/seed [value]`：显示或设置下一次 seed。
 - `/seed-policy <fixed|random>`：显示或设置 seed 策略。
 - `/help`：显示命令列表。
-- `/exit`：退出交互模式。
+- `/exit`：退出交互模式，`Ctrl+C` 也可以退出。
 
 当省略 `[code]` 时，默认使用最近一次合成的音频。
 

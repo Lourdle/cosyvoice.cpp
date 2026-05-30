@@ -290,7 +290,7 @@ Type text at the `> ` prompt to synthesize, or use slash commands:
 - `/seed [value]`: Show or set next seed.
 - `/seed-policy <fixed|random>`: Show or set seed policy.
 - `/help`: Show command list.
-- `/exit`: Exit interactive mode.
+- `/exit`: Exit interactive mode. `Ctrl+C` also exits.
 
 The `[code]` parameter defaults to the last synthesized audio when omitted.
 
