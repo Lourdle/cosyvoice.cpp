@@ -1,6 +1,7 @@
 # cosyvoice-interface.h API 参考
 
 本文档覆盖 `include/cosyvoice-interface.h` 中声明的全部符号，包含 C++ 接口方法。
+运行时支持通过多个 worker 槽实现并发推理；不同上下文可以绑定到不同 worker，同时共享已加载的模型资源。
 这些接口属于内部实现细节，不承诺 ABI 稳定，未来版本可能会调整。
 
 ## cosyvoice_model_context
@@ -11,11 +12,15 @@
 struct cosyvoice_model_context
 {
     virtual uint32_t get_sample_rate() = 0;
+    virtual void get_default_generation_config(cosyvoice_generation_config_t* config) = 0;
     virtual void get_generation_config(cosyvoice_generation_config_t* config) = 0;
     virtual bool set_generation_config(const cosyvoice_generation_config_t* config) = 0;
     virtual void get_context_params(cosyvoice_context_params_t* params) = 0;
     virtual const char* get_architecture() = 0;
     virtual const char* get_instruction_prefix() = 0;
+    virtual bool set_worker_no(uint32_t worker_no) = 0;
+    virtual uint32_t get_worker_no() = 0;
+    virtual uint32_t get_n_workers() = 0;
 
     virtual void get_sampler(cosyvoice_sampler_t* sampler, void** sampler_ctx) = 0;
     virtual void set_sampler(cosyvoice_sampler_t sampler, void* sampler_ctx) = 0;
@@ -112,6 +117,26 @@ virtual void get_generation_config(cosyvoice_generation_config_t* config) = 0;
 
 无返回值。
 
+## cosyvoice_model_context::get_default_generation_config
+
+### 语法
+
+```cpp
+virtual void get_default_generation_config(cosyvoice_generation_config_t* config) = 0;
+```
+
+### 说明
+
+读取模型文件中的默认生成配置，尚未应用 worker 级覆盖。
+
+### 参数
+
+- `config`：输出配置结构体。
+
+### 返回值
+
+无返回值。
+
 ## cosyvoice_model_context::set_generation_config
 
 ### 语法
@@ -151,6 +176,62 @@ virtual void get_context_params(cosyvoice_context_params_t* params) = 0;
 ### 返回值
 
 无返回值。
+
+## cosyvoice_model_context::set_worker_no
+
+### 语法
+
+```cpp
+virtual bool set_worker_no(uint32_t worker_no) = 0;
+```
+
+### 说明
+
+设置后续操作使用的 worker 槽。
+
+### 参数
+
+- `worker_no`：worker 槽编号。
+
+### 返回值
+
+成功返回 `true`，否则返回 `false`。
+
+### 备注
+
+当两个线程需要在不同 worker 上并发推理时，应先复制上下文，再分别绑定 worker。
+
+## cosyvoice_model_context::get_worker_no
+
+### 语法
+
+```cpp
+virtual uint32_t get_worker_no() = 0;
+```
+
+### 说明
+
+获取当前激活的 worker 槽编号。
+
+### 返回值
+
+当前 worker 编号。
+
+## cosyvoice_model_context::get_n_workers
+
+### 语法
+
+```cpp
+virtual uint32_t get_n_workers() = 0;
+```
+
+### 说明
+
+获取可用 worker 槽总数。
+
+### 返回值
+
+worker 槽数量。
 
 ## cosyvoice_model_context::get_architecture
 
@@ -289,6 +370,22 @@ virtual bool set_sampler_seed(uint32_t seed) = 0;
 ### 返回值
 
 成功返回 `true`，失败返回 `false`。
+
+## cosyvoice_model_context::get_sampler_seed
+
+### 语法
+
+```cpp
+virtual uint32_t get_sampler_seed() = 0;
+```
+
+### 说明
+
+获取当前 worker 的采样器种子。
+
+### 返回值
+
+当前 worker 的种子值。
 
 ## cosyvoice_model_context::llm_prefill
 

@@ -1,6 +1,7 @@
 # cosyvoice.h API Reference
 
 This page documents all public symbols declared in `include/cosyvoice.h`.
+The runtime supports concurrent inference through multiple worker slots; context duplication lets separate threads bind to different workers while sharing loaded model resources.
 
 ## COSYVOICE_API
 
@@ -433,6 +434,140 @@ Loaded context handle on success; `NULL` on failure.
 
 Equivalent to calling `cosyvoice_load_from_file_ext(filename, params, NULL, 0, 0)`.
 
+## cosyvoice_context_params_v2_t
+
+### Syntax
+
+```c
+typedef struct cosyvoice_context_params_v2
+{
+    cosyvoice_context_params_t base_params;
+    uint32_t n_workers;
+} cosyvoice_context_params_v2_t;
+```
+
+### Description
+
+Extends `cosyvoice_context_params_t` with a worker count for concurrent inference.
+
+### Fields
+
+- `base_params`: Base context parameters.
+- `n_workers`: Number of worker slots to create.
+
+## cosyvoice_load_from_file_with_params_v2
+
+### Syntax
+
+```c
+COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_with_params_v2(
+    const char*                          filename,
+    const cosyvoice_context_params_v2_t* params
+);
+```
+
+### Description
+
+Loads a model context with extended parameters, including worker-count configuration.
+
+### Parameters
+
+- `filename`: Path to the model file.
+- `params`: Extended context-parameter block.
+
+### Returns
+
+Loaded context handle on success; `NULL` on failure.
+
+## cosyvoice_duplicate_context
+
+### Syntax
+
+```c
+COSYVOICE_API cosyvoice_context_t cosyvoice_duplicate_context(cosyvoice_context_t ctx);
+```
+
+### Description
+
+Creates a new context that shares the loaded model resources with the original context.
+
+### Parameters
+
+- `ctx`: Source context.
+
+### Returns
+
+Duplicated context handle on success; `NULL` on failure.
+
+### Remarks
+
+The new context starts with the same active worker binding as the source context, then can be rebound independently with `cosyvoice_set_worker_no()`.
+
+## cosyvoice_get_n_workers
+
+### Syntax
+
+```c
+COSYVOICE_API uint32_t cosyvoice_get_n_workers(cosyvoice_context_t ctx);
+```
+
+### Description
+
+Gets the total number of worker slots available in the context.
+
+### Parameters
+
+- `ctx`: Context handle.
+
+### Returns
+
+Worker-slot count.
+
+## cosyvoice_get_worker_no
+
+### Syntax
+
+```c
+COSYVOICE_API uint32_t cosyvoice_get_worker_no(cosyvoice_context_t ctx);
+```
+
+### Description
+
+Gets the active worker slot number.
+
+### Parameters
+
+- `ctx`: Context handle.
+
+### Returns
+
+Current worker slot number.
+
+## cosyvoice_set_worker_no
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_set_worker_no(cosyvoice_context_t ctx, uint32_t worker_no);
+```
+
+### Description
+
+Sets the active worker slot used by subsequent inference calls.
+
+### Parameters
+
+- `ctx`: Context handle.
+- `worker_no`: Worker-slot index.
+
+### Returns
+
+`true` on success; otherwise `false`.
+
+### Remarks
+
+Use this on duplicated contexts when two threads need to run inference concurrently while sharing the same loaded model.
+
 ## cosyvoice_free
 
 ### Syntax
@@ -468,6 +603,26 @@ Retrieves effective context parameters currently active in a loaded context.
 
 - `ctx`: Context handle.
 - `params`: Output structure receiving parameters.
+
+## cosyvoice_get_default_generation_config
+
+### Syntax
+
+```c
+COSYVOICE_API void cosyvoice_get_default_generation_config(
+    cosyvoice_context_t            ctx,
+    cosyvoice_generation_config_t* config
+);
+```
+
+### Description
+
+Gets the generation configuration loaded from the model file before any worker-specific overrides are applied.
+
+### Parameters
+
+- `ctx`: Context handle.
+- `config`: Output structure receiving the default configuration.
 
 ## cosyvoice_get_architecture
 
@@ -575,6 +730,32 @@ Registers a custom sampler callback for token selection.
 - `sampler`: Callback function; set `NULL` to restore built-in sampler.
 - `sampler_ctx`: User context pointer passed to callback.
 
+## cosyvoice_sampler_ext_t
+
+### Syntax
+
+```c
+typedef int (_cdecl * cosyvoice_sampler_ext_t)(
+    cosyvoice_llm_token_prob_t*        nucleus_probs,
+    int                                k,
+    float*                             probs,
+    uint32_t                           size,
+    const cosyvoice_sampling_params_t* sampling_params,
+    int*                               accepted_tokens,
+    uint32_t                           n_accepted_tokens,
+    void*                              sampler_ctx,
+    uint32_t                           worker_no
+);
+```
+
+### Description
+
+Extended sampler callback that receives the worker slot number.
+
+### Parameters
+
+- `worker_no`: Active worker slot index.
+
 ## cosyvoice_get_sampler
 
 ### Syntax
@@ -657,7 +838,27 @@ Sets seed used by sampler RNG.
 
 ### Remarks
 
-The seed value is stored even when a custom sampler is active and takes effect when built-in sampler is re-enabled.
+The seed applies to the active worker only. The seed value is stored even when a custom sampler is active and takes effect when built-in sampler is re-enabled on that worker.
+
+## cosyvoice_get_sampler_seed
+
+### Syntax
+
+```c
+COSYVOICE_API uint32_t cosyvoice_get_sampler_seed(cosyvoice_context_t ctx);
+```
+
+### Description
+
+Gets the active worker's built-in sampler seed.
+
+### Parameters
+
+- `ctx`: Context handle.
+
+### Returns
+
+Current sampler seed for the active worker.
 
 ## cosyvoice_generate_random_seed
 

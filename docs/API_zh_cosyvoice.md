@@ -1,6 +1,7 @@
 # cosyvoice.h API 参考
 
 本文档覆盖 `include/cosyvoice.h` 中声明的全部公开符号。
+运行时支持通过多个 worker 槽实现并发推理；复制上下文后，不同线程可以绑定不同 worker，同时共享已加载的模型资源。
 
 ## COSYVOICE_API
 
@@ -445,6 +446,140 @@ COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_with_params(
 
 等价于调用 `cosyvoice_load_from_file_ext(filename, params, NULL, 0, 0)`。
 
+## cosyvoice_context_params_v2_t
+
+### 语法
+
+```c
+typedef struct cosyvoice_context_params_v2
+{
+    cosyvoice_context_params_t base_params;
+    uint32_t n_workers;
+} cosyvoice_context_params_v2_t;
+```
+
+### 说明
+
+在 `cosyvoice_context_params_t` 基础上增加 worker 数量配置。
+
+### 成员
+
+- `base_params`：基础上下文参数。
+- `n_workers`：要创建的 worker 槽数量。
+
+## cosyvoice_load_from_file_with_params_v2
+
+### 语法
+
+```c
+COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_with_params_v2(
+    const char*                          filename,
+    const cosyvoice_context_params_v2_t* params
+);
+```
+
+### 说明
+
+使用扩展参数加载模型上下文，包含 worker 数量配置。
+
+### 参数
+
+- `filename`：模型文件路径。
+- `params`：扩展上下文参数。
+
+### 返回值
+
+成功返回上下文句柄，失败返回 `NULL`。
+
+## cosyvoice_duplicate_context
+
+### 语法
+
+```c
+COSYVOICE_API cosyvoice_context_t cosyvoice_duplicate_context(cosyvoice_context_t ctx);
+```
+
+### 说明
+
+创建一个新的上下文，新上下文与源上下文共享已加载的模型资源。
+
+### 参数
+
+- `ctx`：源上下文。
+
+### 返回值
+
+成功返回复制后的上下文句柄，失败返回 `NULL`。
+
+### 备注
+
+新上下文会继承源上下文当前绑定的 worker，之后可通过 `cosyvoice_set_worker_no()` 独立切换。
+
+## cosyvoice_get_n_workers
+
+### 语法
+
+```c
+COSYVOICE_API uint32_t cosyvoice_get_n_workers(cosyvoice_context_t ctx);
+```
+
+### 说明
+
+获取当前上下文可用的 worker 槽总数。
+
+### 参数
+
+- `ctx`：模型上下文。
+
+### 返回值
+
+worker 槽数量。
+
+## cosyvoice_get_worker_no
+
+### 语法
+
+```c
+COSYVOICE_API uint32_t cosyvoice_get_worker_no(cosyvoice_context_t ctx);
+```
+
+### 说明
+
+获取当前激活的 worker 槽编号。
+
+### 参数
+
+- `ctx`：模型上下文。
+
+### 返回值
+
+当前 worker 编号。
+
+## cosyvoice_set_worker_no
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_set_worker_no(cosyvoice_context_t ctx, uint32_t worker_no);
+```
+
+### 说明
+
+设置后续推理使用的 worker 槽。
+
+### 参数
+
+- `ctx`：模型上下文。
+- `worker_no`：worker 槽编号。
+
+### 返回值
+
+成功返回 `true`，否则返回 `false`。
+
+### 备注
+
+当两个线程需要在共享同一份模型资源的前提下并发推理时，建议先复制上下文，再分别绑定不同 worker。
+
 ## cosyvoice_free
 
 ### 语法
@@ -484,6 +619,26 @@ COSYVOICE_API void cosyvoice_get_context_params(
 
 - `ctx`：模型上下文。
 - `params`：输出参数结构体。
+
+## cosyvoice_get_default_generation_config
+
+### 语法
+
+```c
+COSYVOICE_API void cosyvoice_get_default_generation_config(
+    cosyvoice_context_t            ctx,
+    cosyvoice_generation_config_t* config
+);
+```
+
+### 说明
+
+获取模型文件中加载的默认生成配置，尚未应用 worker 级覆盖。
+
+### 参数
+
+- `ctx`：模型上下文。
+- `config`：输出默认生成配置。
 
 ### 返回值
 
@@ -599,6 +754,32 @@ COSYVOICE_API void cosyvoice_set_sampler(cosyvoice_context_t ctx, cosyvoice_samp
 - `sampler`：采样器函数，`NULL` 表示恢复内置采样器。
 - `sampler_ctx`：用户上下文。
 
+## cosyvoice_sampler_ext_t
+
+### 语法
+
+```c
+typedef int (_cdecl * cosyvoice_sampler_ext_t)(
+    cosyvoice_llm_token_prob_t*        nucleus_probs,
+    int                                k,
+    float*                             probs,
+    uint32_t                           size,
+    const cosyvoice_sampling_params_t* sampling_params,
+    int*                               accepted_tokens,
+    uint32_t                           n_accepted_tokens,
+    void*                              sampler_ctx,
+    uint32_t                           worker_no
+);
+```
+
+### 说明
+
+扩展采样器回调，会额外收到 worker 编号。
+
+### 参数
+
+- `worker_no`：当前激活的 worker 槽编号。
+
 ### 返回值
 
 无返回值。
@@ -689,7 +870,27 @@ COSYVOICE_API bool cosyvoice_set_sampler_seed(cosyvoice_context_t ctx, uint32_t 
 
 ### 备注
 
-即使使用自定义采样器，种子也会被保存。
+该种子仅对当前 worker 生效。即使使用自定义采样器，种子也会被保存，并在当前 worker 切回内置采样器时生效。
+
+## cosyvoice_get_sampler_seed
+
+### 语法
+
+```c
+COSYVOICE_API uint32_t cosyvoice_get_sampler_seed(cosyvoice_context_t ctx);
+```
+
+### 说明
+
+获取当前 worker 的内置采样器 seed。
+
+### 参数
+
+- `ctx`：模型上下文。
+
+### 返回值
+
+当前 worker 的采样器种子。
 
 ## cosyvoice_generate_random_seed
 

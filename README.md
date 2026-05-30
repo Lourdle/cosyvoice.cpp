@@ -1,6 +1,6 @@
 # CosyVoice.cpp
 
-Language: [中文](README_zh.md)
+Language: English | [简体中文](README_zh.md)
 
 > Unofficial project notice: this repository is **not** affiliated with, endorsed by, or maintained by the official CosyVoice team. It is a community-maintained C++/GGML port created by an independent developer.
 
@@ -40,9 +40,9 @@ This project provides:
 - Tooling guide: [docs/TOOLS.md](docs/TOOLS.md)
 
 ## AI Usage Disclosure
-- Most project code is written by the author.
-- Parts of the documentation are drafted and edited with AI assistance.
-- Documentation may contain mistakes or lag behind implementation details; when in doubt, treat source code and header files as the ground truth, and feel free to open an issue/PR.
+- Most core library code is written by the author.
+- Most tooling and documentation content is drafted and edited with AI assistance.
+- Small mistakes or implementation drift may still exist; when in doubt, treat source code and header files as the ground truth, and feel free to open an issue or PR.
 
 ## Third-Party Notices
 - See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for bundled dependency license details.

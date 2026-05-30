@@ -1,6 +1,7 @@
 # cosyvoice-interface.h API Reference
 
 This page documents all symbols declared in `include/cosyvoice-interface.h`, including C++ interface methods.
+The runtime supports concurrent inference through multiple worker slots; separate contexts can bind to different workers while sharing loaded model resources.
 These interfaces are internal implementation details and do not guarantee ABI stability; they may change in future releases.
 
 ## cosyvoice_model_context
@@ -11,11 +12,15 @@ These interfaces are internal implementation details and do not guarantee ABI st
 struct cosyvoice_model_context
 {
     virtual uint32_t get_sample_rate() = 0;
+    virtual void get_default_generation_config(cosyvoice_generation_config_t* config) = 0;
     virtual void get_generation_config(cosyvoice_generation_config_t* config) = 0;
     virtual bool set_generation_config(const cosyvoice_generation_config_t* config) = 0;
     virtual void get_context_params(cosyvoice_context_params_t* params) = 0;
     virtual const char* get_architecture() = 0;
     virtual const char* get_instruction_prefix() = 0;
+    virtual bool set_worker_no(uint32_t worker_no) = 0;
+    virtual uint32_t get_worker_no() = 0;
+    virtual uint32_t get_n_workers() = 0;
 
     virtual void get_sampler(cosyvoice_sampler_t* sampler, void** sampler_ctx) = 0;
     virtual void set_sampler(cosyvoice_sampler_t sampler, void* sampler_ctx) = 0;
@@ -108,6 +113,26 @@ Copies current generation configuration.
 
 No return value.
 
+## cosyvoice_model_context::get_default_generation_config
+
+### Syntax
+
+```cpp
+virtual void get_default_generation_config(cosyvoice_generation_config_t* config) = 0;
+```
+
+### Description
+
+Copies the model-file default generation configuration before worker-level overrides.
+
+### Parameters
+
+- `config`: Output configuration structure.
+
+### Returns
+
+No return value.
+
 ## cosyvoice_model_context::set_generation_config
 
 ### Syntax
@@ -147,6 +172,62 @@ Copies effective context parameters.
 ### Returns
 
 No return value.
+
+## cosyvoice_model_context::set_worker_no
+
+### Syntax
+
+```cpp
+virtual bool set_worker_no(uint32_t worker_no) = 0;
+```
+
+### Description
+
+Selects the active worker slot for subsequent operations.
+
+### Parameters
+
+- `worker_no`: Worker-slot index.
+
+### Returns
+
+`true` on success; otherwise `false`.
+
+### Remarks
+
+Use a duplicated context when two threads need to run concurrently on different workers.
+
+## cosyvoice_model_context::get_worker_no
+
+### Syntax
+
+```cpp
+virtual uint32_t get_worker_no() = 0;
+```
+
+### Description
+
+Gets the current active worker slot number.
+
+### Returns
+
+Current worker-slot index.
+
+## cosyvoice_model_context::get_n_workers
+
+### Syntax
+
+```cpp
+virtual uint32_t get_n_workers() = 0;
+```
+
+### Description
+
+Gets the total number of worker slots available.
+
+### Returns
+
+Worker-slot count.
 
 ## cosyvoice_model_context::get_architecture
 
@@ -277,6 +358,22 @@ Sets sampler seed.
 ### Returns
 
 `true` on success; otherwise `false`.
+
+## cosyvoice_model_context::get_sampler_seed
+
+### Syntax
+
+```cpp
+virtual uint32_t get_sampler_seed() = 0;
+```
+
+### Description
+
+Gets the active worker's sampler seed.
+
+### Returns
+
+Current seed value for the active worker.
 
 ## cosyvoice_model_context::llm_prefill
 
