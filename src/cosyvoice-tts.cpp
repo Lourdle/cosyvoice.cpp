@@ -377,9 +377,9 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
     ggml_backend_sched_reset(sched.get());
     gf = new_cgraph(ctx0.get());
 
-    if (std::abs(speed - 1.f) > FLT_EPSILON)
+    if (auto ne0 = static_cast<int64_t>(speech_feat->ne[0] / speed); ne0 != speech_feat->ne[0])
         speech_feat = ggml_interpolate(ctx0.get(), speech_feat,
-            static_cast<int64_t>(speech_feat->ne[0] / speed), speech_feat->ne[1], speech_feat->ne[2], speech_feat->ne[3],
+            ne0, speech_feat->ne[1], speech_feat->ne[2], speech_feat->ne[3],
             GGML_SCALE_MODE_BILINEAR);
 
     auto [generated_speech, noise] = hift.build_cgraph(ctx0.get(), speech_feat);
