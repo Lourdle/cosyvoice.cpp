@@ -1,5 +1,10 @@
 # CosyVoice.cpp
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-blue.svg)]()
+[![GitHub Release](https://img.shields.io/github/v/release/Lourdle/cosyvoice.cpp)](https://github.com/Lourdle/cosyvoice.cpp/releases)
+[![CI](https://github.com/Lourdle/cosyvoice.cpp/actions/workflows/build-release.yml/badge.svg)](https://github.com/Lourdle/cosyvoice.cpp/actions/workflows/build-release.yml)
+
 语言： [English](README.md) | 简体中文
 
 > 非官方说明：本仓库**与 CosyVoice 官方团队无隶属关系**，也未获得官方背书或维护。本项目是社区开发者发起和维护的 C++/GGML 移植实现。
@@ -17,6 +22,8 @@
 - GGUF 量化工具（`quantize`）
 
 ## 目录
+- [功能特性](#功能特性)
+- [预转换模型](#预转换模型)
 - [文档](#文档)
 - [AI 使用说明](#ai-使用说明)
 - [快速开始](#快速开始)
@@ -35,13 +42,39 @@
 - [许可证说明](#许可证说明)
 - [欢迎贡献](#欢迎贡献)
 
+## 功能特性
+
+| 特性 | 说明 |
+|---|---|
+| **OpenAI Speech API 服务** | 即插即用的 `POST /v1/audio/speech` 端点，支持多音色、鉴权和 CORS |
+| **交互式 REPL** | CLI 交互模式，支持 /play、/save、/list、/query、/seed 等斜杠命令 |
+| **并发服务** | Server 的 `--concurrency` 参数，支持并行请求处理 |
+| **模型量化** | 内置 `quantize` 工具，支持 Q2_K 到 F16 多种量化格式 |
+| **KV Cache 量化** | 通过 `--llm-kv-cache-type` 降低 LLM 内存占用（f32 / f16 / q8_0 / q5_1 / q4_0 / ...） |
+| **Prompt Speech 复用** | 一次编码参考音色，后续合成直接复用，无需再跑 ONNX |
+| **音频后端可切换** | 可选 MINIAUDIO（默认）或 FFMPEG，支持 WAV、MP3、AAC、FLAC、OPUS、M4A |
+| **UMA 自动检测** | 自动检测统一内存架构并调整 buffer policy，优化吞吐 |
+| **推理 Buffer 策略** | `shared` / `balanced` / `dedicated` 三种模式，权衡内存与吞吐 |
+| **文本拆分与淡入** | 长文本智能拆分与可配置的输出淡入后处理 |
+| **多后端支持** | CPU、CUDA、Metal、SYCL（见[后端测试情况](#后端测试情况)） |
+| **跨平台** | Windows (x64)、Linux (x86_64)、macOS (arm64) — 均在 CI 中测试 |
+
+## 预转换模型
+
+下载即用的 GGUF 模型（无需自行转换）：
+
+- **ModelScope**：<https://modelscope.cn/models/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
+- **Hugging Face**：<https://huggingface.co/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
+
+上述链接包含 Q2_K 到 F16 的多种量化变体。
+
 ## 文档
 - API 索引：[docs/API_zh.md](docs/API_zh.md)
 - 工具说明：[docs/TOOLS_zh.md](docs/TOOLS_zh.md)
 
 ## AI 使用说明
 - 核心库代码主要由作者手工实现。
-- 工具和文档内容大多由 AI 协助撰写与整理。
+- 工具（cli、server）和文档内容大多由 AI 协助撰写与整理。
 - 仍可能存在少量错误或与实现不同步的情况；如有疑问请以源码与头文件为准，也欢迎提交 Issue/PR 纠正。
 
 ## 第三方许可说明
@@ -53,44 +86,56 @@
 - **本仓库代码**：MIT（见 `LICENSE`）。
 - **上游参考**：原始 CosyVoice 项目代码与模型为 Apache-2.0。
 - **实现说明**：本仓库是基于模型架构与推理行为的独立 C++/GGML 重实现，并非官方 fork 或官方发布。
-- **GGUF 模型产物**：发布的模型文件继续保持 Apache-2.0。
-  - ModelScope：<https://modelscope.cn/models/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
-  - Hugging Face：<https://huggingface.co/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
+- **GGUF 模型产物**：发布的模型文件继续保持 Apache-2.0。下载链接见[预转换模型](#预转换模型)。
 - **模型许可证文件**：[MODEL_LICENSE.md](MODEL_LICENSE.md)
 
 ## 快速开始
 
+各工具（`cosyvoice-cli`、`cosyvoice-server`、`quantize`）的详细用法见 [docs/TOOLS_zh.md](docs/TOOLS_zh.md)。
+
 ### 预编译发布版 (Releases)
 
-本仓库提供的 Releases 不包含 GGML 后端库。要使用它们：
-1. 从本仓库的 Releases 页面下载 `cosyvoice-cli` 或 `cosyvoice-server`。
-2. 下载与您的硬件（如 CUDA、CPU 等）和操作系统匹配的 `llama.cpp` release。
-3. 解压 `llama.cpp` release，并将 `cosyvoice` 的可执行文件放入其中，即包含 GGML 后端共享库（如 `ggml.dll`、`ggml-cuda.dll` 等）的目录。
-4. 在该目录下运行可执行文件。它们默认会自动加载程序所在目录的 GGML 后端。
+本仓库提供的 Releases 不包含 GGML 后端库：
+1. 从本仓库的 [Releases 页面](https://github.com/Lourdle/cosyvoice.cpp/releases) 下载 `cosyvoice-cli` 或 `cosyvoice-server`。
+2. 下载与硬件和操作系统匹配的 `llama.cpp` release。
+3. 将 `cosyvoice` 可执行文件放到包含 GGML 后端共享库（`ggml.dll`、`ggml-cuda.dll` 等）的同一目录。
+4. 在该目录下运行。
 
 > **预编译 GGML CUDA 后端已知问题（Issue [#15](https://github.com/Lourdle/cosyvoice.cpp/issues/15)）：** 有用户反馈使用 `llama.cpp` 预编译发布版的 GGML CUDA 后端时，生成的音频存在噪音。我测试确认了预编译 GGML CUDA 版本存在此问题，而自行从源码编译的 GGML 则未出现该问题。如果您在使用 CUDA 后端配合预编译 GGML 时遇到噪音，建议参考本文[构建](#构建)章节，将本项目与 GGML 一同从源码编译。
 
-### Python 环境准备（用于模型转换）
-1. 先用本仓库的 `convert_model_to_gguf.py` 将上游 CosyVoice 模型权重转换为 GGUF。
-2. 配置并编译本项目。
-3. （可选）用 `quantize` 对 GGUF 模型量化。
-4. 使用 `cosyvoice-cli` 进行文件合成，或使用 `cosyvoice-server` 提供 OpenAI Speech 兼容 HTTP API。
+### 从源码构建
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+```
+
+构建产物在 `build/bin`（可执行文件）和 `build/lib`（库文件）。详细构建选项见[构建](#构建)。
 
 ## 推理流程
+
 本项目支持两条等价推理路径：
 
-1. **前端 + TTS 一体流程（首次推荐）**
-   - 输入：参考音频（以及按模式要求的参考文本）+ 目标文本
-   - 流程：前端提取 `prompt_speech` -> 使用 `prompt_speech` 与目标文本执行 TTS
-   - 模式说明：
-     - `zero-shot` 模式需要 `--prompt-text`
-     - `instruct` / `cross-lingual` 模式下 `--prompt-text` 会被忽略
+```mermaid
+flowchart TD
+    subgraph E2E ["端到端（前端 + TTS）"]
+        A["参考音频<br/>+ 转录文本"] --> B["前端 (ONNX)<br/>SpeechTokenizer + Campplus"]
+        B --> C["prompt_speech<br/>（音色嵌入）"]
+        C --> D["TTS<br/>(LLM + Flow + HiFT)"]
+        E["目标文本"] --> D
+        D --> F["输出音频"]
+    end
 
-2. **复用 `prompt_speech`（批量合成推荐）**
-   - 可将 `prompt_speech` 保存为 `.gguf`（例如通过 `--prompt-speech-output` 或 API `cosyvoice_prompt_speech_save_to_file`）
-   - 后续直接传入 `--prompt-speech <file>` 即可合成，**不需要再次运行前端 ONNX**
+    subgraph REUSE["复用已保存的 prompt_speech"]
+        G["已保存的 prompt_speech.gguf<br/>（通过 --frontend-only<br/>或 --prompt-speech-output）"] --> H["TTS<br/>(LLM + Flow + HiFT)"]
+        I["目标文本"] --> H
+        H --> J["输出音频"]
+    end
+```
 
-简化理解：先把参考条件（音色/说话人信息）编码成 `prompt_speech`，再将 `prompt_speech` 与目标文本结合生成语音。
+- **路径 1（端到端）**：前端从参考音频 + 转录文本提取 `prompt_speech`，然后 TTS 与目标文本合成语音。
+  - `zero-shot` 模式需要 `--prompt-text`；`instruct` / `cross-lingual` 模式忽略它。
+- **路径 2（复用）**：通过 `--frontend-only` / `--prompt-speech-output` 运行一次前端，后续合成跳过 ONNX 模型。适合批量/重复合成。
 
 ## 构建
 

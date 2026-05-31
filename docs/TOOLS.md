@@ -310,6 +310,7 @@ Core options:
 - `--max-llm-len <value>`: Maximum input token count for LLM (`n_max_seq`). Default: `2048`. Must be a positive integer.
 - `--threads, -j <value>`: CPU thread count for model inference. Must be an unsigned 32-bit integer. Default: `0` (use current hardware concurrency).
 - `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>`: LLM KV cache type. Default: `q8_0`.
+- `--inference-buffer-policy <shared|balanced|dedicated>`: Inference buffer policy. Only effective in interactive mode; non-interactive mode always uses `shared` for minimal memory footprint and fastest single-shot synthesis. Default: `balanced`.
 - `--mode <zero-shot|instruct|cross-lingual>`: TTS mode. Default: auto-detect from `--instruction`.
 - `--instruction, -i <text>`: Instruction text for instruct mode.
 
@@ -356,6 +357,8 @@ Text normalization:
 Runtime logs:
 - Basic request info (model path, mode, prompt source, output, speed, resolved CPU thread count, seed source) is shown before model loading.
 - During model loading, a spinner (`| / - \\`) is shown in the console.
+- Backend info now includes UMA (unified memory architecture) detection result and effective buffer policy.
+- When UMA is detected and the requested buffer policy is `balanced`, the library automatically switches to `dedicated` for better throughput; a log message is printed in this case.
 - Default output is concise and formatted with sections.
 - `--verbose` shows full runtime details, including context/memory breakdown and full timing stages.
 - `--quiet` suppresses runtime info and timings (errors still print).
@@ -389,6 +392,7 @@ Required vs optional:
 | `--max-llm-len` | `2048` | CLI |
 | `--threads` | `0` (hardware concurrency) | CLI |
 | `--llm-kv-cache-type` | `q8_0` | CLI |
+| `--inference-buffer-policy` | `balanced` (interactive) / `shared` (non-interactive) | CLI |
 | `--seed` | random | runtime |
 | `temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, `min/max_token_text_ratio` | model metadata | model |
 

@@ -1,5 +1,10 @@
 # CosyVoice.cpp
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-blue.svg)]()
+[![GitHub Release](https://img.shields.io/github/v/release/Lourdle/cosyvoice.cpp)](https://github.com/Lourdle/cosyvoice.cpp/releases)
+[![CI](https://github.com/Lourdle/cosyvoice.cpp/actions/workflows/build-release.yml/badge.svg)](https://github.com/Lourdle/cosyvoice.cpp/actions/workflows/build-release.yml)
+
 Language: English | [简体中文](README_zh.md)
 
 > Unofficial project notice: this repository is **not** affiliated with, endorsed by, or maintained by the official CosyVoice team. It is a community-maintained C++/GGML port created by an independent developer.
@@ -17,6 +22,8 @@ This project provides:
 - A GGUF quantization tool (`quantize`)
 
 ## Contents
+- [Features](#features)
+- [Pre-converted Models](#pre-converted-models)
 - [Documentation](#documentation)
 - [AI Usage Disclosure](#ai-usage-disclosure)
 - [Quick Start](#quick-start)
@@ -35,13 +42,39 @@ This project provides:
 - [Licensing](#licensing)
 - [Contributing](#contributing)
 
+## Features
+
+| Feature | Description |
+|---|---|
+| **OpenAI Speech API Server** | Drop-in compatible `POST /v1/audio/speech` endpoint with multi-voice, auth, and CORS support |
+| **Interactive REPL** | CLI interactive mode with slash commands for play, save, list, query, and seed control |
+| **Concurrent Serving** | Server `--concurrency` for parallel request handling |
+| **Model Quantization** | Quantize GGUF models to smaller formats (Q2_K through F16) with the built-in `quantize` tool |
+| **KV Cache Quantization** | Reduce LLM memory usage via `--llm-kv-cache-type` (f32 / f16 / q8_0 / q5_1 / q4_0 / ...) |
+| **Prompt Speech Reuse** | Pre-encode reference voice once, reuse across multiple synthesis runs — no ONNX overhead |
+| **Audio Backend Plugins** | Choose MINIAUDIO (default) or FFMPEG for multi-format encoding (WAV, MP3, AAC, FLAC, OPUS, M4A) |
+| **UMA Auto-Detection** | Automatically detects unified memory architecture and adjusts buffer policy for optimal throughput |
+| **Inference Buffer Policies** | `shared` / `balanced` / `dedicated` buffer modes to trade off memory vs. throughput |
+| **Text Splitting & Fade-in** | Smart text splitting for long inputs and configurable output fade-in postprocessing |
+| **Multiple Backends** | CPU, CUDA, Metal, SYCL (see [Backend Test Status](#backend-test-status)) |
+| **Cross-Platform** | Windows (x64), Linux (x86_64), macOS (arm64) — all tested in CI |
+
+## Pre-converted Models
+
+Download ready-to-use GGUF models (no conversion needed):
+
+- **ModelScope**: <https://modelscope.cn/models/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
+- **Hugging Face**: <https://huggingface.co/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
+
+Pre-quantized variants (Q2_K through F16) are available at the links above.
+
 ## Documentation
 - API index: [docs/API.md](docs/API.md)
 - Tooling guide: [docs/TOOLS.md](docs/TOOLS.md)
 
 ## AI Usage Disclosure
 - Most core library code is written by the author.
-- Most tooling and documentation content is drafted and edited with AI assistance.
+- Most tooling (cli, server) and documentation content is drafted and edited with AI assistance.
 - Small mistakes or implementation drift may still exist; when in doubt, treat source code and header files as the ground truth, and feel free to open an issue or PR.
 
 ## Third-Party Notices
@@ -53,44 +86,56 @@ This project provides:
 - **Repository code**: MIT (`LICENSE`).
 - **Upstream reference**: the original CosyVoice project code and models are under Apache-2.0.
 - **Implementation note**: this repository is an independent C++/GGML re-implementation based on model architecture and inference behavior, and is not an official fork or release.
-- **GGUF model artifacts**: published model files remain under Apache-2.0.
-  - ModelScope: <https://modelscope.cn/models/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
-  - Hugging Face: <https://huggingface.co/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
+- **GGUF model artifacts**: published model files remain under Apache-2.0. See [Pre-converted Models](#pre-converted-models) for download links.
 - **Model license file**: [MODEL_LICENSE.md](MODEL_LICENSE.md)
 
 ## Quick Start
 
+See [docs/TOOLS.md](docs/TOOLS.md) for detailed usage of all tools (`cosyvoice-cli`, `cosyvoice-server`, `quantize`).
+
 ### Pre-built Releases
 
 The releases provided in this repository do not bundle the GGML backend libraries. To use them:
-1. Download `cosyvoice-cli` or `cosyvoice-server` from this repository's Releases page.
-2. Download a `llama.cpp` release that matches your hardware (e.g., CUDA, CPU, etc.) and OS.
-3. Extract the `llama.cpp` release and place the `cosyvoice` executables into the same directory where the GGML backend shared libraries (like `ggml.dll`, `ggml-cuda.dll`, etc.) are located.
-4. Run the executables from that directory. They will automatically load the GGML backend from the current executable directory by default.
+1. Download `cosyvoice-cli` or `cosyvoice-server` from this repository's [Releases page](https://github.com/Lourdle/cosyvoice.cpp/releases).
+2. Download a `llama.cpp` release that matches your hardware and OS.
+3. Place the `cosyvoice` executables into the same directory as the GGML backend shared libraries (`ggml.dll`, `ggml-cuda.dll`, etc.).
+4. Run from that directory.
 
 > **Known issue with pre-built GGML CUDA backend (Issue [#15](https://github.com/Lourdle/cosyvoice.cpp/issues/15)):** Some users have reported noise in generated audio when using pre-built GGML binaries from `llama.cpp` releases with the CUDA backend. I testing confirmed this issue with pre-compiled GGML CUDA builds, while self-compiled GGML from source did not exhibit the problem. If you encounter noise when using the CUDA backend with pre-built GGML, we recommend building both this project and GGML from source as a workaround. Refer to the [Build](#build) section for instructions.
 
-### Setup using Python (For Model Conversion)
-1. Convert upstream CosyVoice model weights to GGUF (via this repository's `convert_model_to_gguf.py`).
-2. Configure and build this project.
-3. (Optional) Quantize the GGUF model with `quantize`.
-4. Run `cosyvoice-cli` for file-based synthesis, or run `cosyvoice-server` for OpenAI Speech-compatible HTTP API.
+### Build from Source
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+```
+
+Outputs in `build/bin` (executables) and `build/lib` (libraries). See [Build](#build) for detailed options.
 
 ## Inference Pipeline
+
 This project supports two equivalent inference paths:
 
-1. **End-to-end frontend + TTS (recommended for first run)**
-   - Input: reference audio (and reference text when required by mode) + target text
-   - Flow: frontend extracts `prompt_speech` -> TTS runs with `prompt_speech` and target text
-   - Mode notes:
-     - `zero-shot` requires `--prompt-text`
-     - `instruct` and `cross-lingual` ignore `--prompt-text`
+```mermaid
+flowchart TD
+    subgraph E2E ["End-to-end (Frontend + TTS)"]
+        A["Reference Audio<br/>+ Transcript"] --> B["Frontend (ONNX)<br/>SpeechTokenizer + Campplus"]
+        B --> C["prompt_speech<br/>(voice embedding)"]
+        C --> D["TTS<br/>(LLM + Flow + HiFT)"]
+        E["Target Text"] --> D
+        D --> F["Output Audio"]
+    end
 
-2. **Reuse saved `prompt_speech` (recommended for batch/repeated synthesis)**
-   - Save `prompt_speech` as `.gguf` first (for example via `--prompt-speech-output` or API `cosyvoice_prompt_speech_save_to_file`)
-   - Later runs can pass `--prompt-speech <file>` directly, so frontend ONNX does **not** need to run again
+    subgraph REUSE["Reuse Saved prompt_speech"]
+        G["Saved prompt_speech.gguf<br/>(from --frontend-only<br/>or --prompt-speech-output)"] --> H["TTS<br/>(LLM + Flow + HiFT)"]
+        I["Target Text"] --> H
+        H --> J["Output Audio"]
+    end
+```
 
-In short: encode reference conditions (voice/speaker traits) into `prompt_speech` first, then combine `prompt_speech` with target text to generate audio.
+- **Path 1 (end-to-end)**: Frontend extracts `prompt_speech` from reference audio + transcript, then TTS synthesizes with target text.
+  - `zero-shot` mode requires `--prompt-text`; `instruct` and `cross-lingual` modes ignore it.
+- **Path 2 (reuse)**: Run frontend once via `--frontend-only` / `--prompt-speech-output`, then skip it for all subsequent synthesis. This avoids re-running the ONNX model each time.
 
 ## Build
 

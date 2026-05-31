@@ -310,6 +310,7 @@ cosyvoice-cli \
 - `--max-llm-len <value>`：LLM 最大输入 token 数（`n_max_seq`），默认 `2048`，必须为正整数。
 - `--threads, -j <value>`：模型推理使用的 CPU 线程数，必须是无符号 32 位整数；默认 `0`（使用当前硬件并发数）。
 - `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>`：LLM KV cache 类型，默认 `q8_0`。
+- `--inference-buffer-policy <shared|balanced|dedicated>`：推理缓冲区策略。仅在交互模式下生效；非交互模式始终使用 `shared` 以最小化内存占用并获得最快的单次合成速度。默认 `balanced`。
 - `--mode <zero-shot|instruct|cross-lingual>`：TTS 模式。默认按 `--instruction` 自动判定。
 - `--instruction, -i <text>`：instruct 模式指令文本。
 
@@ -356,6 +357,8 @@ cosyvoice-cli \
 运行日志：
 - 模型加载前会先打印基础请求信息（模型路径、模式、提示源、输出路径、语速、解析后的 CPU 线程数、seed 来源）。
 - 模型加载阶段会显示转圈动画（`| / - \\`）。
+- 后端信息现在包含 UMA（统一内存架构）检测结果和生效的缓冲策略。
+- 当检测到 UMA 且请求的缓冲策略为 `balanced` 时，库会自动切换为 `dedicated` 以获得更好性能；此时会打印日志提示。
 - 默认输出为简洁分区样式。
 - `--verbose` 显示完整运行细节（含上下文/内存明细与完整阶段耗时）。
 - `--quiet` 不显示运行信息和耗时（错误信息仍会输出）。
@@ -389,6 +392,7 @@ cosyvoice-cli \
 | `--max-llm-len` | `2048` | CLI |
 | `--threads` | `0`（硬件并发数） | CLI |
 | `--llm-kv-cache-type` | `q8_0` | CLI |
+| `--inference-buffer-policy` | `balanced`（交互模式）/ `shared`（非交互模式） | CLI |
 | `--seed` | 随机 | 运行时 |
 | `temperature/top_k/top_p/win_size/tau_r/min/max_token_text_ratio` | 模型元数据 | 模型 |
 
