@@ -72,6 +72,8 @@ struct cli_options
     uint32_t n_threads = 0;
     bool has_llm_kv_cache_type = false;
     cosyvoice_llm_kv_cache_type_t llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0;
+    bool has_inference_buffer_policy = false;
+    cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
     bool verbose = false;
     bool quiet = false;
     bool has_temperature = false;
@@ -269,6 +271,8 @@ static void print_usage(const char* argv0)
     printf("  --threads, -j <value>                       CPU thread count. Default: 0 (hardware concurrency).\n");
     printf("  --llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>\n");
     printf("                                              KV cache type. Default: q8_0.\n");
+    printf("  --inference-buffer-policy <shared|balanced|dedicated>\n");
+    printf("                                              Inference buffer policy (interactive only). Default: balanced.\n");
     printf("  --seed <value>                              Fixed seed for sampling.\n");
     printf("  --seed-policy <auto|fixed|random>           Seed strategy. Default: auto (fixed if --seed is set).\n");
 
@@ -681,6 +685,7 @@ static void print_preload_run_info(const cli_options& options, cli_log_level log
 
 static void print_tts_runtime_info(
     const cli_options& options,
+    cosyvoice_context_t ctx,
     ggml_backend_t backend,
     const cosyvoice_context_params_t& context_params,
     const cosyvoice_generation_config_t& generation_config,
@@ -697,6 +702,7 @@ static void print_tts_runtime_info(
     print_kv_line_string("device_id", props.device_id);
     print_kv_line_mib("total_memory", props.memory_total);
     print_kv_line_mib("free_memory", props.memory_free);
+    print_kv_line_string("uma", cosyvoice_is_backend_uma(ctx) ? "yes" : "no");
 #ifndef GGML_SHARED
     ggml_backend_free(backend);
 #endif
@@ -722,6 +728,7 @@ static void print_tts_runtime_info(
             options.has_llm_kv_cache_type ? "cli override" : "default");
         print_kv_line_string("llm_kv_cache_type", buf);
     }
+    print_kv_line_string("buffer_policy", inference_buffer_policy_to_string(context_params.inference_buffer_policy));
     if (log_level == cli_log_level::verbose)
     {
         print_kv_line_u32("n_batch", context_params.n_batch);
@@ -1345,6 +1352,18 @@ int tool_entry(int argc, char** argv)
             options.llm_kv_cache_type = type;
             options.has_llm_kv_cache_type = true;
         }
+        else if (str_casecmp(arg, "--inference-buffer-policy") == 0)
+        {
+            auto value = get_arg_value();
+            cosyvoice_inference_buffer_policy_t policy;
+            if (!parse_inference_buffer_policy_arg(value, &policy))
+            {
+                print_error_log("Error: invalid --inference-buffer-policy value \"%s\".\n", value);
+                return 1;
+            }
+            options.inference_buffer_policy = policy;
+            options.has_inference_buffer_policy = true;
+        }
 #ifndef COSYVOICE_NO_FRONTEND
         else if (str_casecmp(arg, "--frontend-only") == 0)
             options.frontend_only = true;
@@ -1671,7 +1690,13 @@ int tool_entry(int argc, char** argv)
 
     cosyvoice_context_params_t params;
     cosyvoice_init_default_context_params(&params);
-    params.inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED;
+    if (options.interactive)
+    {
+        if (options.has_inference_buffer_policy)
+            params.inference_buffer_policy = options.inference_buffer_policy;
+    }
+    else
+        params.inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED;
     params.n_max_seq = options.max_llm_len;
     if (options.has_llm_kv_cache_type)
         params.llm_kv_cache_type = options.llm_kv_cache_type;
@@ -1703,7 +1728,7 @@ int tool_entry(int argc, char** argv)
     model_loading_spinner.start();
 
     ggml_backend_t backend = ggml_backend_init_best();
-    cosyvoice_context_handle ctx(cosyvoice_load_from_file_ext(options.model.c_str(), &params, backend, options.n_threads, 0));
+    cosyvoice_context_handle ctx(cosyvoice_load_from_file_ext(options.model.c_str(), &params, backend, options.n_threads));
     model_loading_spinner.stop(ctx != nullptr);
     timing.model_load_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
     if (!ctx)
@@ -1760,7 +1785,7 @@ int tool_entry(int argc, char** argv)
         cosyvoice_get_generation_config(ctx.get(), &generation_config);
     }
     const uint32_t sample_rate = cosyvoice_get_sample_rate(ctx.get());
-    print_tts_runtime_info(options, backend, effective_params, generation_config, sample_rate, log_level);
+    print_tts_runtime_info(options, ctx.get(), backend, effective_params, generation_config, sample_rate, log_level);
 
     tts_seed_state* seed_state_ptr = &seed_state;
 
