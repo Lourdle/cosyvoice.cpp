@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <format>
 #include <span>
@@ -39,15 +40,17 @@ static transfer_fit fit_transfer(size_t size_1, double time_1_us, size_t size_2,
 }
 
 template <typename F>
-static double measure_avg_us(F&& fn)
+static double measure_min_us(F&& fn)
 {
-    const auto start = ggml_time_us();
-    for (int i = 0; i != kUmaProbeIters; ++i)
+    double min_us = (std::numeric_limits<double>::max)();
+    for (int i = 0; i != kUmaProbeIters; ++i) {
+        const auto start = ggml_time_us();
         fn();
-    const auto elapsed = ggml_time_us() - start;
-    if (elapsed <= 0)
-        return 0.0;
-    return static_cast<double>(elapsed) / static_cast<double>(kUmaProbeIters);
+        const auto elapsed = ggml_time_us() - start;
+        if (elapsed > 0 && static_cast<double>(elapsed) < min_us)
+            min_us = static_cast<double>(elapsed);
+    }
+    return min_us < (std::numeric_limits<double>::max)() ? min_us : 0.0;
 }
 
 #if defined(__APPLE__) && defined(__aarch64__)
@@ -82,14 +85,14 @@ bool backend_looks_uma(ggml_backend_t backend, ggml_backend_buffer* buffer)
 
     memcpy(dst, src, size_1);
 
-    const auto memcpy_1_us = measure_avg_us([&] { memcpy(dst, src, size_1); });
-    const auto memcpy_2_us = measure_avg_us([&] { memcpy(dst, src, size_2); });
+    const auto memcpy_1_us = measure_min_us([&] { memcpy(dst, src, size_1); });
+    const auto memcpy_2_us = measure_min_us([&] { memcpy(dst, src, size_2); });
 
     ggml_backend_tensor_set(&tensor, src, 0, size_1);
-    const auto backend_1_us = measure_avg_us([&] { ggml_backend_tensor_set(&tensor, src, 0, size_1); });
+    const auto backend_1_us = measure_min_us([&] { ggml_backend_tensor_set(&tensor, src, 0, size_1); });
 
     ggml_backend_tensor_set(&tensor, src, 0, size_2);
-    const auto backend_2_us = measure_avg_us([&] { ggml_backend_tensor_set(&tensor, src, 0, size_2); });
+    const auto backend_2_us = measure_min_us([&] { ggml_backend_tensor_set(&tensor, src, 0, size_2); });
 
     if (memcpy_1_us <= 0.0 || memcpy_2_us <= 0.0 || backend_1_us <= 0.0 || backend_2_us <= 0.0)
         return false;
