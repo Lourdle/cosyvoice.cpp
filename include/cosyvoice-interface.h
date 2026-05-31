@@ -25,6 +25,7 @@ struct cosyvoice_model_context
     virtual void get_context_params(cosyvoice_context_params_t* params) = 0; ///< Copy the effective context parameters into `params`.
     virtual const char* get_instruction_prefix() = 0; ///< Get the instruction prefix expected by the current model.
     virtual const char* get_architecture() = 0; ///< Get a string identifying the current model architecture, e.g. "cosyvoice3-2512".
+    virtual bool is_backend_uma() = 0; ///< Query whether the backend appears to use unified memory (UMA).
     virtual bool set_worker_no(uint32_t worker_no) = 0; ///< Select the active worker slot for subsequent operations. Use a duplicated context when running different workers concurrently. Returns false if the worker number is out of range.
     virtual uint32_t get_worker_no() = 0; ///< Get the current active worker slot number.
     virtual uint32_t get_n_workers() = 0; ///< Get the total number of worker slots available.

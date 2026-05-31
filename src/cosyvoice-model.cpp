@@ -61,7 +61,7 @@ void cosyvoice_init_default_context_params(cosyvoice_context_params_t* params)
 }
 
 cosyvoice_model_shared::cosyvoice_model_shared(const cosyvoice_context_params_v2_cpp& params)
-    : params(params), ctx(nullptr), rand_noise_len(0), noise_callback(nullptr), noise_callback_ctx(nullptr) {}
+    : params(params), ctx(nullptr), backend_uma(false), rand_noise_len(0), noise_callback(nullptr), noise_callback_ctx(nullptr) {}
 
 cosyvoice_worker_context::cosyvoice_worker_context(ggml_backend_t backend)
     : backend(backend), cpu_backend(backend),
@@ -414,6 +414,11 @@ void cosyvoice_model::get_context_params(cosyvoice_context_params_t* params)
 const char* cosyvoice_model::get_architecture()
 {
     return shared->architecture.get();
+}
+
+bool cosyvoice_model::is_backend_uma()
+{
+    return shared->backend_uma;
 }
 
 void cosyvoice_model::get_sampler(cosyvoice_sampler_t* sampler, void** sampler_ctx)

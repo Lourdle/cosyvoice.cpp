@@ -2,10 +2,123 @@
 #include "cosyvoice-loader.h"
 #include "cosyvoice-llm-kv-cache.h"
 
+#include <algorithm>
+#include <cstring>
 #include <stdexcept>
 #include <format>
 #include <span>
 #include <ranges>
+
+namespace
+{
+constexpr size_t kUmaProbeBytes = 128ull * 1024ull * 1024ull;
+constexpr size_t kUmaProbeMinBytes = 64ull * 1024ull * 1024ull;
+constexpr int kUmaProbeIters = 4;
+
+struct transfer_fit
+{
+    double bandwidth_bytes_per_us = 0.0;
+    double overhead_us = 0.0;
+};
+
+static transfer_fit fit_transfer(size_t size_1, double time_1_us, size_t size_2, double time_2_us)
+{
+    transfer_fit result;
+    if (size_1 <= size_2 || time_1_us <= time_2_us)
+        return result;
+
+    const auto bw = static_cast<double>(size_1 - size_2) / (time_1_us - time_2_us);
+    if (bw <= 0.0)
+        return result;
+
+    result.bandwidth_bytes_per_us = bw;
+    result.overhead_us = time_1_us - static_cast<double>(size_1) / bw;
+    if (result.overhead_us < 0.0)
+        result.overhead_us = 0.0;
+    return result;
+}
+
+template <typename F>
+static double measure_avg_us(F&& fn)
+{
+    const auto start = ggml_time_us();
+    for (int i = 0; i != kUmaProbeIters; ++i)
+        fn();
+    const auto elapsed = ggml_time_us() - start;
+    if (elapsed <= 0)
+        return 0.0;
+    return static_cast<double>(elapsed) / static_cast<double>(kUmaProbeIters);
+}
+
+#if defined(__APPLE__) && defined(__aarch64__)
+constexpr bool backend_looks_uma(ggml_backend_t backend, ggml_backend_buffer* buffer) { return true; }
+#else
+bool backend_looks_uma(ggml_backend_t backend, ggml_backend_buffer* buffer)
+{
+    constexpr auto size_1 = kUmaProbeBytes - (kUmaProbeBytes % sizeof(float));
+    constexpr auto size_2 = kUmaProbeMinBytes - (kUmaProbeMinBytes % sizeof(float));
+    if constexpr (size_1 == 0 || size_2 == 0 || size_1 <= size_2)
+        return false;
+
+    if (!backend || !buffer)
+        return false;
+
+    const auto buffer_size = ggml_backend_buffer_get_size(buffer);
+    if (buffer_size < kUmaProbeBytes)
+        return false;
+
+    ggml_tensor tensor =
+    {
+        .type = GGML_TYPE_I8,
+        .ne = { static_cast<int64_t>(size_1), 1, 1, 1 },
+        .nb = { 1, size_1, size_1, size_1 }
+    };
+    ggml_backend_tensor_alloc(buffer, &tensor, ggml_backend_buffer_get_base(buffer));
+
+    auto host_src = std::make_unique<char[]>(size_1 * 2);
+
+    auto* src = host_src.get();
+    auto* dst = src + size_1;
+
+    memcpy(dst, src, size_1);
+
+    const auto memcpy_1_us = measure_avg_us([&] { memcpy(dst, src, size_1); });
+    const auto memcpy_2_us = measure_avg_us([&] { memcpy(dst, src, size_2); });
+
+    ggml_backend_tensor_set(&tensor, src, 0, size_1);
+    const auto backend_1_us = measure_avg_us([&] { ggml_backend_tensor_set(&tensor, src, 0, size_1); });
+
+    ggml_backend_tensor_set(&tensor, src, 0, size_2);
+    const auto backend_2_us = measure_avg_us([&] { ggml_backend_tensor_set(&tensor, src, 0, size_2); });
+
+    if (memcpy_1_us <= 0.0 || memcpy_2_us <= 0.0 || backend_1_us <= 0.0 || backend_2_us <= 0.0)
+        return false;
+
+    const auto memcpy_fit = fit_transfer(size_1, memcpy_1_us, size_2, memcpy_2_us);
+    const auto backend_fit = fit_transfer(size_1, backend_1_us, size_2, backend_2_us);
+    if (memcpy_fit.bandwidth_bytes_per_us <= 0.0 || backend_fit.bandwidth_bytes_per_us <= 0.0)
+        return false;
+
+    constexpr double mib_per_us_to_mib_per_s = 1000000.0 / (1024.0 * 1024.0);
+    const auto memcpy_mib_s = memcpy_fit.bandwidth_bytes_per_us * mib_per_us_to_mib_per_s;
+    const auto backend_mib_s = backend_fit.bandwidth_bytes_per_us * mib_per_us_to_mib_per_s;
+    const auto uma = backend_fit.bandwidth_bytes_per_us >= memcpy_fit.bandwidth_bytes_per_us * 0.7;
+    cosyvoice_call_ggml_log_callback(
+        GGML_LOG_LEVEL_INFO,
+        std::format(
+            "UMA probe: memcpy={:.1f} MiB/s (overhead {:.1f} us), backend={:.1f} MiB/s (overhead {:.1f} us), guess: UMA={}\n",
+            memcpy_mib_s,
+            memcpy_fit.overhead_us,
+            backend_mib_s,
+            backend_fit.overhead_us,
+            uma
+        ).c_str()
+    );
+
+    return uma;
+}
+#endif
+}
 
 #define LOAD_SUBMODULE_EX(name, module) do {\
     auto& _module = module;\
@@ -406,6 +519,15 @@ void cosyvoice_model_3::load(gguf_loader& loader)
 
     shared->buffer.reset(ggml_backend_buft_alloc_buffer(buft, mem_size));
     auto buffer_base = reinterpret_cast<char*>(ggml_backend_buffer_get_base(shared->buffer.get()));
+
+    shared->backend_uma = backend_looks_uma(backend, shared->buffer.get());
+    if (shared->params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED
+        && shared->backend_uma)
+    {
+        shared->params.inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED;
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, "Detected UMA-like backend memory; switching balanced inference buffers to dedicated mode.\n");
+    }
+
     shared->ctx.reset(ggml_init(params));
 
     mem_size = ggml_backend_buft_get_alloc_size(ggml_backend_cpu_buffer_type(), llm.embed_tokens_weight)

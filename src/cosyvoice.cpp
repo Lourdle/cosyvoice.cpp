@@ -407,6 +407,11 @@ const char* cosyvoice_get_architecture(cosyvoice_context_t ctx)
     return ctx->get_architecture();
 }
 
+bool cosyvoice_is_backend_uma(cosyvoice_context_t ctx)
+{
+    return ctx->is_backend_uma();
+}
+
 void cosyvoice_set_sampler(cosyvoice_context_t ctx, cosyvoice_sampler_t sampler, void* sampler_ctx)
 {
     return ctx->set_sampler(sampler, sampler_ctx);

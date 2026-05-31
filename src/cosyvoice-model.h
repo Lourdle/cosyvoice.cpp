@@ -23,6 +23,7 @@ struct cosyvoice_model_shared
 
     cosyvoice_context_params_v2_cpp params;
     ggml_backend_op_capabilities op_caps;
+    bool backend_uma;
 
     std::mt19937 noise_rng;
     std::shared_mutex noise_mutex;
@@ -112,6 +113,7 @@ struct cosyvoice_model : virtual cosyvoice_model_context, virtual cosyvoice_obje
     const char* get_instruction_prefix();
     void get_context_params(cosyvoice_context_params_t* params);
     const char* get_architecture();
+    bool is_backend_uma();
 
     void get_sampler(cosyvoice_sampler_t* sampler, void** sampler_ctx);
     void set_sampler(cosyvoice_sampler_t sampler, void* sampler_ctx);

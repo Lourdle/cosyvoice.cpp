@@ -309,6 +309,11 @@ COSYVOICE_API bool                cosyvoice_set_worker_no(
  */
 COSYVOICE_API const char*         cosyvoice_get_architecture(cosyvoice_context_t ctx);
 
+/**
+ * @brief Query whether the backend appears to use unified memory (UMA).
+ */
+COSYVOICE_API bool                cosyvoice_is_backend_uma(cosyvoice_context_t ctx);
+
 // ----------------------------------------------------------------------------
 // Generation Configuration API
 // ----------------------------------------------------------------------------
