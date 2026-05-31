@@ -29,6 +29,7 @@
 #include <map>
 
 #ifdef _WIN32
+    #define NOMINMAX
     #include <Windows.h>
 #else
     #include <signal.h>
