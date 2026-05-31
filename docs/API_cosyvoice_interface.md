@@ -18,6 +18,7 @@ struct cosyvoice_model_context
     virtual void get_context_params(cosyvoice_context_params_t* params) = 0;
     virtual const char* get_architecture() = 0;
     virtual const char* get_instruction_prefix() = 0;
+    virtual bool is_backend_uma() = 0;
     virtual bool set_worker_no(uint32_t worker_no) = 0;
     virtual uint32_t get_worker_no() = 0;
     virtual uint32_t get_n_workers() = 0;
@@ -260,6 +261,28 @@ Gets instruction prefix required by model.
 ### Returns
 
 Null-terminated UTF-8 string pointer.
+
+## cosyvoice_model_context::is_backend_uma
+
+### Syntax
+
+```cpp
+virtual bool is_backend_uma() = 0;
+```
+
+### Description
+
+Queries whether the backend appears to use unified memory architecture (UMA).
+
+### Returns
+
+`true` if the backend memory is detected as UMA; otherwise `false`.
+
+### Remarks
+
+The result is determined at model load time. The runtime compares backend tensor-write bandwidth against host `memcpy` bandwidth; if the backend achieves at least 70% of host memcpy throughput, UMA is assumed. On Apple Silicon (`__aarch64__`), UMA is always reported.
+
+> **Note**: UMA detection is a heuristic based on bandwidth probing. Results may be inaccurate depending on hardware, driver version, and system load at probe time. Treat the result as a rough hint rather than a definitive hardware capability.
 
 ## cosyvoice_model_context::get_sampler
 

@@ -644,6 +644,32 @@ Returns the architecture identifier of the loaded model.
 
 Null-terminated UTF-8 architecture string, such as `cosyvoice3-2512`.
 
+## cosyvoice_is_backend_uma
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_is_backend_uma(cosyvoice_context_t ctx);
+```
+
+### Description
+
+Queries whether the backend appears to use unified memory architecture (UMA).
+
+### Parameters
+
+- `ctx`: Context handle.
+
+### Returns
+
+`true` if the backend memory is detected as UMA; otherwise `false`.
+
+### Remarks
+
+The result is determined at model load time by probing the backend memory bandwidth. On Apple Silicon (`__aarch64__`), UMA is assumed by default. On other platforms, the runtime compares backend tensor-set bandwidth against host `memcpy` bandwidth. When UMA is detected and the requested buffer policy is `balanced`, the library automatically switches to `dedicated` to avoid redundant buffer sharing. This query is useful for callers that want to display backend characteristics or make policy decisions based on the memory architecture.
+
+> **Note**: UMA detection is a heuristic based on bandwidth probing. Results may be inaccurate depending on hardware, driver version, and system load at probe time. Treat the result as a rough hint rather than a definitive hardware capability.
+
 ## cosyvoice_get_generation_config
 
 ### Syntax

@@ -664,6 +664,32 @@ COSYVOICE_API const char* cosyvoice_get_architecture(cosyvoice_context_t ctx);
 
 以 `\0` 结尾的 UTF-8 架构字符串，例如 `cosyvoice3-2512`。
 
+## cosyvoice_is_backend_uma
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_is_backend_uma(cosyvoice_context_t ctx);
+```
+
+### 说明
+
+查询后端是否使用统一内存架构（UMA）。
+
+### 参数
+
+- `ctx`：模型上下文。
+
+### 返回值
+
+检测到 UMA 内存时返回 `true`，否则返回 `false`。
+
+### 备注
+
+UMA 判定在模型加载阶段完成：运行时通过对比后端 tensor 写入带宽与主机 `memcpy` 带宽来推断。Apple Silicon（`__aarch64__`）默认视为 UMA。当检测到 UMA 且请求的缓冲策略为 `balanced` 时，库会自动切换为 `dedicated` 以避免冗余缓冲共享。调用方可通过此接口展示后端特性或据此调整缓冲策略。
+
+> **注意**：UMA 检测基于带宽探测的启发式方法，结果可能因硬件、驱动版本和探测时系统负载不同而有偏差，请将其视为粗略参考而非确定性的硬件能力判断。
+
 ## cosyvoice_get_generation_config
 
 ### 语法

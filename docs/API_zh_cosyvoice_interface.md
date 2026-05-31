@@ -18,6 +18,7 @@ struct cosyvoice_model_context
     virtual void get_context_params(cosyvoice_context_params_t* params) = 0;
     virtual const char* get_architecture() = 0;
     virtual const char* get_instruction_prefix() = 0;
+    virtual bool is_backend_uma() = 0;
     virtual bool set_worker_no(uint32_t worker_no) = 0;
     virtual uint32_t get_worker_no() = 0;
     virtual uint32_t get_n_workers() = 0;
@@ -268,6 +269,28 @@ virtual const char* get_instruction_prefix() = 0;
 ### 返回值
 
 UTF-8 字符串指针。
+
+## cosyvoice_model_context::is_backend_uma
+
+### 语法
+
+```cpp
+virtual bool is_backend_uma() = 0;
+```
+
+### 说明
+
+查询后端是否使用统一内存架构（UMA）。
+
+### 返回值
+
+检测到 UMA 内存时返回 `true`，否则返回 `false`。
+
+### 备注
+
+UMA 判定在模型加载阶段完成。运行时通过对比后端 tensor 写入带宽与主机 `memcpy` 带宽来推断：若后端带宽达到主机 `memcpy` 的 70% 以上即视为 UMA。Apple Silicon（`__aarch64__`）始终报告为 UMA。
+
+> **注意**：UMA 检测基于带宽探测的启发式方法，结果可能因硬件、驱动版本和探测时系统负载不同而有偏差，请将其视为粗略参考而非确定性的硬件能力判断。
 
 ## cosyvoice_model_context::get_sampler
 
