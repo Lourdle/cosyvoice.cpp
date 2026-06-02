@@ -138,6 +138,9 @@ cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context
 
     op_caps.leaky_relu = ggml_backend_supports_op(backend, ggml_leaky_relu(ctx0, a, 0.01f, false));
 
+    op_caps.sin = ggml_backend_supports_op(backend, ggml_sin(ctx0, a));
+    op_caps.cos = ggml_backend_supports_op(backend, ggml_cos(ctx0, a));
+
     {
         ggml_tensor* w = ggml_new_tensor_3d(ctx0, GGML_TYPE_F16, 3, 4, 8);
         a = ggml_new_tensor_3d(ctx0, GGML_TYPE_F16, 16, 4, 1);

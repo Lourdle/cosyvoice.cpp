@@ -35,6 +35,8 @@ struct ggml_backend_op_capabilities
     bool emb_cast_f32  : 1;
     bool top_k         : 1;
     bool leaky_relu    : 1;
+    bool sin           : 1;
+    bool cos           : 1;
 };
 
 struct ggml_cgraph_node_iterator
