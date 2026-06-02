@@ -532,7 +532,7 @@ ggml_tensor* PreLookaheadLayer::build_cgraph(ggml_context* ctx, ggml_tensor* inp
     outputs = ggml_cont(ctx, outputs);
     outputs = ggml_pad(ctx, outputs, pre_lookahead_len, 0, 0, 0);
     outputs = conv1.build_cgraph(ctx, outputs, 1, 0, 1, 1, {});
-    outputs = ggml_leaky_relu(ctx, outputs, 0.01f, true);
+    outputs = ggml_leaky_relu(ctx, outputs, 0.01f, false);
 
     outputs = ggml_pad_ext(ctx, outputs, static_cast<int>(conv2.weight->ne[0] - 1), 0, 0, 0, 0, 0, 0, 0);
     outputs = conv2.build_cgraph(ctx, outputs, 1, 0, 1, 1, {});
@@ -728,7 +728,7 @@ std::array<ggml_tensor*, 2> CausalHiFTGenerator::build_cgraph(ggml_context* ctx,
         const auto num_kernels = resblocks.size() / num_upsamples;
         for (size_t i = 0; i != num_upsamples; ++i)
         {
-            x = ggml_leaky_relu(ctx, x, lrelu_slope, true);
+            x = ggml_leaky_relu(ctx, x, lrelu_slope, false);
             x = ups[i].build_cgraph(ctx, x);
 
             if (i == num_upsamples - 1)
@@ -744,7 +744,7 @@ std::array<ggml_tensor*, 2> CausalHiFTGenerator::build_cgraph(ggml_context* ctx,
                     resblocks[i * num_kernels + j].build_cgraph(ctx, x));
             x = ggml_scale(ctx, xs, 1.f / num_kernels);
         }
-        x = ggml_leaky_relu(ctx, x, 0.01f, true);
+        x = ggml_leaky_relu(ctx, x, 0.01f, false);
         x = conv_post.build_cgraph(ctx, x);
 
         auto magnitude = ggml_view_3d(ctx, x, x->ne[0], nfft / 2 + 1, x->ne[2], x->nb[1], x->nb[2], 0);
