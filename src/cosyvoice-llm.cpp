@@ -78,10 +78,19 @@ static ggml_tensor* build_qwen2_decoder_layer(const Qwen2DecoderLayer& layer, gg
     return hidden_states;
 }
 
-static void set_graph_backend(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml_backend_t backend, ggml_backend_t cpu_backend, ggml_tensor* input_embeds)
+static void set_graph_backend(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml_backend_t backend, ggml_backend_t cpu_backend, ggml_tensor* input_embeds, ggml_tensor* cpu_pivot = nullptr)
 {
+    bool cpu = false;
     for (auto node : ggml_cgraph_node_iterator(gf))
-        ggml_backend_sched_set_tensor_backend(sched, node, node == input_embeds ? cpu_backend : backend);
+    {
+        if (node == cpu_pivot)
+            cpu = true;
+
+        if (cpu)
+            ggml_backend_sched_set_tensor_backend(sched, node, cpu_backend);
+        else
+            ggml_backend_sched_set_tensor_backend(sched, node, node == input_embeds ? cpu_backend : backend);
+    }
 }
 
 bool cosyvoice_model_3::llm_prefill(
@@ -245,33 +254,56 @@ bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
 
         auto logits = llm.llm_decoder.build_cgraph(ctx0, hidden_states);
         auto probs = ggml_soft_max_ext(ctx0, logits, nullptr, 1.f / worker->config.temperature, 0.f);
-        auto top_k = ggml_top_k(ctx0, probs, worker->config.sampling.top_k);
 
-        probs = ggml_reshape_2d(ctx0, probs, 1, probs->ne[0]);
-        probs = ggml_get_rows(ctx0, probs, top_k);
-        top_k = ggml_reshape_2d(ctx0, top_k, 1, top_k->ne[0]);
-        top_k->type = GGML_TYPE_F32;
-        probs = ggml_concat(ctx0, top_k, probs, 0);
+        if (shared->op_caps.top_k)
+        {
+            auto top_k = ggml_top_k(ctx0, probs, worker->config.sampling.top_k);
+
+            probs = ggml_reshape_2d(ctx0, probs, 1, probs->ne[0]);
+            probs = ggml_get_rows(ctx0, probs, top_k);
+            top_k = ggml_reshape_2d(ctx0, top_k, 1, top_k->ne[0]);
+            top_k->type = GGML_TYPE_F32;
+            probs = ggml_concat(ctx0, top_k, probs, 0);
+
+            ggml_build_forward_expand(gf, probs);
+            set_graph_backend(gf, worker->sched.get(), worker->backend.get(), worker->cpu_backend.get(), input_embeds);
+        }
+        else
+        {
+            auto sched = worker->sched.get();
+            auto cpu_backend = worker->cpu_backend.get();
+
+            probs = ggml_dup(ctx0, probs);
+            auto cpu_pivot = probs;
+            auto top_k = ggml_top_k(ctx0, probs, worker->config.sampling.top_k);
+
+            probs = ggml_reshape_2d(ctx0, probs, 1, probs->ne[0]);
+            probs = ggml_get_rows(ctx0, probs, top_k);
+            top_k = ggml_reshape_2d(ctx0, top_k, 1, top_k->ne[0]);
+            top_k->type = GGML_TYPE_F32;
+            probs = ggml_concat(ctx0, top_k, probs, 0);
+            ggml_build_forward_expand(gf, probs);
+            set_graph_backend(gf, sched, worker->backend.get(), cpu_backend, input_embeds, cpu_pivot);
+        }
+
         llm_probs = probs;
-
-        ggml_build_forward_expand(gf, probs);
-        set_graph_backend(gf, worker->sched.get(), worker->backend.get(), worker->cpu_backend.get(), input_embeds);
         ggml_backend_sched_alloc_graph(worker->sched.get(), gf);
         ggml_backend_tensor_set_async(input_embeds ? worker->cpu_backend.get() : worker->backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
     }
 
-    worker->status = ggml_backend_sched_graph_compute_async(worker->sched.get(), gf);
+    worker->status = ggml_backend_sched_graph_compute(worker->sched.get(), gf);
     if (worker->status == GGML_STATUS_SUCCESS)
     {
         auto probs = reinterpret_cast<cosyvoice_llm_token_prob_t*>(worker->nucleus_probs.get());
-        ggml_backend_tensor_get_async(worker->backend.get(), llm_probs, probs, 0, ggml_nbytes(llm_probs));
+        auto backend = shared->op_caps.top_k ? worker->backend.get() : worker->cpu_backend.get();
+        ggml_backend_tensor_get_async(backend, llm_probs, probs, 0, ggml_nbytes(llm_probs));
         ggml_backend_tensor_get_async(
-            worker->backend.get(),
+            backend,
             llm_probs->src[1]->src[0]->src[0],
             worker->probs.get(),
             0,
             sizeof(float) * cv3_shared->llm.llm_decoder.weight->ne[1]);
-        ggml_backend_synchronize(worker->backend.get());
+        ggml_backend_synchronize(backend);
         return true;
     }
     return false;

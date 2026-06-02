@@ -33,6 +33,7 @@ struct ggml_backend_op_capabilities
     bool fill          : 1;
     bool cumsum        : 1;
     bool emb_cast_f32  : 1;
+    bool top_k         : 1;
 };
 
 struct ggml_cgraph_node_iterator
