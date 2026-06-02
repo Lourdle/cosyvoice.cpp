@@ -185,12 +185,13 @@ static void set_graph_backends(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml
         else
         {
             auto op = node->op;
+            auto src = node;
             if (is_virtual(op))
             {
-                auto cur_node = node;
-                while (cur_node && is_virtual(cur_node->op))
-                    cur_node = cur_node->src[0];
-                op = cur_node->op;
+                src = node;
+                while (src && is_virtual(src->op))
+                    src = src->src[0];
+                op = src->op;
             }
 
             switch (op)
@@ -218,6 +219,22 @@ static void set_graph_backends(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml
                 break;
             case GGML_OP_ARANGE:
                 target_backend = op_caps.arange ? backend : cpu_backend;
+                break;
+            case GGML_OP_UNARY:
+                switch (ggml_get_unary_op(src))
+                {
+                case GGML_UNARY_OP_ELU:
+                    target_backend = op_caps.elu ? backend : cpu_backend;
+                    break;
+                case GGML_UNARY_OP_ABS:
+                    target_backend = op_caps.abs ? backend : cpu_backend;
+                    break;
+                case GGML_UNARY_OP_FLOOR:
+                    target_backend = op_caps.floor ? backend : cpu_backend;
+                    break;
+                default:
+                    target_backend = backend;
+                }
                 break;
             case GGML_OP_CPY:
                 if (node->type == GGML_TYPE_I32 && node->src[0]->type == GGML_TYPE_F32)

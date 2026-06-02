@@ -38,6 +38,9 @@ struct ggml_backend_op_capabilities
     bool sin           : 1;
     bool cos           : 1;
     bool arange        : 1;
+    bool elu           : 1;
+    bool abs           : 1;
+    bool floor         : 1;
 };
 
 struct ggml_cgraph_node_iterator
