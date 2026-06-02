@@ -78,10 +78,10 @@ static ggml_tensor* build_qwen2_decoder_layer(const Qwen2DecoderLayer& layer, gg
     return hidden_states;
 }
 
-static void set_graph_backend(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml_backend_t backend)
+static void set_graph_backend(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml_backend_t backend, ggml_backend_t cpu_backend, ggml_tensor* input_embeds)
 {
     for (auto node : ggml_cgraph_node_iterator(gf))
-        ggml_backend_sched_set_tensor_backend(sched, node, backend);
+        ggml_backend_sched_set_tensor_backend(sched, node, node == input_embeds ? cpu_backend : backend);
 }
 
 bool cosyvoice_model_3::llm_prefill(
@@ -142,6 +142,7 @@ bool cosyvoice_model_3::llm_prefill(
         llm_probs = nullptr;
 
         auto hidden_states = type == GGML_TYPE_F32 ? llm_input : ggml_cast(ctx0, llm_input, GGML_TYPE_F32);
+        ggml_tensor* input_embeds = shared->op_caps.emb_cast_f32 ? nullptr : hidden_states;
 
         auto num_attention_heads = llm.num_attention_heads;
         auto num_key_value_heads = llm.num_key_value_heads;
@@ -182,9 +183,9 @@ bool cosyvoice_model_3::llm_prefill(
         kv_cache->update_cache(ctx0, gf, key_states, value_states, position_ids, static_cast<int>(llm.layers.size() - 1));
         kv_cache->cur_len += n_tokens;
 
-        set_graph_backend(gf, worker->sched.get(), worker->backend.get());
+        set_graph_backend(gf, worker->sched.get(), worker->backend.get(), worker->cpu_backend.get(), input_embeds);
         ggml_backend_sched_alloc_graph(worker->sched.get(), gf);
-        ggml_backend_tensor_set_async(worker->backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
+        ggml_backend_tensor_set_async(input_embeds ? worker->cpu_backend.get() : worker->backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
     }
 
     worker->status = ggml_backend_sched_graph_compute(worker->sched.get(), gf);
@@ -207,7 +208,7 @@ bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
         && llm_input->type == type && 1 == llm_input->ne[1]
         && kv_cache->can_reuse(false))
     {
-        ggml_backend_tensor_set_async(worker->backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
+        ggml_backend_tensor_set_async(shared->op_caps.emb_cast_f32 ? worker->backend.get() : worker->cpu_backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
         kv_cache->shift_kv_node_pos(1);
     }
     else
@@ -225,6 +226,7 @@ bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
         llm_probs = nullptr;
 
         auto hidden_states = type == GGML_TYPE_F32 ? llm_input : ggml_cast(ctx0, llm_input, GGML_TYPE_F32);
+        ggml_tensor* input_embeds = shared->op_caps.emb_cast_f32 ? nullptr : hidden_states;
 
         auto num_attention_heads = llm.num_attention_heads;
         auto num_key_value_heads = llm.num_key_value_heads;
@@ -253,9 +255,9 @@ bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
         llm_probs = probs;
 
         ggml_build_forward_expand(gf, probs);
-        set_graph_backend(gf, worker->sched.get(), worker->backend.get());
+        set_graph_backend(gf, worker->sched.get(), worker->backend.get(), worker->cpu_backend.get(), input_embeds);
         ggml_backend_sched_alloc_graph(worker->sched.get(), gf);
-        ggml_backend_tensor_set_async(worker->backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
+        ggml_backend_tensor_set_async(input_embeds ? worker->cpu_backend.get() : worker->backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
     }
 
     worker->status = ggml_backend_sched_graph_compute_async(worker->sched.get(), gf);

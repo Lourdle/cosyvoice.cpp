@@ -743,6 +743,12 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         shared->params.flow_use_flash_attn = ggml_backend_supports_op(backend, o);
     }
 
+    {
+        auto a = llm.embed_tokens_weight;
+        auto b = ggml_cast(worker->ctx0.get(), a, GGML_TYPE_F32);
+        shared->op_caps.emb_cast_f32 = ggml_backend_supports_op(backend, b);
+    }
+
     for (auto& block : flow.decoder.estimator.transformer_blocks)
         block.attn.fattn = shared->params.flow_use_flash_attn;
 
