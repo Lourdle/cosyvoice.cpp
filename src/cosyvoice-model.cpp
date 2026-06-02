@@ -148,6 +148,12 @@ cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context
     op_caps.floor = ggml_backend_supports_op(backend, ggml_floor(ctx0, a));
 
     {
+        auto a2 = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, 16, 4);
+        auto b = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, 16, 4);
+        op_caps.acc = ggml_backend_supports_op(backend, ggml_acc(ctx0, a2, b, a2->nb[1], a2->nb[2], a2->nb[3], 0));
+    }
+
+    {
         ggml_tensor* w = ggml_new_tensor_3d(ctx0, GGML_TYPE_F16, 3, 4, 8);
         a = ggml_new_tensor_3d(ctx0, GGML_TYPE_F16, 16, 4, 1);
         a = ggml_im2col(ctx0, w, a, 1, 0, 0, 0, 1, 0, false, GGML_TYPE_F16);

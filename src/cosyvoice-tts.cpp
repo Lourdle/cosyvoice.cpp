@@ -220,6 +220,9 @@ static void set_graph_backends(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml
             case GGML_OP_ARANGE:
                 target_backend = op_caps.arange ? backend : cpu_backend;
                 break;
+            case GGML_OP_ACC:
+                target_backend = op_caps.acc ? backend : cpu_backend;
+                break;
             case GGML_OP_UNARY:
                 switch (ggml_get_unary_op(src))
                 {

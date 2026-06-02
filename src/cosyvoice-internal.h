@@ -41,6 +41,7 @@ struct ggml_backend_op_capabilities
     bool elu           : 1;
     bool abs           : 1;
     bool floor         : 1;
+    bool acc           : 1;
 };
 
 struct ggml_cgraph_node_iterator
