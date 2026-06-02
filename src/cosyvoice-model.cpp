@@ -141,6 +141,8 @@ cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context
     op_caps.sin = ggml_backend_supports_op(backend, ggml_sin(ctx0, a));
     op_caps.cos = ggml_backend_supports_op(backend, ggml_cos(ctx0, a));
 
+    op_caps.arange = ggml_backend_supports_op(backend, ggml_arange(ctx0, 0.f, 10.f, 1.f));
+
     {
         ggml_tensor* w = ggml_new_tensor_3d(ctx0, GGML_TYPE_F16, 3, 4, 8);
         a = ggml_new_tensor_3d(ctx0, GGML_TYPE_F16, 16, 4, 1);

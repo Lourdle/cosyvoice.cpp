@@ -37,6 +37,7 @@ struct ggml_backend_op_capabilities
     bool leaky_relu    : 1;
     bool sin           : 1;
     bool cos           : 1;
+    bool arange        : 1;
 };
 
 struct ggml_cgraph_node_iterator
