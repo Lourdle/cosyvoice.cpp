@@ -651,7 +651,16 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     for (uint32_t i = 0; i != shared->params.n_workers; ++i)
         workers[i].config = shared->config;
 
+    {
+        auto q = ggml_new_tensor_3d(worker->ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attention_heads);
+        auto k = ggml_new_tensor_3d(worker->ctx0.get(), kv_type, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
+        auto v = ggml_new_tensor_3d(worker->ctx0.get(), kv_type, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
+        auto o = ggml_flash_attn_ext(worker->ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
+        shared->params.llm_use_flash_attn = ggml_backend_supports_op(backend, o);
+    }
+
     if (shared->params.llm_use_flash_attn)
+    {
         if (shared->params.llm_allow_kv_cache_fallback
             && ggml_is_quantized(kv_type))
         {
@@ -698,14 +707,7 @@ void cosyvoice_model_3::load(gguf_loader& loader)
                 throw std::invalid_argument("unexpected type");
             }
         }
-        else
-        {
-            auto q = ggml_new_tensor_3d(worker->ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attention_heads);
-            auto k = ggml_new_tensor_3d(worker->ctx0.get(), kv_type, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
-            auto v = ggml_new_tensor_3d(worker->ctx0.get(), kv_type, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
-            auto o = ggml_flash_attn_ext(worker->ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
-            shared->params.llm_use_flash_attn = ggml_backend_supports_op(backend, o);
-        }
+    }
     else if (ggml_is_quantized(kv_type))
         kv_type = GGML_TYPE_F16;
 
