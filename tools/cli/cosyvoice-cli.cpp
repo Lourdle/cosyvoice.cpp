@@ -115,6 +115,10 @@ static BOOL WINAPI handle_console_ctrl(DWORD ctrl_type)
     if (ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT)
     {
         g_interactive_exit_requested.store(true, std::memory_order_relaxed);
+
+        // Unregister self: next Ctrl+C triggers default handler (process termination)
+        SetConsoleCtrlHandler(handle_console_ctrl, FALSE);
+
         return TRUE;
     }
 
@@ -124,6 +128,9 @@ static BOOL WINAPI handle_console_ctrl(DWORD ctrl_type)
 static void handle_sigint(int)
 {
     g_interactive_exit_requested.store(true, std::memory_order_relaxed);
+
+    // Restore default handler: next Ctrl+C terminates the process immediately
+    signal(SIGINT, SIG_DFL);
 }
 #endif
 
