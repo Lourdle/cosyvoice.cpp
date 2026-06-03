@@ -1,7 +1,10 @@
 #include "cli_audio_player.h"
 
-#define MINIAUDIO_IMPLEMENTATION
-#define MA_API static
+#ifndef COSYVOICE_STATIC
+    #define MINIAUDIO_IMPLEMENTATION
+    #define MA_API static
+#endif
+
 #define MA_NO_RESOURCE_MANAGER
 #define MA_NO_NODE_GRAPH
 #define MA_NO_ENGINE

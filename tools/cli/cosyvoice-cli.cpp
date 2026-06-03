@@ -704,9 +704,6 @@ static void print_tts_runtime_info(
     print_kv_line_mib("total_memory", props.memory_total);
     print_kv_line_mib("free_memory", props.memory_free);
     print_kv_line_string("uma", cosyvoice_is_backend_uma(ctx) ? "yes" : "no");
-#ifndef GGML_SHARED
-    ggml_backend_free(backend);
-#endif
 
     print_section_title("Model");
     print_kv_line_u32("sample_rate", sample_rate);

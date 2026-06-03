@@ -130,11 +130,7 @@ cosyvoice_context_t cosyvoice_load_from_file_ext(
         params_v2.n_workers = 1;
 
     auto ctx = new cosyvoice_context_3(reinterpret_cast<const cosyvoice_context_params_v2_cpp&>(params_v2),
-#ifndef GGML_SHARED
-        ggml_backend_init_best()
-#else
         backend ? backend : ggml_backend_init_best()
-#endif
     );
     ctx->cosyvoice_model_3::load(loader);
     ctx->cosyvoice_tokenizer::load(loader);
