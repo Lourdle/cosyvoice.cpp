@@ -161,9 +161,8 @@ COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_ext(
 ### 备注
 
 - 该接口在 GGML 动态库与静态库构建下都可用。
-- 在 GGML 动态库构建下，传入的 `backend` 所有权会转移给创建出的上下文，并在 `cosyvoice_free()` 时自动释放。
-- 当 GGML 以静态库构建（`GGML_SHARED` 关闭）时，`backend` 参数会被忽略。
-- 当 GGML 以动态库构建（`GGML_SHARED` 开启）时，`backend == NULL` 表示自动选择后端；否则使用传入后端。
+- `backend == NULL` 表示自动选择后端。
+- 如果 `backend != NULL`，其所有权会转移给创建出的上下文，并在 `cosyvoice_free()` 时自动释放。
 
 ## cosyvoice_get_last_status
 

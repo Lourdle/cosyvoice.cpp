@@ -71,6 +71,7 @@
 ## 文档
 - API 索引：[docs/API_zh.md](docs/API_zh.md)
 - 工具说明：[docs/TOOLS_zh.md](docs/TOOLS_zh.md)
+- Android 构建指南：[docs/build-android_zh.md](docs/build-android_zh.md)
 
 ## AI 使用说明
 - 核心库代码主要由作者手工实现。
@@ -236,6 +237,7 @@ FFmpeg 使用要点：
 - `ICU_PREBUILT_DIR=<path>`
 - `ORT_PREBUILT_DIR=<path>`
 - `FFMPEG_PREBUILT_DIR=<path>`
+- `SIMDE_INCLUDE_DIR=<path>`（ARM64/aarch64 交叉编译时必需，包括 Android）
 
 GGML 后端相关选项可直接透传（例如 `GGML_CUDA`、`GGML_VULKAN` 等）。
 
@@ -284,7 +286,8 @@ cmake -S . -B build-noplay -DCOSYVOICE_CLI_NO_PLAYBACK=ON
 cmake -S . -B build \
   -DGGML_SOURCE_DIR=/path/to/ggml \
   -DICU_PREBUILT_DIR=/path/to/icu \
-  -DORT_PREBUILT_DIR=/path/to/onnxruntime
+  -DORT_PREBUILT_DIR=/path/to/onnxruntime \
+  -DSIMDE_INCLUDE_DIR=/path/to/simde
 ```
 
 也可以直接使用构建目录下的默认预编译依赖位置：
@@ -363,6 +366,7 @@ python convert_model_to_gguf.py \
 | Metal | 可运行 | 感谢 @[jasagiri](https://github.com/jasagiri) 的支持与代码贡献。 |
 | SYCL | 可运行 | 已在 Windows 11 x64 上的 Intel Raptor Lake 集成显卡上验证。 |
 | Vulkan | 不能运行 | 目前无法正常运行。 |
+| OpenCL | 可运行 | 在 Android 16、Qualcomm Snapdragon 8 Elite 上验证通过。OpenCL 后端缺失大量算子，需卸载到 CPU 运行，频繁切换计算后端导致上下文开支较大，相比 CPU 并未带来显著提速。 |
 | 其它 | 未测试 | |
 
 ## 故障排查

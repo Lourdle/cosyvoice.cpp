@@ -150,7 +150,7 @@ Loads model context with explicit backend and threading parameters.
 
 - `filename`: Model path.
 - `params`: Context parameters.
-- `backend`: Optional backend handle.
+- `backend`: Optional backend handle. If non-null, ownership is transferred to the created context.
 - `n_threads`: CPU thread count; set `0` to use hardware concurrency when available.
 - `reserved`: Reserved field. Pass `0`.
 
@@ -161,9 +161,8 @@ Context handle on success; `NULL` on failure.
 ### Remarks
 
 - This API is available in both shared and static GGML builds.
-- In shared GGML builds, backend ownership is transferred to the created context and released by `cosyvoice_free()`.
-- If GGML is built statically (`GGML_SHARED` disabled), `backend` is ignored.
-- If GGML is built as shared (`GGML_SHARED` enabled), `backend == NULL` means auto-select backend; otherwise the provided backend is used.
+- `backend == NULL` means auto-select backend.
+- If `backend != NULL`, ownership is transferred to the created context and released by `cosyvoice_free()`.
 
 ## cosyvoice_get_last_status
 

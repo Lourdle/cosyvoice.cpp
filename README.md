@@ -71,6 +71,7 @@ Pre-quantized variants (Q2_K through F16) are available at the links above.
 ## Documentation
 - API index: [docs/API.md](docs/API.md)
 - Tooling guide: [docs/TOOLS.md](docs/TOOLS.md)
+- Android build guide: [docs/build-android.md](docs/build-android.md)
 
 ## AI Usage Disclosure
 - Most core library code is written by the author.
@@ -236,6 +237,7 @@ Dependency path options:
 - `ICU_PREBUILT_DIR=<path>`
 - `ORT_PREBUILT_DIR=<path>`
 - `FFMPEG_PREBUILT_DIR=<path>`
+- `SIMDE_INCLUDE_DIR=<path>` (required on ARM64/aarch64, including Android cross-compilation)
 
 GGML backend options are passed through from GGML CMake (for example `GGML_CUDA`, `GGML_VULKAN`, etc.).
 
@@ -284,7 +286,8 @@ You can point CMake to custom dependency locations with cache variables:
 cmake -S . -B build \
   -DGGML_SOURCE_DIR=/path/to/ggml \
   -DICU_PREBUILT_DIR=/path/to/icu \
-  -DORT_PREBUILT_DIR=/path/to/onnxruntime
+  -DORT_PREBUILT_DIR=/path/to/onnxruntime \
+  -DSIMDE_INCLUDE_DIR=/path/to/simde
 ```
 
 You can also use the default prebuilt locations under your build directory:
@@ -363,6 +366,7 @@ Current backend test results are as follows:
 | Metal | Working | Thanks to @[jasagiri](https://github.com/jasagiri) for his help and code contributions. |
 | SYCL | Working | Verified on the Intel Raptor Lake integrated GPU on Windows 11 x64. |
 | Vulkan | Not working | Currently cannot run normally. |
+| OpenCL | Working | Verified on Android 16, Qualcomm Snapdragon 8 Elite. Many ops are missing and fall back to CPU; frequent GPU-CPU context switching overhead results in no significant speedup over CPU. |
 | Others | Untested | |
 
 ## Troubleshooting
