@@ -1,6 +1,8 @@
 #include "cosyvoice-server.h"
 #include "tool_common_cosyvoice.h"
 
+#include <ggml-backend.h>
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -21,6 +23,7 @@ struct server_options
     std::string api_key;
     std::string served_model_name;
     std::string backend_path;
+    std::string backend = "auto";
     uint16_t port = 8080;
     bool has_served_model_name = false;
     std::vector<voice_prompt_option> voice_prompts;
@@ -77,6 +80,9 @@ static void print_usage(const char* argv0)
     printf("  --help, -h                                  Show this help message and exit.\n");
     printf("  --model, -m <file>                          CosyVoice model file (.gguf).\n");
     printf("  --backend-path <dir>                        GGML backend directory. Default: load from the executable's directory.\n");
+    printf("  --backend <name>                            GGML backend name. Default: auto (best available).\n");
+    printf("  --cpu                                       Use CPU backend (equivalent to --backend cpu).\n");
+    printf("  --cuda                                      Use CUDA backend (equivalent to --backend cuda0).\n");
     printf("  --served-model-name <name>                  Exposed model name for API requests.\n");
     printf("  --host <host>                               Listen host. Default: 127.0.0.1.\n");
     printf("  --port <port>                               Listen port. Default: 8080.\n");
@@ -190,7 +196,7 @@ static std::string derive_served_model_name(const std::string& model_path)
     return model_path.substr(start, end - start);
 }
 
-static bool init_model_context(const server_options& options, server_runtime* runtime)
+static bool init_model_context(const server_options& options, ggml_backend_t backend, server_runtime* runtime)
 {
     cosyvoice_context_params_v2_cpp context_params;
     cosyvoice_init_default_context_params(&context_params);
@@ -206,7 +212,7 @@ static bool init_model_context(const server_options& options, server_runtime* ru
     runtime->model_slots.emplace_back(cosyvoice_load_from_file_ext(
         options.model.c_str(),
         &context_params,
-        nullptr,
+        backend,
         options.n_threads));
 
     if (!runtime->model_slots.back())
@@ -340,7 +346,20 @@ static bool build_runtime(const server_options& options, server_runtime* runtime
 
     cosyvoice_init_backend_from_path(options.backend_path.empty() ? nullptr : options.backend_path.c_str());
 
-    if (!init_model_context(options, runtime))
+    ggml_backend_t backend = nullptr;
+    if (options.backend == "auto")
+        backend = ggml_backend_init_best();
+    else
+    {
+        backend = ggml_backend_init_by_name(options.backend.c_str(), nullptr);
+        if (!backend)
+        {
+            fprintf(stderr, "Error: failed to initialize backend \"%s\".\n", options.backend.c_str());
+            return false;
+        }
+    }
+
+    if (!init_model_context(options, backend, runtime))
         return false;
 
     if (!apply_generation_defaults(options, runtime))
@@ -407,6 +426,33 @@ int tool_entry(int argc, char** argv)
                 options.model = get_arg_value();
             else if (str_casecmp(arg, "--backend-path") == 0)
                 options.backend_path = get_arg_value();
+            else if (str_casecmp(arg, "--backend") == 0)
+            {
+                if (options.backend != "auto")
+                {
+                    fprintf(stderr, "Error: --backend, --cpu, and --cuda are mutually exclusive.\n");
+                    return 1;
+                }
+                options.backend = get_arg_value();
+            }
+            else if (str_casecmp(arg, "--cpu") == 0)
+            {
+                if (options.backend != "auto")
+                {
+                    fprintf(stderr, "Error: --backend, --cpu, and --cuda are mutually exclusive.\n");
+                    return 1;
+                }
+                options.backend = "cpu";
+            }
+            else if (str_casecmp(arg, "--cuda") == 0)
+            {
+                if (options.backend != "auto")
+                {
+                    fprintf(stderr, "Error: --backend, --cpu, and --cuda are mutually exclusive.\n");
+                    return 1;
+                }
+                options.backend = "cuda0";
+            }
             else if (str_casecmp(arg, "--served-model-name") == 0)
             {
                 options.served_model_name = get_arg_value();
