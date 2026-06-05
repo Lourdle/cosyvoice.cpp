@@ -47,6 +47,7 @@ struct cli_options
     bool fade_in_enabled = true;
     std::string model;
     std::string backend_path;
+    std::string backend = "auto";
 #ifndef COSYVOICE_NO_FRONTEND
     bool frontend_only = false;
     std::string speech_tokenizer;
@@ -266,6 +267,9 @@ static void print_usage(const char* argv0)
     printf("  --interactive                               Run in interactive mode.\n");
     printf("  --model, -m <file>                          CosyVoice model file.\n");
     printf("  --backend-path <dir>                        GGML backend directory. Default: load from the executable's directory.\n");
+    printf("  --backend <name>                            GGML backend name. Default: auto (best available).\n");
+    printf("  --cpu                                       Use CPU backend (equivalent to --backend cpu).\n");
+    printf("  --cuda                                      Use CUDA backend (equivalent to --backend cuda0).\n");
     printf("  --text, -t <text>                           Text to synthesize.\n");
     printf("  --instruction, -i <text>                    Only used in instruct mode.\n");
 #ifdef COSYVOICE_NO_AUDIO
@@ -1323,6 +1327,33 @@ int tool_entry(int argc, char** argv)
             options.model = get_arg_value();
         else if (str_casecmp(arg, "--backend-path") == 0)
             options.backend_path = get_arg_value();
+        else if (str_casecmp(arg, "--backend") == 0)
+        {
+            if (options.backend != "auto")
+            {
+                print_error_log("Error: --backend, --cpu, and --cuda are mutually exclusive.\n");
+                return 1;
+            }
+            options.backend = get_arg_value();
+        }
+        else if (str_casecmp(arg, "--cpu") == 0)
+        {
+            if (options.backend != "auto")
+            {
+                print_error_log("Error: --backend, --cpu, and --cuda are mutually exclusive.\n");
+                return 1;
+            }
+            options.backend = "cpu";
+        }
+        else if (str_casecmp(arg, "--cuda") == 0)
+        {
+            if (options.backend != "auto")
+            {
+                print_error_log("Error: --backend, --cpu, and --cuda are mutually exclusive.\n");
+                return 1;
+            }
+            options.backend = "cuda0";
+        }
         else if (str_casecmp(arg, "--max-llm-len") == 0)
         {
             auto value = get_arg_value();
@@ -1732,7 +1763,18 @@ int tool_entry(int argc, char** argv)
     loading_spinner model_loading_spinner(log_level, "Loading model");
     model_loading_spinner.start();
 
-    ggml_backend_t backend = ggml_backend_init_best();
+    ggml_backend_t backend = nullptr;
+    if (options.backend == "auto")
+        backend = ggml_backend_init_best();
+    else
+    {
+        backend = ggml_backend_init_by_name(options.backend.c_str(), nullptr);
+        if (!backend)
+        {
+            print_error_log("Error: failed to initialize backend \"%s\".\n", options.backend.c_str());
+            return 1;
+        }
+    }
     cosyvoice_context_handle ctx(cosyvoice_load_from_file_ext(options.model.c_str(), &params, backend, options.n_threads));
     model_loading_spinner.stop(ctx != nullptr);
     timing.model_load_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
