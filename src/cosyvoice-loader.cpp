@@ -12,6 +12,9 @@
 
 namespace
 {
+#if defined(__APPLE__) && defined(__aarch64__)
+constexpr bool backend_looks_uma(ggml_backend_t backend, ggml_backend_buffer* buffer) { return true; }
+#else
 constexpr size_t kUmaProbeBytes = 128ull * 1024ull * 1024ull;
 constexpr size_t kUmaProbeMinBytes = 64ull * 1024ull * 1024ull;
 constexpr int kUmaProbeIters = 4;
@@ -53,11 +56,15 @@ static double measure_min_us(F&& fn)
     return min_us < (std::numeric_limits<double>::max)() ? min_us : 0.0;
 }
 
-#if defined(__APPLE__) && defined(__aarch64__)
-constexpr bool backend_looks_uma(ggml_backend_t backend, ggml_backend_buffer* buffer) { return true; }
-#else
 bool backend_looks_uma(ggml_backend_t backend, ggml_backend_buffer* buffer)
 {
+    ggml_backend_dev_props props;
+    ggml_backend_dev_get_props(ggml_backend_get_device(backend), &props);
+    if (props.type == GGML_BACKEND_DEVICE_TYPE_IGPU)
+        return true;
+    if (strncmp(props.name, "Vulkan", 6) == 0 && props.type == GGML_BACKEND_DEVICE_TYPE_GPU)
+        return false;
+
     constexpr auto size_1 = kUmaProbeBytes - (kUmaProbeBytes % sizeof(float));
     constexpr auto size_2 = kUmaProbeMinBytes - (kUmaProbeMinBytes % sizeof(float));
     if constexpr (size_1 == 0 || size_2 == 0 || size_1 <= size_2)
@@ -77,7 +84,6 @@ bool backend_looks_uma(ggml_backend_t backend, ggml_backend_buffer* buffer)
         .nb = { 1, size_1, size_1, size_1 }
     };
     ggml_backend_tensor_alloc(buffer, &tensor, ggml_backend_buffer_get_base(buffer));
-
     auto host_src = std::make_unique<char[]>(size_1 * 2);
 
     auto* src = host_src.get();
