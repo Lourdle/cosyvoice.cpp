@@ -1,0 +1,5 @@
+{
+    "decoder\\.estimator\\.proj_out\\.weight": "Q6_K",
+    "llm_decoder\\.weight": "Q6_K",
+    "spk_embed_affine_layer\\.weight": "Q6_K"
+}

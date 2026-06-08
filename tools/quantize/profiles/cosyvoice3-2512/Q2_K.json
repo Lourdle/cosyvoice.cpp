@@ -1,0 +1,13 @@
+{
+    "decoder\\.estimator\\.input_embed\\.proj\\.weight": "Q3_K",
+    "decoder\\.estimator\\.norm_out\\.linear\\.weight": "Q3_K",
+    "decoder\\.estimator\\.proj_out\\.weight": "Q3_K",
+    "decoder\\.estimator\\.time_embed\\.time_mlp\\.2\\.weight": "Q3_K",
+    "decoder\\.estimator\\.transformer_blocks\\..*\\.attn\\.to_out\\.0\\.weight": "Q3_K",
+    "decoder\\.estimator\\.transformer_blocks\\..*\\.attn\\.to_v\\.weight": "Q3_K",
+    "decoder\\.estimator\\.transformer_blocks\\..*\\.ff\\.ff\\.2\\.weight": "Q3_K",
+    "layers\\..*\\.mlp\\.down_proj\\.weight": "Q3_K",
+    "layers\\..*\\.self_attn\\.v_proj\\.weight": "Q3_K",
+    "llm_decoder\\.weight": "Q3_K",
+    "spk_embed_affine_layer\\.weight": "Q3_K"
+}

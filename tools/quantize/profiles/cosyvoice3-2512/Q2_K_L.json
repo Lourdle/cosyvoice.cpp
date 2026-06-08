@@ -1,0 +1,9 @@
+{
+    "decoder\\.*": "Q3_K",
+    "decoder\\.estimator\\.transformer_blocks\\..*\\.attn\\.to_k\\.weight": "Q2_K",
+    "decoder\\.estimator\\.transformer_blocks\\..*\\.ff\\.ff\\.0\\.0\\.weight": "Q2_K",
+    "layers\\..*\\.mlp\\.down_proj\\.weight": "Q3_K",
+    "layers\\..*\\.self_attn\\.v_proj\\.weight": "Q3_K",
+    "llm_decoder\\.weight": "Q3_K",
+    "spk_embed_affine_layer\\.weight": "Q3_K"
+}
