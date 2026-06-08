@@ -1,4 +1,4 @@
-# CosyVoice.cpp
+﻿# CosyVoice.cpp
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-blue.svg)]()
@@ -75,7 +75,7 @@
 
 ## AI 使用说明
 - 核心库代码主要由作者手工实现。
-- 工具（cli、server）和文档内容大多由 AI 协助撰写与整理。
+- 工具（cli、quantize、server）和文档内容大多由 AI 协助撰写与整理。
 - 仍可能存在少量错误或与实现不同步的情况；如有疑问请以源码与头文件为准，也欢迎提交 Issue/PR 纠正。
 
 ## 第三方许可说明
@@ -351,7 +351,7 @@ python convert_model_to_gguf.py \
 本仓库包含 3 个面向使用者的工具：
 - `cosyvoice-cli`：本地文件式 TTS 合成（支持复用 prompt_speech，以及前端 + TTS 一体流程）。
 - `cosyvoice-server`：OpenAI Speech 兼容 HTTP API 服务，适合服务化接入。
-- `quantize`：GGUF 量化工具，用于将模型转换为更小/更快的量化格式。
+- `quantize`：GGUF 量化工具，用于将模型转换为更小/更快的量化格式。支持通过 PCRE2 正则逐 tensor 指定量化类型（`-M/--tensor-map`）。预置的 CosyVoice3-2512 profile 见 `tools/quantize/profiles/`。
 
 完整命令、参数和示例见：
 - [docs/TOOLS_zh.md](docs/TOOLS_zh.md)

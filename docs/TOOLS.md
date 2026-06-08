@@ -22,6 +22,59 @@ Supported quantization types:
 - `Q6_K`, `Q5_K`, `Q4_K`, `Q3_K`, `Q2_K`
 - `COPY`
 
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-h, --help` | Show help message |
+| `-f, --file <arg>` | Input GGUF file path |
+| `-o, --output-file <arg>` | Output GGUF file path |
+| `-t, --type <arg>` | Default quantization type |
+| `-c, --custom-string <arg> <arg>` | Custom metadata key-value pair (repeatable) |
+| `-M, --tensor-map <arg>` | JSON file mapping tensor name regex to quantization type |
+
+### Tensor Map (Selective Quantization)
+
+Use `-M/--tensor-map` to apply different quantization types to different tensors.
+Unlisted tensors use the `--type` default.
+
+JSON format (PCRE2 regex patterns as keys):
+```json
+{
+    "blk\\.\\d+\\.attn_(q|k|v|o)\\.weight": "Q4_K",
+    "token_embd\\.weight": "Q8_0",
+    "output\\.weight": "COPY"
+}
+```
+
+#### Pattern Matching Priority
+
+A tensor may match multiple patterns. The winning pattern is determined by:
+
+1. **Literal (exact) patterns** always beat regex patterns.
+   - `"tensor0": "Q5_K"` (literal) wins over `"tensor.*": "Q4_K"` for tensor `tensor0`.
+2. **Among regex patterns, the longest textual pattern wins** (more specific).
+   - `"layers\\..*\\.mlp\\.down_proj\\.weight": "Q5_K"` beats `"layers.*": "Q4_K"` for `layers.0.mlp.down_proj.weight`.
+3. Ties are broken by JSON insertion order.
+
+Patterns that never match any tensor produce a warning.
+
+#### Pre-built Profiles
+
+Ready-to-use tensor maps are available under `tools/quantize/profiles/`, organized by model:
+
+```
+tools/quantize/profiles/
+└── cosyvoice3-2512/
+    ├── Q4_K_S.json
+    └── Q4_K_M.json
+```
+
+Example:
+```bash
+quantize -f model.gguf -o model-q4_k_-_s.gguf -t Q4_K -M tools/quantize/profiles/cosyvoice3-2512/Q4_K_S.json
+```
+
 Custom metadata strings are supported with repeated `-c/--custom-string`.
 
 ## Server Tool (`tools/server`)

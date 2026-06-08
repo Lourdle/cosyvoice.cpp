@@ -75,7 +75,7 @@ Pre-quantized variants (Q2_K through F16) are available at the links above.
 
 ## AI Usage Disclosure
 - Most core library code is written by the author.
-- Most tooling (cli, server) and documentation content is drafted and edited with AI assistance.
+- Most tooling (cli, quantize, server) and documentation content is drafted and edited with AI assistance.
 - Small mistakes or implementation drift may still exist; when in doubt, treat source code and header files as the ground truth, and feel free to open an issue or PR.
 
 ## Third-Party Notices
@@ -351,7 +351,7 @@ After conversion:
 This repository includes three user-facing tools:
 - `cosyvoice-cli`: local file-based TTS generation (supports prompt_speech reuse and frontend + TTS flow).
 - `cosyvoice-server`: OpenAI Speech-compatible HTTP API server for service-style integration.
-- `quantize`: GGUF quantization utility to convert model files to smaller/faster formats.
+- `quantize`: GGUF quantization utility to convert model files to smaller/faster formats. Supports per-tensor quantization type mapping via PCRE2 regex patterns (`-M/--tensor-map`). Pre-built profiles for CosyVoice3-2512 are available under `tools/quantize/profiles/`.
 
 Full commands, options, and examples are documented in:
 - [docs/TOOLS.md](docs/TOOLS.md)

@@ -1,4 +1,4 @@
-# 工具使用说明
+﻿# 工具使用说明
 
 语言： [English](TOOLS.md)
 
@@ -21,6 +21,59 @@ quantize --help
 - `F16`, `Q8_0`, `Q5_0`, `Q5_1`, `Q4_0`, `Q4_1`
 - `Q6_K`, `Q5_K`, `Q4_K`, `Q3_K`, `Q2_K`
 - `COPY`
+
+### 参数列表
+
+| 参数 | 说明 |
+|------|------|
+| `-h, --help` | 显示帮助 |
+| `-f, --file <arg>` | 输入 GGUF 文件路径 |
+| `-o, --output-file <arg>` | 输出 GGUF 文件路径 |
+| `-t, --type <arg>` | 默认量化类型 |
+| `-c, --custom-string <arg> <arg>` | 自定义字符串元数据（可重复） |
+| `-M, --tensor-map <arg>` | Tensor 名称正则到量化类型的 JSON 映射文件 |
+
+### Tensor Map（选择性量化）
+
+使用 `-M/--tensor-map` 可以为不同 tensor 指定不同的量化类型。
+不在映射中的 tensor 会使用 `--type` 指定的默认类型。
+
+JSON 格式（key 为 PCRE2 正则表达式）：
+```json
+{
+    "blk\\.\\d+\\.attn_(q|k|v|o)\\.weight": "Q4_K",
+    "token_embd\\.weight": "Q8_0",
+    "output\\.weight": "COPY"
+}
+```
+
+#### 匹配优先级
+
+一个 tensor 名可能匹配多个 pattern，按以下规则确定胜出者：
+
+1. **Literal（精确）pattern 始终优先于正则 pattern**。
+   - `"tensor0": "Q5_K"`（literal）对 tensor `tensor0` 胜过 `"tensor.*": "Q4_K"`。
+2. **正则之间，选 pattern 字符串最长的那条**（越具体越长）。
+   - `"layers\\..*\\.mlp\\.down_proj\\.weight": "Q5_K"` 对 `layers.0.mlp.down_proj.weight` 胜过 `"layers.*": "Q4_K"`。
+3. 平手按 JSON 中的顺序。
+
+从未匹配过任何 tensor 的 pattern 会在运行结束后给出警告。
+
+#### 预制 Profile
+
+预制 tensor map 放在 `tools/quantize/profiles/`，按模型分组：
+
+```
+tools/quantize/profiles/
+└── cosyvoice3-2512/
+    ├── Q4_K_S.json
+    └── Q4_K_M.json
+```
+
+示例：
+```bash
+quantize -f model.gguf -o model-q4_k_s.gguf -t Q4_K -M tools/quantize/profiles/cosyvoice3-2512/Q4_K_S.json
+```
 
 支持通过重复 `-c/--custom-string` 写入自定义字符串元数据。
 
