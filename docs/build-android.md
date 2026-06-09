@@ -11,11 +11,11 @@ pkg update
 apt install clang cmake make simde
 ```
 
-For the FFmpeg backend, also run `apt install ffmpeg`. For ICU support, also run `apt install libicu`.
+For the FFmpeg backend, also run `apt install ffmpeg`. For ICU support, also run `apt install libicu`. For the frontend, install `apt install onnxruntime`, and CMake will automatically find the system version via `find_package`.
 
 ### CPU
 
-Follow the standard configure and build flow from the README, but remember to add `-DCOSYVOICE_NO_FRONTEND=ON`. ONNX Runtime does not have Android prebuilt libraries; without this flag, CMake will automatically download the Linux version of ONNX Runtime.
+Follow the standard configure and build flow from the README. `apt install onnxruntime` (added in the prerequisites above) provides a system-installed ONNX Runtime that CMake will find via `find_package`. For ICU support, add `apt install libicu` as well.
 
 ### OpenCL
 
@@ -45,8 +45,7 @@ cmake -S /path/to/cosyvoice.cpp -B build-termux-opencl \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INCLUDE_PATH=/path/to/OpenCL-Headers \
   -DGGML_OPENCL=ON \
-  -DGGML_OPENCL_USE_ADRENO_KERNELS=OFF \
-  -DCOSYVOICE_NO_FRONTEND=ON
+  -DGGML_OPENCL_USE_ADRENO_KERNELS=OFF
 make -C build-termux-opencl -j8
 ```
 
