@@ -235,6 +235,21 @@ if(NOT COSYVOICE_NO_FRONTEND)
         find_package(onnxruntime QUIET)
         if(onnxruntime_FOUND)
             message(STATUS "Found ONNX Runtime via find_package")
+            # find_package(onnxruntime) typically creates onnxruntime::onnxruntime,
+            # but target_link_libraries(cosyvoice-frontend ... onnxruntime) uses the
+            # bare name. Create a forwarding target so include dirs propagate.
+            if(TARGET onnxruntime::onnxruntime AND NOT TARGET onnxruntime)
+                get_target_property(_ort_inc_dirs onnxruntime::onnxruntime INTERFACE_INCLUDE_DIRECTORIES)
+                message(STATUS "ONNX Runtime target: onnxruntime::onnxruntime")
+                message(STATUS "ONNX Runtime include directories: ${_ort_inc_dirs}")
+                add_library(onnxruntime INTERFACE IMPORTED)
+                target_link_libraries(onnxruntime INTERFACE onnxruntime::onnxruntime)
+            elseif(TARGET onnxruntime)
+                get_target_property(_ort_inc_dirs onnxruntime INTERFACE_INCLUDE_DIRECTORIES)
+                message(STATUS "ONNX Runtime target: onnxruntime")
+                message(STATUS "ONNX Runtime include directories: ${_ort_inc_dirs}")
+            endif()
+            unset(_ort_inc_dirs)
         else()
             message(STATUS "ONNX Runtime not found. Downloading pre-built binaries to ${ORT_PREBUILT_DIR}...")
 
@@ -291,6 +306,7 @@ if(NOT COSYVOICE_NO_FRONTEND)
 
     if(EXISTS "${ORT_PREBUILT_DIR}/include/onnxruntime_c_api.h")
         message(STATUS "Using prebuilt ONNX Runtime from ${ORT_PREBUILT_DIR}")
+        message(STATUS "Prebuilt ONNX Runtime include directory: ${ORT_PREBUILT_DIR}/include")
         add_library(onnxruntime SHARED IMPORTED)
         if(WIN32)
             set_target_properties(onnxruntime PROPERTIES
