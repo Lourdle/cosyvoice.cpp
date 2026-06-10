@@ -659,8 +659,8 @@ void cosyvoice_model_3::load(gguf_loader& loader)
 
     {
         auto q = ggml_new_tensor_3d(worker->ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attention_heads);
-        auto k = ggml_new_tensor_3d(worker->ctx0.get(), kv_type, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
-        auto v = ggml_new_tensor_3d(worker->ctx0.get(), kv_type, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
+        auto k = ggml_new_tensor_3d(worker->ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
+        auto v = ggml_new_tensor_3d(worker->ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
         auto o = ggml_flash_attn_ext(worker->ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
         shared->params.llm_use_flash_attn = ggml_backend_supports_op(backend, o);
     }
@@ -668,21 +668,44 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     if (shared->params.llm_use_flash_attn)
     {
         if (shared->params.llm_allow_kv_cache_fallback
-            && ggml_is_quantized(kv_type))
+            && kv_type != GGML_TYPE_F32)
         {
             auto cur_type = kv_type;
             while (cur_type != GGML_TYPE_F32)
             {
                 auto q = ggml_new_tensor_3d(worker->ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attention_heads);
-                auto k = ggml_new_tensor_3d(worker->ctx0.get(), kv_type, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
-                auto v = ggml_new_tensor_3d(worker->ctx0.get(), kv_type, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
+                auto k = ggml_new_tensor_3d(worker->ctx0.get(), cur_type, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
+                auto v = ggml_new_tensor_3d(worker->ctx0.get(), cur_type, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
                 auto o = ggml_flash_attn_ext(worker->ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
                 if (ggml_backend_supports_op(backend, o))
                 {
                     kv_type = cur_type;
                     break;
                 }
-                --reinterpret_cast<int&>(cur_type);
+
+                switch (cur_type)
+                {
+                case GGML_TYPE_Q4_0:
+                    cur_type = GGML_TYPE_Q4_1;
+                    break;
+                case GGML_TYPE_Q4_1:
+                    cur_type = GGML_TYPE_Q5_0;
+                    break;
+                case GGML_TYPE_Q5_0:
+                    cur_type = GGML_TYPE_Q5_1;
+                    break;
+                case GGML_TYPE_Q5_1:
+                    cur_type = GGML_TYPE_Q8_0;
+                    break;
+                case GGML_TYPE_Q8_0:
+                    cur_type = GGML_TYPE_F16;
+                    break;
+                case GGML_TYPE_F16:
+                    cur_type = GGML_TYPE_F32;
+                    break;
+                default:
+                    GGML_ABORT("fatal error");
+                }
             }
 
             shared->params.llm_use_flash_attn = cur_type != GGML_TYPE_F32;
@@ -710,7 +733,7 @@ void cosyvoice_model_3::load(gguf_loader& loader)
                 shared->params.llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0;
                 break;
             default:
-                throw std::invalid_argument("unexpected type");
+                GGML_ABORT("fatal error");
             }
         }
     }
