@@ -337,7 +337,7 @@ cosyvoice-cli \
 When neither `--text` nor `--output` is provided, interactive mode is enabled automatically.
 Type text at the `> ` prompt to synthesize, or use slash commands:
 
-- `/play [code]`: Play cached audio (requires audio support; disabled with `COSYVOICE_CLI_NO_PLAYBACK=ON`).
+- `/play [code]`: Play cached audio (requires audio support; disabled with `COSYVOICE_CLI_NO_PLAYBACK=ON`). Press `Ctrl+C` to stop playback.
 - `/save <file> [code]`: Save cached audio to file.
 - `/list`: List cached audio.
 - `/query [code]`: Show audio details.

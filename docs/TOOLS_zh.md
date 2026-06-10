@@ -337,7 +337,7 @@ cosyvoice-cli \
 当同时未提供 `--text` 和 `--output` 时，会自动进入交互模式。
 在 `> ` 提示符下输入文本即可合成，或使用斜杠命令：
 
-- `/play [code]`：播放缓存音频（需要音频支持；`COSYVOICE_CLI_NO_PLAYBACK=ON` 时不可用）。
+- `/play [code]`：播放缓存音频（需要音频支持；`COSYVOICE_CLI_NO_PLAYBACK=ON` 时不可用）。按 `Ctrl+C` 可停止播放。
 - `/save <file> [code]`：保存缓存音频到文件。
 - `/list`：列出缓存音频。
 - `/query [code]`：查看音频详情。
