@@ -5,6 +5,8 @@
 #include "tool_common_cosyvoice.h"
 #ifndef COSYVOICE_CLI_NO_PLAYBACK
     #include "cli_audio_player.h"
+#else
+    #define interrupt_playback()
 #endif
 
 #ifdef COSYVOICE_NO_AUDIO
@@ -102,7 +104,7 @@ enum class cli_log_level
 };
 
 static bool g_quiet_logs = false;
-static std::atomic_bool g_interactive_exit_requested = false;
+inline std::atomic_bool g_interactive_exit_requested = false;
 static constexpr const char* ANSI_RESET = "\033[0m";
 static constexpr const char* ANSI_RED = "\033[31m";
 static constexpr const char* ANSI_YELLOW = "\033[93m";
@@ -116,6 +118,7 @@ static BOOL WINAPI handle_console_ctrl(DWORD ctrl_type)
     if (ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT)
     {
         g_interactive_exit_requested.store(true, std::memory_order_relaxed);
+        interrupt_playback();
 
         // Unregister self: next Ctrl+C triggers default handler (process termination)
         SetConsoleCtrlHandler(handle_console_ctrl, FALSE);
@@ -129,6 +132,7 @@ static BOOL WINAPI handle_console_ctrl(DWORD ctrl_type)
 static void handle_sigint(int)
 {
     g_interactive_exit_requested.store(true, std::memory_order_relaxed);
+    interrupt_playback();
 
     // Restore default handler: next Ctrl+C terminates the process immediately
     signal(SIGINT, SIG_DFL);
@@ -140,12 +144,7 @@ class interactive_ctrl_c_guard
 public:
     interactive_ctrl_c_guard()
     {
-        g_interactive_exit_requested.store(false, std::memory_order_relaxed);
-#ifdef _WIN32
-        SetConsoleCtrlHandler(handle_console_ctrl, TRUE);
-#else
-        previous_sigint_handler = signal(SIGINT, handle_sigint);
-#endif
+        _register();
     }
 
     ~interactive_ctrl_c_guard()
@@ -154,6 +153,20 @@ public:
         SetConsoleCtrlHandler(handle_console_ctrl, FALSE);
 #else
         signal(SIGINT, previous_sigint_handler);
+#endif
+    }
+
+    void _register()
+    {
+        g_interactive_exit_requested.store(false, std::memory_order_relaxed);
+#ifndef COSYVOICE_CLI_NO_PLAYBACK
+        g_playback_interrupted.store(false, std::memory_order_relaxed);
+#endif
+
+#ifdef _WIN32
+        SetConsoleCtrlHandler(handle_console_ctrl, TRUE);
+#else
+        previous_sigint_handler = signal(SIGINT, handle_sigint);
 #endif
     }
 
@@ -238,7 +251,7 @@ static void print_interactive_commands()
     printf("Interactive commands:\n");
     printf("  /save <file> [code]          Save audio to file (default: last synthesized).\n");
 #ifndef COSYVOICE_CLI_NO_PLAYBACK
-    printf("  /play [code]                 Play audio (default: last synthesized).\n");
+    printf("  /play [code]                 Play audio (default: last synthesized). Press Ctrl+C to stop.\n");
 #endif
     printf("  /list                        List cached audio.\n");
     printf("  /query [code]                Show audio info (default: last synthesized).\n");
@@ -836,7 +849,11 @@ static void run_interactive_loop(
         seed_state->next_seed = cosyvoice_generate_random_seed();
         seed_state->has_next_seed = true;
     }
-    printf("\nInteractive mode. Type text to synthesize, /exit to quit, or press Ctrl+C to quit.\n");
+    printf("\nInteractive mode. Type text to synthesize, /exit to quit, or press Ctrl+C to quit"
+#ifndef COSYVOICE_CLI_NO_PLAYBACK
+           " (during playback, Ctrl+C stops playback)"
+#endif
+           ".\n");
     print_interactive_commands();
     interactive_ctrl_c_guard ctrl_c_guard;
 
@@ -1004,9 +1021,16 @@ static void run_interactive_loop(
                     print_error_log("Error: audio code %u not found.\n", id);
                     continue;
                 }
+
                 std::string play_error;
                 if (!cli_audio_play_pcm_blocking(item->pcm.data(), static_cast<uint32_t>(item->pcm.size()), sample_rate, &play_error))
-                    print_error_log("Error: %s\n", play_error.c_str());
+                    if (is_playback_interrupted())
+                    {
+                        ctrl_c_guard._register();
+                        printf("Playback stopped.\n");
+                    }
+                    else
+                        print_error_log("Error: %s\n", play_error.c_str());
             }
 #endif
             else

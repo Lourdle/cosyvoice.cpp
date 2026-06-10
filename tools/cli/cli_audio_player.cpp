@@ -86,12 +86,19 @@ bool cli_audio_play_pcm_blocking(const float* data, uint32_t length, uint32_t sa
     }
 
     const auto sleep_chunk = std::chrono::milliseconds(20);
+    bool interrupted = false;
     while (state.cursor.load(std::memory_order_relaxed) < state.length)
+    {
+        interrupted = is_playback_interrupted();
+        if (interrupted)
+            break;
         std::this_thread::sleep_for(sleep_chunk);
+    }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    if (!interrupted && !is_playback_interrupted())
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
     ma_device_stop(&device);
     ma_device_uninit(&device);
-    return true;
+    return !interrupted;
 }
