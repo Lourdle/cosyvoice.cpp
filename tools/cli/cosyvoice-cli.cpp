@@ -75,7 +75,10 @@ struct cli_options
     seed_policy_mode seed_policy = seed_policy_mode::auto_mode;
     uint32_t n_threads = 0;
     bool has_llm_kv_cache_type = false;
-    cosyvoice_llm_kv_cache_type_t llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0;
+    cosyvoice_llm_kv_cache_type_t llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+        COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0,
+        COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0,
+        COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0);
     bool has_inference_buffer_policy = false;
     cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
     bool verbose = false;
@@ -294,8 +297,9 @@ static void print_usage(const char* argv0)
     printf("  --speed, -s <value>                         Speech speed. Default: 1.0.\n");
     printf("  --max-llm-len <value>                       Maximum LLM sequence length. Default: " COSYVOICE_DEFAULT_LLM_MAX_SEQ_LEN_STR ".\n");
     printf("  --threads, -j <value>                       CPU thread count. Default: 0 (hardware concurrency).\n");
-    printf("  --llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>\n");
-    printf("                                              KV cache type. Default: q8_0.\n");
+    printf("  --llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>\n");
+    printf("                                              KV cache type. Single type (e.g. q8_0) uses the same format for K and V.\n");
+    printf("                                              Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
     printf("  --inference-buffer-policy <shared|balanced|dedicated>\n");
     printf("                                              Inference buffer policy (interactive only). Default: balanced.\n");
     printf("  --seed <value>                              Fixed seed for sampling.\n");
@@ -353,7 +357,7 @@ static void print_usage(const char* argv0)
     print_interactive_commands();
 
     printf("\nDefaults and sources:\n");
-    printf("  CLI defaults: speed=1.0, max-llm-len=" COSYVOICE_DEFAULT_LLM_MAX_SEQ_LEN_STR ", threads=0 (hardware concurrency), llm-kv-cache-type=q8_0, mode=auto.\n");
+    printf("  CLI defaults: speed=1.0, max-llm-len=" COSYVOICE_DEFAULT_LLM_MAX_SEQ_LEN_STR ", threads=0 (hardware concurrency), llm-kv-cache-type=k=q8_0,v=q4_0,fallback=q8_0, mode=auto.\n");
     printf("  Sampling defaults (temperature/top-k/top-p/win-size/tau-r/token-text ratios) come from model metadata unless overridden.\n");
 }
 
@@ -699,7 +703,6 @@ static void print_preload_run_info(const cli_options& options, cli_log_level log
     print_kv_line_string("text_splitting", enabled_to_string(options.split_text_enabled));
     print_kv_line_string("fast_split", enabled_to_string(options.fast_split_text_enabled));
     print_kv_line_string("fade_in", enabled_to_string(options.fade_in_enabled));
-    print_kv_line_string("llm_kv_cache_type", llm_kv_cache_type_to_string(options.llm_kv_cache_type));
     if (log_level == cli_log_level::verbose)
     {
         print_kv_line_size("text_length", options.text.size());
@@ -745,8 +748,10 @@ static void print_tts_runtime_info(
             print_kv_line_string("seed", buf);
         }
     {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%s (%s)", llm_kv_cache_type_to_string(context_params.llm_kv_cache_type),
+        char buf[256];
+        snprintf(buf, sizeof(buf), "requested: %s, actual: %s (%s)",
+            llm_kv_cache_type_to_string(options.llm_kv_cache_type).c_str(),
+            llm_kv_cache_type_to_string(context_params.llm_kv_cache_type).c_str(),
             options.has_llm_kv_cache_type ? "cli override" : "default");
         print_kv_line_string("llm_kv_cache_type", buf);
     }
@@ -1273,9 +1278,10 @@ static bool validate_options(cli_options& options)
     }
 
     if (options.has_llm_kv_cache_type
+        && !COSYVOICE_IS_SEPARATE_KV_CACHE(options.llm_kv_cache_type)
         && (options.llm_kv_cache_type < 0 || options.llm_kv_cache_type >= COSYVOICE_LLM_KV_CACHE_TYPE_COUNT))
     {
-        print_error_log("Error: invalid --llm-kv-cache-type. Allowed values: f32, f16, q8_0, q5_1, q5_0, q4_1, q4_0.\n");
+        print_error_log("Error: invalid --llm-kv-cache-type. Allowed values: f32, f16, q8_0, q5_1, q5_0, q4_1, q4_0 or k=<type>,v=<type>.\n");
         ok = false;
     }
 
@@ -1758,8 +1764,7 @@ int tool_entry(int argc, char** argv)
     else
         params.inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED;
     params.n_max_seq = options.max_llm_len;
-    if (options.has_llm_kv_cache_type)
-        params.llm_kv_cache_type = options.llm_kv_cache_type;
+    params.llm_kv_cache_type = options.llm_kv_cache_type;
     tts_seed_state seed_state;
     const bool has_seed_value = !options.seed.empty();
     const cli_options::seed_policy_mode policy = resolve_seed_policy_mode(options);
