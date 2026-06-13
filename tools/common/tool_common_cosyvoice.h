@@ -30,6 +30,45 @@ using cosyvoice_audio_encoder_handle = std::unique_ptr<cosyvoice_audio_encoder, 
 
 inline bool parse_llm_kv_cache_type_arg(const std::string& value, cosyvoice_llm_kv_cache_type_t* result)
 {
+    // Check for separate K/V format: "k=<type>,v=<type>" or "k=<type>,v=<type>,fallback=<type>"
+    auto k_pos = value.find("k=");
+    auto v_pos = value.find("v=");
+    if (k_pos != std::string::npos && v_pos != std::string::npos)
+    {
+        auto k_start = k_pos + 2;
+        auto k_end = value.find_first_of(",", k_start);
+        auto k_str = value.substr(k_start, k_end - k_start);
+        auto v_start = v_pos + 2;
+        auto v_end = value.find_first_of(",", v_start);
+        auto v_str = value.substr(v_start, v_end - v_start);
+
+        cosyvoice_llm_kv_cache_type_t k_type, v_type;
+
+        if (!parse_llm_kv_cache_type_arg(k_str, &k_type) ||
+            !parse_llm_kv_cache_type_arg(v_str, &v_type))
+            return false;
+
+        // Parse optional fallback
+        auto f_pos = value.find("fallback=");
+        cosyvoice_llm_kv_cache_type_t fallback_type;
+        if (f_pos != std::string::npos)
+        {
+            auto f_start = f_pos + 9;
+            auto f_end = value.find_first_of(",", f_start);
+            auto f_str = value.substr(f_start, f_end - f_start);
+            if (!parse_llm_kv_cache_type_arg(f_str, &fallback_type))
+                return false;
+        }
+        else
+        {
+            fallback_type = v_type; // default fallback = V type
+        }
+
+        *result = COSYVOICE_MAKE_SEPARATE_KV_CACHE(k_type, v_type, fallback_type);
+        return true;
+    }
+
+    // Unified type.
     const auto lowered = to_lower(value);
     if (lowered == "f32")
         *result = COSYVOICE_LLM_KV_CACHE_TYPE_F32;
@@ -79,8 +118,18 @@ inline const char* inference_buffer_policy_to_string(cosyvoice_inference_buffer_
     }
 }
 
-inline const char* llm_kv_cache_type_to_string(cosyvoice_llm_kv_cache_type_t type)
+inline std::string llm_kv_cache_type_to_string(cosyvoice_llm_kv_cache_type_t type)
 {
+    if (COSYVOICE_IS_SEPARATE_KV_CACHE(type))
+    {
+        auto fallback = COSYVOICE_KV_CACHE_FALLBACK(type);
+        auto result = "k=" + std::string(llm_kv_cache_type_to_string(COSYVOICE_K_CACHE_TYPE(type)))
+            + ",v=" + llm_kv_cache_type_to_string(COSYVOICE_V_CACHE_TYPE(type));
+        if (fallback != COSYVOICE_V_CACHE_TYPE(type))
+            result += ",fallback=" + llm_kv_cache_type_to_string(fallback);
+        return result;
+    }
+
     switch (type)
     {
     case COSYVOICE_LLM_KV_CACHE_TYPE_F32:
