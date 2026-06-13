@@ -50,7 +50,7 @@
 | **交互式 REPL** | CLI 交互模式，支持 /play、/save、/list、/query、/seed 等斜杠命令 |
 | **并发服务** | Server 的 `--concurrency` 参数，支持并行请求处理 |
 | **模型量化** | 内置 `quantize` 工具，支持 Q2_K 到 F16 多种量化格式 |
-| **KV Cache 量化** | 通过 `--llm-kv-cache-type` 降低 LLM 内存占用（f32 / f16 / q8_0 / q5_1 / q4_0 / ...） |
+| **KV Cache 量化** | 通过 `--llm-kv-cache-type` 降低 LLM 内存占用（f32 / f16 / q8_0 / q5_1 / q4_0 / ...）。支持非对称量化，K 和 V 可独立指定类型（如 `k=q8_0,v=q4_0`）。 |
 | **Prompt Speech 复用** | 一次编码参考音色，后续合成直接复用，无需再跑 ONNX |
 | **音频后端可切换** | 可选 MINIAUDIO（默认）或 FFMPEG，支持 WAV、MP3、AAC、FLAC、OPUS、M4A |
 | **UMA 自动检测** | 自动检测统一内存架构并调整 buffer policy，优化吞吐 |

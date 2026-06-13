@@ -106,7 +106,7 @@ quantize -f model.gguf -o model-q4_k_s.gguf -t Q4_K -M tools/quantize/profiles/c
 - `--inference-buffer-policy <shared|balanced|dedicated>`：推理缓冲区策略，默认 `balanced`。
 - `--max-llm-len <value>`：LLM 最大序列长度，默认 `2048`。
 - `--threads, -j <value>`：CPU 线程数，默认 `0`（硬件并发）。
-- `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>`：默认 `q8_0`。
+- `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>`：默认 `k=q8_0,v=q4_0,fallback=q8_0`。可使用独立的 K/V 类型（如 `k=q8_0,v=q4_0`）或单一类型（如 `q8_0`）统一指定。
 - `--seed <value>`：请求级默认 seed（当请求扩展字段未传 `seed` 时使用）。
 
 TTS 后处理参数：
@@ -368,7 +368,7 @@ cosyvoice-cli \
 - `--seed <value>`：采样与内部噪声生成的随机种子，必须是无符号 32 位整数；默认随机。
 - `--max-llm-len <value>`：LLM 最大输入 token 数（`n_max_seq`），默认 `2048`，必须为正整数。
 - `--threads, -j <value>`：模型推理使用的 CPU 线程数，必须是无符号 32 位整数；默认 `0`（使用当前硬件并发数）。
-- `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>`：LLM KV cache 类型，默认 `q8_0`。
+- `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>`：LLM KV cache 类型。单一类型（如 `q8_0`）为 K 和 V 使用相同格式。可使用独立 K/V 类型（如 `k=q8_0,v=q4_0`）指定不同格式。默认 `k=q8_0,v=q4_0,fallback=q8_0`。
 - `--inference-buffer-policy <shared|balanced|dedicated>`：推理缓冲区策略。仅在交互模式下生效；非交互模式始终使用 `shared` 以最小化内存占用并获得最快的单次合成速度。默认 `balanced`。
 - `--mode <zero-shot|instruct|cross-lingual>`：TTS 模式。默认按 `--instruction` 自动判定。
 - `--instruction, -i <text>`：instruct 模式指令文本。
@@ -428,7 +428,7 @@ cosyvoice-cli \
 - 常规 TTS 必填：`--model`、`--text`、`--output`，以及一个提示源（`--prompt-speech` 或前端输入）。
 - `--frontend-only` 必填：`--speech-tokenizer`、`--campplus`、音频输入、`--prompt-speech-output`。
 - 可选参数默认值来自 CLI 或模型元数据：
-  - CLI 默认：`--speed=1.0`、`--max-llm-len=2048`、`--threads=0`（硬件并发数）、`--llm-kv-cache-type=q8_0`、`--mode=auto`。
+  - CLI 默认：`--speed=1.0`、`--max-llm-len=2048`、`--threads=0`（硬件并发数）、`--llm-kv-cache-type=k=q8_0,v=q4_0,fallback=q8_0`、`--mode=auto`。
   - 采样默认（`temperature/top_k/top_p/win_size/tau_r/token-text ratio`）来自模型配置，未传参数时不变。
 
 ## CLI 快速索引
@@ -450,7 +450,7 @@ cosyvoice-cli \
 | `--speed` | `1.0` | CLI |
 | `--max-llm-len` | `2048` | CLI |
 | `--threads` | `0`（硬件并发数） | CLI |
-| `--llm-kv-cache-type` | `q8_0` | CLI |
+| `--llm-kv-cache-type` | `k=q8_0,v=q4_0,fallback=q8_0` | CLI |
 | `--inference-buffer-policy` | `balanced`（交互模式）/ `shared`（非交互模式） | CLI |
 | `--seed` | 随机 | 运行时 |
 | `temperature/top_k/top_p/win_size/tau_r/min/max_token_text_ratio` | 模型元数据 | 模型 |

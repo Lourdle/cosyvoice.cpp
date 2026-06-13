@@ -62,6 +62,62 @@ Specifies supported KV-cache storage formats for the LLM module.
 - `COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0`: GGML `Q4_0` quantized cache.
 - `COSYVOICE_LLM_KV_CACHE_TYPE_COUNT`: Sentinel value, not a runtime mode.
 
+### Separate K/V Cache Macros
+
+The `cosyvoice_llm_kv_cache_type_t` value can encode separate types for the K and V cache
+buffers via bit-packing.  This allows using different quantization formats for the K and V
+tensors (e.g. K in `Q8_0` and V in `Q4_0`) to trade off quality vs. memory.
+
+#### Packing format (bit 31 = 1 signals separate mode)
+
+| Bits   | Field                |
+|--------|----------------------|
+|  0–4   | K cache type         |
+|  5–9   | V cache type         |
+| 10–14  | Fallback cache type  |
+| 15–30  | Reserved             |
+| 31     | Separate-K/V flag    |
+
+When bit 31 is 0, the value is a plain `cosyvoice_llm_kv_cache_type_t` that applies
+to both K and V (backward compatible).
+
+```c
+#define COSYVOICE_MAKE_SEPARATE_KV_CACHE(k_type, v_type, fallback_type)
+#define COSYVOICE_IS_SEPARATE_KV_CACHE(t)
+#define COSYVOICE_K_CACHE_TYPE(t)
+#define COSYVOICE_V_CACHE_TYPE(t)
+#define COSYVOICE_KV_CACHE_FALLBACK(t)
+```
+
+- `COSYVOICE_MAKE_SEPARATE_KV_CACHE(k_type, v_type, fallback_type)` — Pack separate K, V and fallback types into a single value.
+- `COSYVOICE_IS_SEPARATE_KV_CACHE(t)` — Returns non-zero if `t` is in separate-K/V mode.
+- `COSYVOICE_K_CACHE_TYPE(t)` — Extracts the K cache type from a packed value.
+- `COSYVOICE_V_CACHE_TYPE(t)` — Extracts the V cache type from a packed value.
+- `COSYVOICE_KV_CACHE_FALLBACK(t)` — Extracts the fallback cache type from a packed value.
+
+When the preferred K or V type is not supported by the backend, the fallback type is
+tried first; if that also fails, auto-fallback applies.
+
+#### Application in parameters
+
+Use the bitfield members of `cosyvoice_context_params_t` directly, or pack a value
+with `COSYVOICE_MAKE_SEPARATE_KV_CACHE` and assign it to `llm_kv_cache_type`:
+
+```c
+params.llm_k_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0;
+params.llm_v_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0;
+params.llm_kv_cache_separate_buffers = true;
+```
+
+or equivalently:
+
+```c
+params.llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+    COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0,
+    COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0,
+    COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0);
+```
+
 ## cosyvoice_inference_buffer_policy_t
 
 ### Syntax
@@ -296,7 +352,18 @@ typedef struct cosyvoice_context_params
     bool llm_use_flash_attn;
     bool flow_use_flash_attn;
 
-    cosyvoice_llm_kv_cache_type_t       llm_kv_cache_type;
+    union
+    {
+        struct
+        {
+            cosyvoice_llm_kv_cache_type_t  llm_k_cache_type : 5;              ///< K cache data type.
+            cosyvoice_llm_kv_cache_type_t  llm_v_cache_type : 5;              ///< V cache data type.
+            cosyvoice_llm_kv_cache_type_t  llm_kv_cache_fallback : 5;         ///< Fallback type when preferred type unsupported.
+            cosyvoice_llm_kv_cache_type_t : 16;                               ///< Reserved.
+            cosyvoice_llm_kv_cache_type_t  llm_kv_cache_separate_buffers : 1; ///< Allocate separate K & V buffers.
+        };
+        cosyvoice_llm_kv_cache_type_t      llm_kv_cache_type;                 ///< Backward-compatible unified type.
+    };
     bool                                llm_allow_kv_cache_fallback;
     cosyvoice_inference_buffer_policy_t inference_buffer_policy;
 
@@ -318,7 +385,10 @@ Groups context creation options that affect backend behavior, memory planning, a
 
 - `llm_use_flash_attn`: Enables flash attention for the LLM when backend supports it.
 - `flow_use_flash_attn`: Enables flash attention for Flow module when available.
-- `llm_kv_cache_type`: Requested KV-cache storage type.
+- `llm_k_cache_type`, `llm_v_cache_type`: Separate data types for K and V cache when `llm_kv_cache_separate_buffers` is true.
+- `llm_kv_cache_fallback`: Fallback type when the preferred K or V type is unsupported by the backend.
+- `llm_kv_cache_separate_buffers`: If true, allocate separate buffers for K and V caches using the types from `llm_k_cache_type` and `llm_v_cache_type`. Ignored when the unified `llm_kv_cache_type` does not have bit 31 set.
+- `llm_kv_cache_type`: Requested KV-cache storage type. Can be a plain enum value (unified, applied to both K and V) or a packed value created with `COSYVOICE_MAKE_SEPARATE_KV_CACHE` that encodes separate K, V, and fallback types.
 - `llm_allow_kv_cache_fallback`: Allows fallback to flash-attention-compatible KV type when unsupported.
 - `inference_buffer_policy`: Strategy for inference-buffer allocation and reuse.
 - `n_batch`: Kernel batch size.

@@ -62,6 +62,58 @@ typedef enum cosyvoice_llm_kv_cache_type
 - `COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0`：GGML `Q4_0` 量化格式。
 - `COSYVOICE_LLM_KV_CACHE_TYPE_COUNT`：哨兵值，不用于运行配置。
 
+### 分离 K/V 缓存宏
+
+`cosyvoice_llm_kv_cache_type_t` 可以通过位打包（bit-packing）编码 K 和 V 缓存的不同类型，
+从而为 K 和 V 张量使用不同的量化格式（例如 K 用 `Q8_0`、V 用 `Q4_0`），在质量与内存之间灵活取舍。
+
+#### 打包格式（bit 31 = 1 表示分离模式）
+
+| 位     | 字段           |
+|--------|----------------|
+|  0–4   | K 缓存类型     |
+|  5–9   | V 缓存类型     |
+| 10–14  | 回退缓存类型   |
+| 15–30  | 保留           |
+| 31     | 分离标志位     |
+
+当 bit 31 为 0 时，值被当作普通的 `cosyvoice_llm_kv_cache_type_t`，K 和 V 使用同一类型（向后兼容）。
+
+```c
+#define COSYVOICE_MAKE_SEPARATE_KV_CACHE(k_type, v_type, fallback_type)
+#define COSYVOICE_IS_SEPARATE_KV_CACHE(t)
+#define COSYVOICE_K_CACHE_TYPE(t)
+#define COSYVOICE_V_CACHE_TYPE(t)
+#define COSYVOICE_KV_CACHE_FALLBACK(t)
+```
+
+- `COSYVOICE_MAKE_SEPARATE_KV_CACHE(k_type, v_type, fallback_type)` — 将独立的 K、V 和回退类型打包为一个值。
+- `COSYVOICE_IS_SEPARATE_KV_CACHE(t)` — 若 `t` 为分离模式则返回非零。
+- `COSYVOICE_K_CACHE_TYPE(t)` — 从打包值中提取 K 缓存类型。
+- `COSYVOICE_V_CACHE_TYPE(t)` — 从打包值中提取 V 缓存类型。
+- `COSYVOICE_KV_CACHE_FALLBACK(t)` — 从打包值中提取回退缓存类型。
+
+当后端不支持首选 K 或 V 类型时，会先尝试回退类型；如果回退也失败，则会自动继续回退。
+
+#### 在参数中使用
+
+可以直接使用 `cosyvoice_context_params_t` 中的位域成员，或通过 `COSYVOICE_MAKE_SEPARATE_KV_CACHE` 打包后赋值给 `llm_kv_cache_type`：
+
+```c
+params.llm_k_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0;
+params.llm_v_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0;
+params.llm_kv_cache_separate_buffers = true;
+```
+
+或等价地：
+
+```c
+params.llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+    COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0,
+    COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0,
+    COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0);
+```
+
 ## cosyvoice_inference_buffer_policy_t
 
 ### 语法
@@ -296,7 +348,18 @@ typedef struct cosyvoice_context_params
     bool llm_use_flash_attn;
     bool flow_use_flash_attn;
 
-    cosyvoice_llm_kv_cache_type_t       llm_kv_cache_type;
+    union
+    {
+        struct
+        {
+            cosyvoice_llm_kv_cache_type_t  llm_k_cache_type : 5;              ///< K 缓存数据类型。
+            cosyvoice_llm_kv_cache_type_t  llm_v_cache_type : 5;              ///< V 缓存数据类型。
+            cosyvoice_llm_kv_cache_type_t  llm_kv_cache_fallback : 5;         ///< 首选类型不受支持时的回退类型。
+            cosyvoice_llm_kv_cache_type_t : 16;                               ///< 保留位。
+            cosyvoice_llm_kv_cache_type_t  llm_kv_cache_separate_buffers : 1; ///< 是否分别为 K 和 V 分配独立缓存。
+        };
+        cosyvoice_llm_kv_cache_type_t      llm_kv_cache_type;                 ///< 向后兼容的统一类型。
+    };
     bool                                llm_allow_kv_cache_fallback;
     cosyvoice_inference_buffer_policy_t inference_buffer_policy;
 
@@ -318,7 +381,10 @@ typedef struct cosyvoice_context_params
 
 - `llm_use_flash_attn`：是否启用 LLM Flash Attention。
 - `flow_use_flash_attn`：是否启用 Flow Flash Attention。
-- `llm_kv_cache_type`：KV 缓存数据类型。
+- `llm_k_cache_type`、`llm_v_cache_type`：当 `llm_kv_cache_separate_buffers` 为 true 时，K 和 V 缓存各自使用的数据类型。
+- `llm_kv_cache_fallback`：当首选 K 或 V 类型不被后端支持时的回退类型。
+- `llm_kv_cache_separate_buffers`：为 true 时，K 和 V 缓存使用独立缓冲区，分别由 `llm_k_cache_type` 和 `llm_v_cache_type` 指定类型。当统一 `llm_kv_cache_type` 的 bit 31 未设置时此字段被忽略。
+- `llm_kv_cache_type`：KV 缓存数据类型。可以是普通的枚举值（统一类型，K 和 V 使用相同格式），也可以是 `COSYVOICE_MAKE_SEPARATE_KV_CACHE` 创建的打包值（分别编码 K、V 和回退类型）。
 - `llm_allow_kv_cache_fallback`：不兼容时是否允许回退 KV 类型。
 - `inference_buffer_policy`：推理缓冲策略。
 - `n_batch`：推理批大小。

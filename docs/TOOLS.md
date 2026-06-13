@@ -106,7 +106,7 @@ Runtime tuning options:
 - `--inference-buffer-policy <shared|balanced|dedicated>`: inference buffer policy. Default: `balanced`.
 - `--max-llm-len <value>`: maximum LLM sequence length. Default: `2048`.
 - `--threads, -j <value>`: CPU thread count. Default: `0` (hardware concurrency).
-- `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>`: default `q8_0`.
+- `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>`: default `k=q8_0,v=q4_0,fallback=q8_0`. Use separate K/V types (e.g. `k=q8_0,v=q4_0`) or a single type (e.g. `q8_0`) for both.
 - `--seed <value>`: default per-request seed (used when request does not provide extension field `seed`).
 
 TTS postprocess options:
@@ -368,7 +368,7 @@ Core options:
 - `--seed <value>`: Random seed for sampling and internal noise generation. Must be an unsigned 32-bit integer. Default: random.
 - `--max-llm-len <value>`: Maximum input token count for LLM (`n_max_seq`). Default: `2048`. Must be a positive integer.
 - `--threads, -j <value>`: CPU thread count for model inference. Must be an unsigned 32-bit integer. Default: `0` (use current hardware concurrency).
-- `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>`: LLM KV cache type. Default: `q8_0`.
+- `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>`: LLM KV cache type. Single type (e.g. `q8_0`) uses the same format for K and V. Use separate K/V types (e.g. `k=q8_0,v=q4_0`) for different formats. Default: `k=q8_0,v=q4_0,fallback=q8_0`.
 - `--inference-buffer-policy <shared|balanced|dedicated>`: Inference buffer policy. Only effective in interactive mode; non-interactive mode always uses `shared` for minimal memory footprint and fastest single-shot synthesis. Default: `balanced`.
 - `--mode <zero-shot|instruct|cross-lingual>`: TTS mode. Default: auto-detect from `--instruction`.
 - `--instruction, -i <text>`: Instruction text for instruct mode.
@@ -428,7 +428,7 @@ Required vs optional:
 - Required for normal TTS: `--model`, `--text`, `--output`, and one prompt source (`--prompt-speech` OR frontend inputs).
 - Required for `--frontend-only`: `--speech-tokenizer`, `--campplus`, audio input, `--prompt-speech-output`.
 - Optional parameters use defaults from CLI or model metadata:
-  - CLI defaults: `--speed=1.0`, `--max-llm-len=2048`, `--threads=0` (hardware concurrency), `--llm-kv-cache-type=q8_0`, `--mode=auto`.
+  - CLI defaults: `--speed=1.0`, `--max-llm-len=2048`, `--threads=0` (hardware concurrency), `--llm-kv-cache-type=k=q8_0,v=q4_0,fallback=q8_0`, `--mode=auto`.
   - Sampling defaults (`temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, token/text ratios) come from model config unless overridden by CLI.
 
 ## CLI Quick Reference
@@ -450,7 +450,7 @@ Required vs optional:
 | `--speed` | `1.0` | CLI |
 | `--max-llm-len` | `2048` | CLI |
 | `--threads` | `0` (hardware concurrency) | CLI |
-| `--llm-kv-cache-type` | `q8_0` | CLI |
+| `--llm-kv-cache-type` | `k=q8_0,v=q4_0,fallback=q8_0` | CLI |
 | `--inference-buffer-policy` | `balanced` (interactive) / `shared` (non-interactive) | CLI |
 | `--seed` | random | runtime |
 | `temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, `min/max_token_text_ratio` | model metadata | model |
