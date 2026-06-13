@@ -42,7 +42,10 @@ struct server_options
     uint32_t seed = 0;
 
     bool has_llm_kv_cache_type = false;
-    cosyvoice_llm_kv_cache_type_t llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0;
+    cosyvoice_llm_kv_cache_type_t llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+        COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0,
+        COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0,
+        COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0);
 
     bool has_temperature = false;
     float temperature = 0.0f;
@@ -99,8 +102,9 @@ static void print_usage(const char* argv0)
     printf("  --concurrency, -c <value>                   Concurrent request slots. Default: 1.\n");
     printf("  --inference-buffer-policy <shared|balanced|dedicated>\n");
     printf("                                              Inference buffer policy. Default: balanced.\n");
-    printf("  --llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0>\n");
-    printf("                                              KV cache type. Default: q8_0.\n");
+    printf("  --llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>\n");
+    printf("                                              KV cache type. Single type (e.g. q8_0) uses the same format for K and V.\n");
+    printf("                                              Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
     printf("  --seed <value>                              Default random seed for built-in sampler.\n");
 
     printf("\nSampling defaults (server-level):\n");
@@ -202,8 +206,7 @@ static bool init_model_context(const server_options& options, ggml_backend_t bac
     cosyvoice_init_default_context_params(&context_params);
     context_params.inference_buffer_policy = options.inference_buffer_policy;
     context_params.n_max_seq = options.max_llm_len;
-    if (options.has_llm_kv_cache_type)
-        context_params.llm_kv_cache_type = options.llm_kv_cache_type;
+    context_params.llm_kv_cache_type = options.llm_kv_cache_type;
     if (options.has_seed)
         context_params.seed = options.seed;
     context_params.n_workers = options.concurrency;
@@ -361,6 +364,15 @@ static bool build_runtime(const server_options& options, server_runtime* runtime
 
     if (!init_model_context(options, backend, runtime))
         return false;
+
+    {
+        cosyvoice_context_params_t actual_params;
+        cosyvoice_get_context_params(runtime->model_slots.front().get(), &actual_params);
+        if (!options.quiet)
+            fprintf(stderr, "llm_kv_cache_type: requested: %s, actual: %s\n",
+                llm_kv_cache_type_to_string(options.llm_kv_cache_type).c_str(),
+                llm_kv_cache_type_to_string(actual_params.llm_kv_cache_type).c_str());
+    }
 
     if (!apply_generation_defaults(options, runtime))
         return false;
