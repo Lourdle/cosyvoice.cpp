@@ -15,12 +15,15 @@ void cosyvoice_llm_kv_cache::build_kv_cache(
     int num_attention_heads,
     int num_key_value_heads,
     uint32_t max_seq,
-    ggml_type kv_type,
+    ggml_type k_type,
+    ggml_type v_type,
     bool fattn)
 {
     cur_len = 0;
     this->layers = layers;
     this->fattn = fattn;
+    this->k_type = k_type;
+    this->v_type = v_type;
     offloaded_cache = nullptr;
     this->num_attention_heads = num_attention_heads;
     kv_cache_layers = new kv_cache_layer[layers];
@@ -31,10 +34,10 @@ void cosyvoice_llm_kv_cache::build_kv_cache(
     };
     ctx = ggml_init(params);
 
-    shared_buffer.reset(initialize_buffer(backend, k_head_dim, v_head_dim, num_attention_heads, num_key_value_heads, max_seq, kv_type, fattn));
+    shared_buffer.reset(initialize_buffer(backend, k_head_dim, v_head_dim, num_attention_heads, num_key_value_heads, max_seq, k_type, v_type, fattn));
 }
 
-ggml_backend_buffer* cosyvoice_llm_kv_cache::initialize_buffer(ggml_backend_t backend, int k_head_dim, int v_head_dim, int num_attention_heads, int num_key_value_heads, uint32_t max_seq, ggml_type kv_type, bool fattn)
+ggml_backend_buffer* cosyvoice_llm_kv_cache::initialize_buffer(ggml_backend_t backend, int k_head_dim, int v_head_dim, int num_attention_heads, int num_key_value_heads, uint32_t max_seq, ggml_type k_type, ggml_type v_type, bool fattn)
 {
     int64_t k_ne[3] = { k_head_dim, max_seq, num_key_value_heads };
     int64_t v_ne[3] = { v_head_dim, max_seq, num_key_value_heads };
@@ -43,8 +46,8 @@ ggml_backend_buffer* cosyvoice_llm_kv_cache::initialize_buffer(ggml_backend_t ba
 
     for (auto& [k, v, k_view, v_view] : std::span(kv_cache_layers, layers))
     {
-        k = ggml_new_tensor(ctx, kv_type, 3, k_ne);
-        v = ggml_new_tensor(ctx, kv_type, 3, v_ne);
+        k = ggml_new_tensor(ctx, k_type, 3, k_ne);
+        v = ggml_new_tensor(ctx, v_type, 3, v_ne);
         k_view = nullptr;
         v_view = nullptr;
     }
@@ -54,22 +57,17 @@ ggml_backend_buffer* cosyvoice_llm_kv_cache::initialize_buffer(ggml_backend_t ba
 uint32_t cosyvoice_llm_kv_cache::reset_buffer(ggml_backend_buffer* buffer)
 {
     cur_len = 0;
-    auto length = ggml_backend_buffer_get_size(buffer);
     auto alignment = ggml_backend_buffer_get_alignment(buffer);
+    auto max_seq_len = static_cast<uint32_t>(kv_cache_layers[0].k->ne[1]);
     auto k_ne = *reinterpret_cast<std::array<int64_t, GGML_MAX_DIMS>*>(&kv_cache_layers[0].k->ne);
     auto v_ne = *reinterpret_cast<std::array<int64_t, GGML_MAX_DIMS>*>(&kv_cache_layers[0].v->ne);
-    size_t kv_nbytes = get_aligned_size<false>(length / layers / 2, alignment);
-    auto type = kv_cache_layers[0].v->type;
-    uint32_t max_seq_len = static_cast<uint32_t>(kv_nbytes / ggml_row_size(type, k_ne[0]) / v_ne[2]);
-    for (;; --max_seq_len)
-    {
-        ggml_reset(ctx);
-        k_ne[1] = max_seq_len;
-        auto k = ggml_new_tensor(ctx, type, GGML_MAX_DIMS, k_ne.data());
-        if (ggml_backend_buffer_get_alloc_size(buffer, k) <= kv_nbytes)
-            break;
-    }
 
+    auto current_k_size = get_aligned_size(ggml_backend_buffer_get_alloc_size(buffer, kv_cache_layers[0].k), alignment);
+    auto current_v_size = get_aligned_size(ggml_backend_buffer_get_alloc_size(buffer, kv_cache_layers[0].v), alignment);
+    GGML_ASSERT(ggml_backend_buffer_get_size(buffer) >= static_cast<size_t>(layers) * (current_k_size + current_v_size));
+
+    // Rebind the existing KV layout into the larger buffer without changing the
+    // cached sequence capacity.
     if (k_ne[0] == v_ne[0])
         v_ne[1] = k_ne[1];
     else
@@ -79,15 +77,15 @@ uint32_t cosyvoice_llm_kv_cache::reset_buffer(ggml_backend_buffer* buffer)
     auto buffer_base = reinterpret_cast<char*>(ggml_backend_buffer_get_base(buffer));
     for (auto& [k, v, k_view, v_view] : std::span(kv_cache_layers, layers))
     {
-        k = ggml_new_tensor(ctx, type, GGML_MAX_DIMS, k_ne.data());
-        v = ggml_new_tensor(ctx, type, GGML_MAX_DIMS, v_ne.data());
+        k = ggml_new_tensor(ctx, k_type, GGML_MAX_DIMS, k_ne.data());
+        v = ggml_new_tensor(ctx, v_type, GGML_MAX_DIMS, v_ne.data());
         k_view = nullptr;
         v_view = nullptr;
 
         ggml_backend_tensor_alloc(buffer, k, buffer_base);
-        buffer_base += kv_nbytes;
+        buffer_base += get_aligned_size(ggml_backend_buffer_get_alloc_size(buffer, k), alignment);
         ggml_backend_tensor_alloc(buffer, v, buffer_base);
-        buffer_base += kv_nbytes;
+        buffer_base += get_aligned_size(ggml_backend_buffer_get_alloc_size(buffer, v), alignment);
     }
     return max_seq_len;
 }

@@ -138,7 +138,8 @@ struct cosyvoice_model_3_shared
     CausalHiFTGenerator hift;
     CosyVoice3LM llm;
 
-    ggml_type kv_type;
+    ggml_type k_type;
+    ggml_type v_type;
 
     std::set<int> stop_tokens;
 };

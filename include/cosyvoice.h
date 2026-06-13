@@ -172,6 +172,45 @@ typedef int (*cosyvoice_sampler_ext_t)(
 // ----------------------------------------------------------------------------
 
 /**
+ * @brief Pack separate K, V, and fallback cache types into a single value.
+ *
+ * Layout (bit 31 = 1 means separate mode):
+ *   bits  0–4  K cache type (5 bits)
+ *   bits  5–9  V cache type (5 bits)
+ *   bits 10–14 fallback cache type (5 bits)
+ *   bits 15–30 unused
+ *   bit      31 separate-K/V flag (must be 1)
+ *
+ * When bit 31 is 0, the value is a plain `cosyvoice_llm_kv_cache_type_t`
+ * that applies to both K and V (backward compatible).
+ *
+ * When the preferred K or V type is not supported by the backend, the
+ * fallback type is tried first; if that also fails, auto-fallback applies.
+ */
+#define COSYVOICE_MAKE_SEPARATE_KV_CACHE(k_type, v_type, fallback_type) \
+    ((cosyvoice_llm_kv_cache_type_t)((k_type) | ((v_type) << 5) | ((fallback_type) << 10) | (1U << 31)))
+
+/**
+ * @brief Test whether llm_kv_cache_type is in separate-K/V mode.
+ */
+#define COSYVOICE_IS_SEPARATE_KV_CACHE(t)  (((t) & (1U << 31)) != 0)
+
+/**
+ * @brief Extract the K cache type from a packed value.
+ */
+#define COSYVOICE_K_CACHE_TYPE(t)          ((cosyvoice_llm_kv_cache_type_t)((t) & 0x1F))
+
+/**
+ * @brief Extract the V cache type from a packed value.
+ */
+#define COSYVOICE_V_CACHE_TYPE(t)          ((cosyvoice_llm_kv_cache_type_t)(((t) >> 5) & 0x1F))
+
+/**
+ * @brief Extract the fallback cache type from a packed value.
+ */
+#define COSYVOICE_KV_CACHE_FALLBACK(t)     ((cosyvoice_llm_kv_cache_type_t)(((t) >> 10) & 0x1F))
+
+/**
  * @brief Parameters used when creating a model context.
  */
 typedef struct cosyvoice_context_params
@@ -179,7 +218,26 @@ typedef struct cosyvoice_context_params
     bool llm_use_flash_attn;  ///< Use flash attention if supported by the backend. Falls back to regular attention otherwise.
     bool flow_use_flash_attn; ///< Use flash attention for the Flow module if supported.
 
-    cosyvoice_llm_kv_cache_type_t       llm_kv_cache_type;           ///< The data type of the KV cache in the LLM module.
+    union
+    {
+        struct
+        {
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) || defined(_BYTE_ORDER) && (_BYTE_ORDER == _BIG_ENDIAN) || defined(__BIG_ENDIAN__) && !defined(__LITTLE_ENDIAN__) || defined(__ARMEB__) || defined(__MIPSEB__) || defined(__sparc__)
+            cosyvoice_llm_kv_cache_type_t  llm_kv_cache_separate_buffers : 1; ///< If true, allocate separate buffers for the K and V caches in the LLM module. Ignored when `llm_kv_cache_type` is set to a unified format.
+            cosyvoice_llm_kv_cache_type_t : 16;                               ///< Unused bits.
+            cosyvoice_llm_kv_cache_type_t  llm_kv_cache_fallback : 5;         ///< Fallback type when the preferred K or V type is unsupported.
+            cosyvoice_llm_kv_cache_type_t  llm_v_cache_type : 5;              ///< The data type of the V cache in the LLM module.
+            cosyvoice_llm_kv_cache_type_t  llm_k_cache_type : 5;              ///< The data type of the K cache in the LLM module.
+#else
+            cosyvoice_llm_kv_cache_type_t  llm_k_cache_type : 5;              ///< The data type of the K cache in the LLM module.
+            cosyvoice_llm_kv_cache_type_t  llm_v_cache_type : 5;              ///< The data type of the V cache in the LLM module.
+            cosyvoice_llm_kv_cache_type_t  llm_kv_cache_fallback : 5;         ///< Fallback type when the preferred K or V type is unsupported.
+            cosyvoice_llm_kv_cache_type_t : 16;                               ///< Unused bits.
+            cosyvoice_llm_kv_cache_type_t  llm_kv_cache_separate_buffers : 1; ///< If true, allocate separate buffers for the K and V caches in the LLM module. Ignored when `llm_kv_cache_type` is set to a unified format.
+#endif
+        };
+        cosyvoice_llm_kv_cache_type_t      llm_kv_cache_type;                 ///< The data type of the KV cache in the LLM module.
+    };
     bool                                llm_allow_kv_cache_fallback; ///< If true, fall back to a Flash Attention-compatible KV cache type when the requested one is unsupported.
     cosyvoice_inference_buffer_policy_t inference_buffer_policy;     ///< Controls how inference buffers are allocated and reused, which affects performance and memory usage.
 

@@ -269,7 +269,8 @@ void cosyvoice_model_3::empty_buffer_cache()
                 cv3_shared->llm.num_attention_heads,
                 cv3_shared->llm.num_key_value_heads,
                 shared->params.n_max_seq,
-                cv3_shared->kv_type,
+                cv3_shared->k_type,
+                cv3_shared->v_type,
                 shared->params.llm_use_flash_attn));
 
         switch (shared->params.inference_buffer_policy)
