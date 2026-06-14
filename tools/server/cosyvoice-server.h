@@ -31,6 +31,7 @@ struct server_runtime
     std::string api_key;
     uint16_t port = 8080;
     bool has_seed = false;
+    bool webui_enabled = false;
     uint32_t seed = 0;
     uint32_t concurrency = 1;
     cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
@@ -41,6 +42,15 @@ struct server_runtime
     bool fast_split_text_enabled = true;
     bool fade_in_enabled = true;
     server_log_level log_level = server_log_level::concise;
+
+    // Frontend model paths (ONNX, for feature extraction)
+    std::string frontend_model;
+    std::string speech_tokenizer;
+    std::string campplus;
+
+#ifndef COSYVOICE_NO_FRONTEND
+    cosyvoice_frontend_handle frontend_ctx; ///< Pre-loaded ONNX frontend context (kept in memory across extractions)
+#endif
     uint32_t sample_rate = 0;
     cosyvoice_generation_config_t default_generation_config = {};
 

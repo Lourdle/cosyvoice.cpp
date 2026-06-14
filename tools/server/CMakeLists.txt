@@ -2,7 +2,24 @@ set(SERVER_SOURCES
     cosyvoice-server.h
     cosyvoice-server.cpp
     cosyvoice-server-backend.cpp
+    cosyvoice-server-webui.h
+    cosyvoice-server-webui.cpp
 )
+
+# Embedded resources: Windows uses RC, others use C23 #embed
+if(WIN32)
+    list(APPEND SERVER_SOURCES
+        resource.h
+        resource_win.c
+        cosyvoice-server.rc
+    )
+else()
+    set(CMAKE_C_STANDARD 23)
+    list(APPEND SERVER_SOURCES
+        resource.h
+        resource_embed.c
+    )
+endif()
 
 add_executable(cosyvoice-server ${SERVER_SOURCES})
 target_link_libraries(cosyvoice-server PRIVATE cosyvoice common ggml tools_common)

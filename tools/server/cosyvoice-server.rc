@@ -1,0 +1,3 @@
+#include "resource.h"
+
+IDR_WEBUI_HTML RCDATA "webui\\cosyvoice-webui.html"
