@@ -706,6 +706,320 @@ bool cosyvoice_audio_save_to_file(const char* filename, const float* data, uint3
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// In-Memory Audio Decoder (FFmpeg backend)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+struct memory_input_source
+{
+    const uint8_t* data;
+    size_t         size;
+    size_t         pos;
+};
+
+static int read_memory_packet(void* opaque, uint8_t* buf, int buf_size)
+{
+    auto* src = reinterpret_cast<memory_input_source*>(opaque);
+    if (!src)
+        return AVERROR(EINVAL);
+
+    const size_t remaining = src->size - src->pos;
+    const size_t to_copy = (static_cast<size_t>(buf_size) < remaining)
+        ? static_cast<size_t>(buf_size) : remaining;
+    if (to_copy == 0)
+        return AVERROR_EOF;
+
+    std::memcpy(buf, src->data + src->pos, to_copy);
+    src->pos += to_copy;
+    return static_cast<int>(to_copy);
+}
+
+static int64_t seek_memory_packet(void* opaque, int64_t offset, int whence)
+{
+    auto* src = reinterpret_cast<memory_input_source*>(opaque);
+    if (!src)
+        return AVERROR(EINVAL);
+
+    if (whence == AVSEEK_SIZE)
+        return static_cast<int64_t>(src->size);
+
+    int64_t new_pos;
+    switch (whence)
+    {
+    case SEEK_SET: new_pos = offset; break;
+    case SEEK_CUR: new_pos = static_cast<int64_t>(src->pos) + offset; break;
+    case SEEK_END: new_pos = static_cast<int64_t>(src->size) + offset; break;
+    default:       return AVERROR(EINVAL);
+    }
+
+    if (new_pos < 0 || static_cast<size_t>(new_pos) > src->size)
+        return AVERROR(EIO);
+
+    src->pos = static_cast<size_t>(new_pos);
+    return new_pos;
+}
+
+} // namespace
+
+struct cosyvoice_audio_decoder
+{
+    std::vector<float> buffer;
+    uint32_t sample_rate = 0;
+};
+
+bool cosyvoice_audio_decoding_format_supported(cosyvoice_audio_encoding_format_t format)
+{
+    // Check whether FFmpeg has a decoder for this format
+    switch (format)
+    {
+    case COSYVOICE_AUDIO_ENCODING_FORMAT_WAV:
+        return avcodec_find_decoder(AV_CODEC_ID_PCM_S16LE) != nullptr;
+    case COSYVOICE_AUDIO_ENCODING_FORMAT_MP3:
+        return avcodec_find_decoder(AV_CODEC_ID_MP3) != nullptr;
+    case COSYVOICE_AUDIO_ENCODING_FORMAT_FLAC:
+        return avcodec_find_decoder(AV_CODEC_ID_FLAC) != nullptr;
+    case COSYVOICE_AUDIO_ENCODING_FORMAT_AAC:
+    case COSYVOICE_AUDIO_ENCODING_FORMAT_M4A:
+        return avcodec_find_decoder(AV_CODEC_ID_AAC) != nullptr;
+    case COSYVOICE_AUDIO_ENCODING_FORMAT_OPUS:
+        return avcodec_find_decoder(AV_CODEC_ID_OPUS) != nullptr;
+    default:
+        return false;
+    }
+}
+
+cosyvoice_audio_decoder_t cosyvoice_audio_decoder_create(void)
+{
+    return new cosyvoice_audio_decoder();
+}
+
+void cosyvoice_audio_decoder_destroy(cosyvoice_audio_decoder_t decoder)
+{
+    delete decoder;
+}
+
+bool cosyvoice_audio_decoder_decode(
+    cosyvoice_audio_decoder_t decoder,
+    const void*               input,
+    uint32_t                  input_length)
+{
+    if (!decoder || !input || input_length == 0)
+        return false;
+
+    decoder->buffer.clear();
+    decoder->sample_rate = 0;
+
+    memory_input_source mem_src;
+    mem_src.data = static_cast<const uint8_t*>(input);
+    mem_src.size = input_length;
+    mem_src.pos  = 0;
+
+    // All resources start as nullptr; cleanup is uniform.
+    AVFormatContext* format_ctx = nullptr;
+    AVCodecContext*  codec_ctx  = nullptr;
+    AVFrame*         frame      = nullptr;
+    AVPacket*        pkt        = nullptr;
+    SwrContext*      swr_ctx    = nullptr;
+    AVIOContext*     io_ctx     = nullptr;
+    unsigned char*   io_buffer  = nullptr;
+
+    // Deferred cleanup — run at every early-exit point.
+    auto cleanup = [&]() {
+        if (swr_ctx)    swr_free(&swr_ctx);
+        if (frame)      av_frame_free(&frame);
+        if (pkt)        av_packet_free(&pkt);
+        if (codec_ctx)  avcodec_free_context(&codec_ctx);
+        if (format_ctx) avformat_close_input(&format_ctx);
+        if (io_ctx)    { av_freep(&io_ctx->buffer); avio_context_free(&io_ctx); }
+    };
+
+    io_buffer = static_cast<unsigned char*>(av_malloc(4096));
+    if (!io_buffer)
+    {
+        cleanup();
+        return false;
+    }
+
+    io_ctx = avio_alloc_context(io_buffer, 4096, 0, &mem_src,
+                                &read_memory_packet, nullptr, &seek_memory_packet);
+    if (!io_ctx)
+    {
+        av_free(io_buffer);
+        cleanup();
+        return false;
+    }
+
+    format_ctx = avformat_alloc_context();
+    if (!format_ctx)
+    {
+        cleanup();
+        return false;
+    }
+
+    format_ctx->pb = io_ctx;
+    format_ctx->flags |= AVFMT_FLAG_CUSTOM_IO;
+
+    if (avformat_open_input(&format_ctx, nullptr, nullptr, nullptr) < 0)
+    {
+        cleanup();
+        return false;
+    }
+
+    if (avformat_find_stream_info(format_ctx, nullptr) < 0)
+    {
+        cleanup();
+        return false;
+    }
+
+    int audio_stream_idx = -1;
+    for (unsigned int i = 0; i < format_ctx->nb_streams; i++)
+    {
+        if (format_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO)
+        {
+            audio_stream_idx = static_cast<int>(i);
+            break;
+        }
+    }
+    if (audio_stream_idx < 0)
+    {
+        cleanup();
+        return false;
+    }
+
+    AVStream* audio_stream = format_ctx->streams[static_cast<unsigned int>(audio_stream_idx)];
+    const AVCodec* codec = avcodec_find_decoder(audio_stream->codecpar->codec_id);
+    if (!codec)
+    {
+        cleanup();
+        return false;
+    }
+
+    codec_ctx = avcodec_alloc_context3(codec);
+    if (!codec_ctx)
+    {
+        cleanup();
+        return false;
+    }
+
+    if (avcodec_parameters_to_context(codec_ctx, audio_stream->codecpar) < 0)
+    {
+        cleanup();
+        return false;
+    }
+
+    if (avcodec_open2(codec_ctx, codec, nullptr) < 0)
+    {
+        cleanup();
+        return false;
+    }
+
+    decoder->sample_rate = codec_ctx->sample_rate;
+
+    swr_ctx = swr_alloc();
+    if (!swr_ctx)
+    {
+        cleanup();
+        return false;
+    }
+
+    {
+        AVChannelLayout mono = AV_CHANNEL_LAYOUT_MONO;
+        av_opt_set_chlayout(swr_ctx, "in_chlayout", &codec_ctx->ch_layout, 0);
+        av_opt_set_chlayout(swr_ctx, "out_chlayout", &mono, 0);
+        av_opt_set_int(swr_ctx, "in_sample_rate", codec_ctx->sample_rate, 0);
+        av_opt_set_int(swr_ctx, "out_sample_rate", codec_ctx->sample_rate, 0);
+        av_opt_set_sample_fmt(swr_ctx, "in_sample_fmt", codec_ctx->sample_fmt, 0);
+        av_opt_set_sample_fmt(swr_ctx, "out_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
+    }
+    if (swr_init(swr_ctx) < 0)
+    {
+        cleanup();
+        return false;
+    }
+
+    frame = av_frame_alloc();
+    pkt   = av_packet_alloc();
+    if (!frame || !pkt)
+    {
+        cleanup();
+        decoder->buffer.clear();
+        decoder->sample_rate = 0;
+        return false;
+    }
+
+    while (av_read_frame(format_ctx, pkt) >= 0)
+    {
+        if (pkt->stream_index == audio_stream_idx)
+        {
+            if (avcodec_send_packet(codec_ctx, pkt) < 0)
+            {
+                av_packet_unref(pkt);
+                continue;
+            }
+            while (avcodec_receive_frame(codec_ctx, frame) >= 0)
+            {
+                const uint8_t* in_planes[1] = { frame->data[0] };
+                int in_samples = frame->nb_samples;
+                int out_samples = av_rescale_rnd(
+                    swr_get_delay(swr_ctx, codec_ctx->sample_rate) + in_samples,
+                    codec_ctx->sample_rate, codec_ctx->sample_rate, AV_ROUND_UP);
+                std::vector<float> tmp(static_cast<size_t>(out_samples));
+                uint8_t* out_planes[1] = { reinterpret_cast<uint8_t*>(tmp.data()) };
+                int converted = swr_convert(swr_ctx, out_planes, out_samples, in_planes, in_samples);
+                if (converted > 0)
+                    decoder->buffer.insert(decoder->buffer.end(), tmp.begin(), tmp.begin() + converted);
+            }
+        }
+        av_packet_unref(pkt);
+    }
+
+    // Flush remaining packets
+    avcodec_send_packet(codec_ctx, nullptr);
+    while (avcodec_receive_frame(codec_ctx, frame) >= 0)
+    {
+        const uint8_t* in_planes[1] = { frame->data[0] };
+        int in_samples = frame->nb_samples;
+        int out_samples = av_rescale_rnd(
+            swr_get_delay(swr_ctx, codec_ctx->sample_rate) + in_samples,
+            codec_ctx->sample_rate, codec_ctx->sample_rate, AV_ROUND_UP);
+        std::vector<float> tmp(static_cast<size_t>(out_samples));
+        uint8_t* out_planes[1] = { reinterpret_cast<uint8_t*>(tmp.data()) };
+        int converted = swr_convert(swr_ctx, out_planes, out_samples, in_planes, in_samples);
+        if (converted > 0)
+            decoder->buffer.insert(decoder->buffer.end(), tmp.begin(), tmp.begin() + converted);
+    }
+
+    bool ok = !decoder->buffer.empty();
+    cleanup();
+    if (!ok)
+    {
+        decoder->buffer.clear();
+        decoder->sample_rate = 0;
+    }
+    return ok;
+}
+
+void cosyvoice_audio_decoder_get_decoded_data(
+    cosyvoice_audio_decoder_t decoder,
+    float**                   data,
+    uint32_t*                 length,
+    uint32_t*                 sample_rate)
+{
+    if (!decoder || !data || !length || !sample_rate)
+    {
+        if (data)        *data = nullptr;
+        if (length)      *length = 0;
+        if (sample_rate) *sample_rate = 0;
+        return;
+    }
+
+    *data        = decoder->buffer.data();
+    *length      = static_cast<uint32_t>(decoder->buffer.size());
+    *sample_rate = decoder->sample_rate;
+}
+
 void cosyvoice_audio_free(float* data)
 {
     delete[] data;

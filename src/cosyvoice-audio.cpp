@@ -260,3 +260,98 @@ void cosyvoice_audio_free(float* data)
 {
     delete[] data;
 }
+
+// ---------------------------------------------------------------------------
+// In-Memory Audio Decoder (miniaudio backend)
+// ---------------------------------------------------------------------------
+
+struct cosyvoice_audio_decoder
+{
+    std::vector<float> buffer;
+    ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 1, 0);
+    uint32_t sample_rate = 0;
+};
+
+bool cosyvoice_audio_decoding_format_supported(cosyvoice_audio_encoding_format_t format)
+{
+    switch (format)
+    {
+    case COSYVOICE_AUDIO_ENCODING_FORMAT_WAV:
+    case COSYVOICE_AUDIO_ENCODING_FORMAT_FLAC:
+    case COSYVOICE_AUDIO_ENCODING_FORMAT_MP3:
+        return true;
+    default:
+        return false;
+    }
+}
+
+cosyvoice_audio_decoder_t cosyvoice_audio_decoder_create(void)
+{
+    return new cosyvoice_audio_decoder();
+}
+
+void cosyvoice_audio_decoder_destroy(cosyvoice_audio_decoder_t decoder)
+{
+    delete decoder;
+}
+
+bool cosyvoice_audio_decoder_decode(
+    cosyvoice_audio_decoder_t decoder,
+    const void*               input,
+    uint32_t                  input_length)
+{
+    if (!decoder || !input || input_length == 0)
+        return false;
+
+    decoder->buffer.clear();
+    decoder->sample_rate = 0;
+
+    ma_decoder ma_dec;
+    ma_result result = ma_decoder_init_memory(input, input_length, &decoder->config, &ma_dec);
+    if (result != MA_SUCCESS)
+        return false;
+
+    decoder->sample_rate = ma_dec.outputSampleRate;
+
+    ma_uint64 total = 0;
+    result = ma_decoder_get_length_in_pcm_frames(&ma_dec, &total);
+    if (result != MA_SUCCESS)
+    {
+        ma_decoder_uninit(&ma_dec);
+        return false;
+    }
+
+    decoder->buffer.resize(static_cast<size_t>(total));
+    ma_uint64 frames_read = 0;
+    result = ma_decoder_read_pcm_frames(&ma_dec, decoder->buffer.data(), total, &frames_read);
+    ma_decoder_uninit(&ma_dec);
+
+    if (result != MA_SUCCESS)
+    {
+        decoder->buffer.clear();
+        decoder->sample_rate = 0;
+        return false;
+    }
+
+    decoder->buffer.resize(static_cast<size_t>(frames_read));
+    return true;
+}
+
+void cosyvoice_audio_decoder_get_decoded_data(
+    cosyvoice_audio_decoder_t decoder,
+    float**                   data,
+    uint32_t*                 length,
+    uint32_t*                 sample_rate)
+{
+    if (!decoder || !data || !length || !sample_rate)
+    {
+        if (data)        *data = nullptr;
+        if (length)      *length = 0;
+        if (sample_rate) *sample_rate = 0;
+        return;
+    }
+
+    *data        = decoder->buffer.data();
+    *length      = static_cast<uint32_t>(decoder->buffer.size());
+    *sample_rate = decoder->sample_rate;
+}
