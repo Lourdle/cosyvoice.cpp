@@ -1,21 +1,9 @@
-﻿#include "pch.h"
-#include "cosyvoice-server.h"
+﻿#include "cosyvoice-server.h"
 #include "server_common.h"
 
 #ifndef COSYVOICE_NO_AUDIO
     #include "cosyvoice-audio.h"
 #endif
-
-#include "nlohmann/json.hpp"
-#include "httplib.h"
-
-#include <cmath>
-#include <cstdint>
-#include <ctime>
-#include <limits>
-#include <string>
-#include <unordered_map>
-#include <utility>
 
 using json = nlohmann::json;
 

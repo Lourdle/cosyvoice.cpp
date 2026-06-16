@@ -1,11 +1,11 @@
 set(SERVER_SOURCES
     cosyvoice-server.h
     cosyvoice-server.cpp
-    server_common.h
 )
 
 set(SERVER_PCH_SOURCES
     pch.h
+    server_common.h
     cosyvoice-server-backend.cpp
     cosyvoice-server-webui.cpp
     server_common.cpp
@@ -33,7 +33,7 @@ set(SERVER_COMMON_INCLUDES
 set(SERVER_COMMON_LIBS cosyvoice common ggml tools_common)
 
 # PCH object library (only for selected translation units)
-add_library(cosyvoice-server-provider OBJECT ${SERVER_PCH_SOURCES})
+add_library(cosyvoice-server-provider STATIC ${SERVER_PCH_SOURCES})
 target_precompile_headers(cosyvoice-server-provider PRIVATE pch.h)
 target_include_directories(cosyvoice-server-provider PRIVATE ${SERVER_COMMON_INCLUDES})
 target_link_libraries(cosyvoice-server-provider PRIVATE ${SERVER_COMMON_LIBS})

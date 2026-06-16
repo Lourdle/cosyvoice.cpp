@@ -5,13 +5,31 @@ static const unsigned char webui_html[] = {
 };
 static const size_t webui_html_size = sizeof(webui_html);
 
+static const unsigned char webui_css[] = {
+#embed "webui/cosyvoice-webui.css"
+};
+static const size_t webui_css_size = sizeof(webui_css);
+
+static const unsigned char webui_js[] = {
+#embed "webui/cosyvoice-webui.js"
+};
+static const size_t webui_js_size = sizeof(webui_js);
+
 const void* server_resource_load(unsigned int id, size_t* out_size)
 {
-    if (id == IDR_WEBUI_HTML)
+    switch (id)
     {
-        *out_size = webui_html_size;
-        return webui_html;
+        case IDR_WEBUI_HTML:
+            *out_size = webui_html_size;
+            return webui_html;
+        case IDR_WEBUI_CSS:
+            *out_size = webui_css_size;
+            return webui_css;
+        case IDR_WEBUI_JS:
+            *out_size = webui_js_size;
+            return webui_js;
+        default:
+            *out_size = 0;
+            return NULL;
     }
-    *out_size = 0;
-    return NULL;
 }

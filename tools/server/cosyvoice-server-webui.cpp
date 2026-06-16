@@ -1,19 +1,11 @@
-﻿#include "pch.h"
-#include "cosyvoice-server.h"
+﻿#include "cosyvoice-server.h"
 #include "server_common.h"
 #include "resource.h"
 #include "tool_common_cosyvoice.h"
 #include "common.h"
 
-#include "nlohmann/json.hpp"
-#include "httplib.h"
-
 #include <ggml-backend.h>
 
-#include <cstring>
-#include <memory>
-#include <string>
-#include <vector>
 
 #ifndef COSYVOICE_NO_AUDIO
     #include "cosyvoice-audio.h"
@@ -200,13 +192,43 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
 
         std::string script = "\n<script>window.__COSYVOICE_CONFIG__ = " + cfg.dump() + ";</script>\n";
 
-        const auto pos = html.find("</body>");
+        // Insert config before the external JS reference
+        const std::string js_marker = "<script src=\"/cosyvoice-webui.js\">";
+        const auto pos = html.find(js_marker);
         if (pos != std::string::npos)
             html.insert(pos, script);
-        else
-            html.append(script);
 
         res.set_content(std::move(html), "text/html");
+    });
+
+    // ---- GET /cosyvoice-webui.css — serve embedded CSS ----
+    server.Get("/cosyvoice-webui.css", [](const httplib::Request&, httplib::Response& res)
+    {
+        size_t size = 0;
+        const void* data = server_resource_load(IDR_WEBUI_CSS, &size);
+        if (!data)
+        {
+            res.status = 404;
+            res.set_content("/* Not found */", "text/css");
+            return;
+        }
+        res.status = 200;
+        res.set_content(std::string(static_cast<const char*>(data), size), "text/css");
+    });
+
+    // ---- GET /cosyvoice-webui.js — serve embedded JavaScript ----
+    server.Get("/cosyvoice-webui.js", [](const httplib::Request&, httplib::Response& res)
+    {
+        size_t size = 0;
+        const void* data = server_resource_load(IDR_WEBUI_JS, &size);
+        if (!data)
+        {
+            res.status = 404;
+            res.set_content("// Not found", "application/javascript");
+            return;
+        }
+        res.status = 200;
+        res.set_content(std::string(static_cast<const char*>(data), size), "application/javascript");
     });
 
     // ---- Simple ping endpoint (always works) ----

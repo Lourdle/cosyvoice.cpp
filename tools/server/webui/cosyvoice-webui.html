@@ -4,278 +4,77 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CosyVoice TTS WebUI</title>
-<style>
-:root {
-    --bg: #1e1e2e;
-    --surface: #2a2a3e;
-    --surface2: #363650;
-    --border: #40405a;
-    --text: #e0e0f0;
-    --text-dim: #9090b0;
-    --accent: #7c6ff0;
-    --accent-hover: #9080ff;
-    --danger: #e06060;
-    --success: #60c080;
-    --radius: 8px;
-    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-    font-family: var(--font);
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-    padding: 20px;
-}
-.container { max-width: 860px; margin: 0 auto; }
-
-h1 {
-    font-size: 24px;
-    font-weight: 600;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-h1 small { font-size: 14px; font-weight: 400; color: var(--text-dim); }
-
-.card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 20px;
-    margin-bottom: 16px;
-}
-.card h2 {
-    font-size: 16px;
-    font-weight: 600;
-    margin-bottom: 12px;
-    color: var(--accent);
-}
-
-.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
-.row > * { flex: 1; min-width: 150px; }
-.col { flex: 1; min-width: 200px; }
-
-label {
-    display: block;
-    font-size: 13px;
-    color: var(--text-dim);
-    margin-bottom: 4px;
-}
-input, select, textarea {
-    width: 100%;
-    padding: 8px 12px;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    color: var(--text);
-    font-size: 14px;
-    font-family: var(--font);
-    outline: none;
-    transition: border-color 0.15s;
-}
-input:focus, select:focus, textarea:focus {
-    border-color: var(--accent);
-}
-textarea { resize: vertical; min-height: 80px; }
-input[readonly] { opacity: 0.7; }
-
-.btn {
-    padding: 8px 20px;
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: var(--radius);
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    transition: background 0.15s;
-    white-space: nowrap;
-}
-.btn:hover { background: var(--accent-hover); }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-danger { background: var(--danger); }
-.btn-danger:hover { background: #d05050; }
-.btn-sm { padding: 4px 12px; font-size: 12px; }
-
-.tabs { display: flex; gap: 0; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
-.tab {
-    padding: 8px 16px;
-    cursor: pointer;
-    font-size: 13px;
-    color: var(--text-dim);
-    border-bottom: 2px solid transparent;
-    transition: all 0.15s;
-    user-select: none;
-}
-.tab:hover { color: var(--text); }
-.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-.tab:disabled { opacity: 0.4; cursor: not-allowed; }
-.tab-content { display: none; }
-.tab-content.active { display: block; }
-
-.info-grid {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 4px 16px;
-    font-size: 13px;
-}
-.info-grid .label { color: var(--text-dim); white-space: nowrap; }
-.info-grid .value { color: var(--text); word-break: break-all; }
-
-.speaker-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px;
-    background: var(--surface2);
-    border-radius: var(--radius);
-    margin-bottom: 6px;
-    font-size: 14px;
-}
-.speaker-item .del { cursor: pointer; color: var(--danger); font-size: 18px; line-height: 1; }
-
-.player-area { margin-top: 12px; }
-.player-area audio { width: 100%; }
-.download-link { font-size: 13px; color: var(--accent); text-decoration: none; margin-top: 4px; display: inline-block; }
-.download-link:hover { text-decoration: underline; }
-.save-link { font-size: 13px; color: var(--success); text-decoration: none; margin-top: 4px; display: inline-block; cursor: pointer; }
-.save-link:hover { text-decoration: underline; }
-
-.error-box {
-    background: rgba(224,96,96,0.15);
-    border: 1px solid var(--danger);
-    border-radius: var(--radius);
-    padding: 10px 14px;
-    margin-top: 12px;
-    font-size: 14px;
-    color: var(--danger);
-    display: none;
-}
-.error-box.show { display: block; }
-
-.success-box {
-    background: rgba(96,192,128,0.15);
-    border: 1px solid var(--success);
-    border-radius: var(--radius);
-    padding: 10px 14px;
-    margin-top: 12px;
-    font-size: 14px;
-    color: var(--success);
-    display: none;
-}
-.success-box.show { display: block; }
-
-details {
-    margin-top: 8px;
-}
-details summary {
-    font-size: 13px;
-    color: var(--accent);
-    cursor: pointer;
-    user-select: none;
-}
-details summary:hover { text-decoration: underline; }
-details .params { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 10px; }
-details .params > * { flex: 1; min-width: 120px; }
-
-.spinner {
-    display: inline-block;
-    width: 16px; height: 16px;
-    border: 2px solid var(--text-dim);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.6s linear infinite;
-    vertical-align: middle;
-    margin-right: 6px;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-.empty-state {
-    text-align: center;
-    padding: 20px;
-    color: var(--text-dim);
-    font-size: 14px;
-}
-
-input[type="file"] { padding: 6px; }
-input[type="range"] {
-    padding: 0;
-    background: transparent;
-    border: none;
-    accent-color: var(--accent);
-}
-.range-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-dim); }
-
-.model-info {
-    font-size: 13px;
-    color: var(--text-dim);
-    margin-top: 8px;
-    padding: 8px 12px;
-    background: var(--surface2);
-    border-radius: var(--radius);
-}
-
-.btn-group { display: flex; gap: 8px; }
-.btn-group > * { flex: 1; }
-
-/* Audio trim slider area */
-.trim-area {
-    margin-top: 10px;
-    display: none;
-}
-.trim-area.show { display: block; }
-
-.waveform-container {
-    width: 100%;
-    background: var(--surface2);
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
-    overflow: hidden;
-    cursor: crosshair;
-    position: relative;
-}
-.waveform-container canvas {
-    display: block;
-    width: 100%;
-    height: 100px;
-}
-.waveform-controls {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 6px;
-}
-.waveform-time {
-    display: flex;
-    gap: 12px;
-    font-size: 12px;
-    color: var(--text-dim);
-}
-.waveform-buttons {
-    display: flex;
-    gap: 4px;
-}
-</style>
+<link rel="stylesheet" href="/cosyvoice-webui.css">
 </head>
 <body>
-<div class="container">
-    <h1>CosyVoice TTS <small id="server-status">Connecting...</small></h1>
 
-    <!-- Server Info -->
+<!-- Accent bar -->
+<div class="top-bar"></div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toast-container"></div>
+
+<div class="container">
+
+    <!-- Header -->
+    <div class="header">
+        <div class="header-logo">
+            <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="32" height="32" rx="8" fill="url(#logo-grad)"/>
+                <path d="M8 14v4M12 11v10M16 8v16M20 11v10M24 14v4" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+                <defs>
+                    <linearGradient id="logo-grad" x1="0" y1="0" x2="32" y2="32">
+                        <stop stop-color="#7c6ff0"/>
+                        <stop offset="1" stop-color="#5b4fd8"/>
+                    </linearGradient>
+                </defs>
+            </svg>
+            <h1>CosyVoice TTS</h1>
+        </div>
+        <div class="header-status">
+            <span class="status-dot off" id="status-dot"></span>
+            <span id="status-text">Connecting...</span>
+        </div>
+    </div>
+
+    <!-- Server Info & Stats -->
     <div class="card" id="info-card" style="display:none">
-        <h2>Server Info</h2>
+        <div class="card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            <h2>Server Info</h2>
+        </div>
         <div class="info-grid" id="server-info-grid"></div>
+        <div class="stats-dash">
+            <div class="stat-card" id="stat-model">
+                <div class="stat-num">0</div>
+                <div class="stat-label">Model</div>
+                <div class="stat-sub">—</div>
+            </div>
+            <div class="stat-card" id="stat-speakers">
+                <div class="stat-num">0</div>
+                <div class="stat-label">Speakers</div>
+                <div class="stat-sub">registered</div>
+            </div>
+            <div class="stat-card" id="stat-frontend">
+                <div class="stat-num">✗</div>
+                <div class="stat-label">Frontend</div>
+                <div class="stat-sub">ONNX models</div>
+            </div>
+            <div class="stat-card" id="stat-sample-rate">
+                <div class="stat-num">—</div>
+                <div class="stat-label">Sample Rate</div>
+                <div class="stat-sub">—</div>
+            </div>
+        </div>
     </div>
 
     <!-- Model Management -->
     <div class="card">
-        <h2>Model Management</h2>
+        <div class="card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
+            <h2>Model Management</h2>
+        </div>
 
-        <!-- Load state -->
         <div id="model-load-area">
             <div class="row">
                 <div>
@@ -284,174 +83,110 @@ input[type="range"] {
                 </div>
                 <div>
                     <label>Backend</label>
-                    <select id="model-backend">
-                        <option value="auto">Auto (best available)</option>
-                    </select>
+                    <select id="model-backend"><option value="auto">Auto (best available)</option></select>
                 </div>
                 <div>
-                    <label>Threads (0 = auto)</label>
+                    <label>Threads <span class="hint">(0 = auto)</span></label>
                     <input type="number" id="model-threads" value="0" min="0">
                 </div>
             </div>
 
-            <details style="margin-top:10px">
+            <details>
                 <summary>Advanced Model Config</summary>
                 <div class="params">
-                    <div>
-                        <label>K Cache Type</label>
+                    <div><label>K Cache Type</label>
                         <select id="model-kv-k">
-                            <option value="q8_0" selected>Q8_0</option>
-                            <option value="f32">F32</option>
-                            <option value="f16">F16</option>
-                            <option value="q5_1">Q5_1</option>
-                            <option value="q5_0">Q5_0</option>
-                            <option value="q4_1">Q4_1</option>
-                            <option value="q4_0">Q4_0</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label>V Cache Type</label>
+                            <option value="q8_0">Q8_0</option><option value="f32">F32</option><option value="f16">F16</option>
+                            <option value="q5_1">Q5_1</option><option value="q5_0">Q5_0</option>
+                            <option value="q4_1">Q4_1</option><option value="q4_0">Q4_0</option>
+                        </select></div>
+                    <div><label>V Cache Type</label>
                         <select id="model-kv-v">
-                            <option value="q4_0" selected>Q4_0</option>
-                            <option value="f32">F32</option>
-                            <option value="f16">F16</option>
-                            <option value="q5_1">Q5_1</option>
-                            <option value="q5_0">Q5_0</option>
-                            <option value="q4_1">Q4_1</option>
-                            <option value="q8_0">Q8_0</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label>Buffer Policy</label>
+                            <option value="q4_0">Q4_0</option><option value="f32">F32</option><option value="f16">F16</option>
+                            <option value="q5_1">Q5_1</option><option value="q5_0">Q5_0</option>
+                            <option value="q4_1">Q4_1</option><option value="q8_0">Q8_0</option>
+                        </select></div>
+                    <div><label>Buffer Policy</label>
                         <select id="model-buffer-policy">
                             <option value="">Default (Balanced)</option>
-                            <option value="shared">Shared</option>
-                            <option value="balanced">Balanced</option>
-                            <option value="dedicated">Dedicated</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label>Max LLM Length</label>
-                        <input type="number" id="model-max-llm" min="0">
-                    </div>
+                            <option value="shared">Shared</option><option value="balanced">Balanced</option><option value="dedicated">Dedicated</option>
+                        </select></div>
+                    <div><label>Max LLM Length</label><input type="number" id="model-max-llm" min="0"></div>
                 </div>
-                <div style="margin-top:12px">
-                    <button class="btn btn-sm" id="btn-reset-model-config" style="width:100%">↻ Reset Model Config to Defaults</button>
-                </div>
+                <div style="margin-top:12px"><button class="btn btn-sm" id="btn-reset-model-config" style="width:100%">Reset Model Config to Defaults</button></div>
             </details>
 
-            <div style="margin-top:10px">
-                <button class="btn" id="btn-load-model" style="width:100%">Load Model</button>
-            </div>
+            <div style="margin-top:12px"><button class="btn" id="btn-load-model" style="width:100%">Load Model</button></div>
         </div>
 
-        <!-- Loaded state -->
         <div id="model-loaded-area" style="display:none">
             <div class="model-info" id="model-loaded-info"></div>
-            <div style="margin-top:10px">
-                <button class="btn btn-danger" id="btn-unload-model" style="width:100%">Unload Model</button>
-            </div>
+            <div style="margin-top:12px"><button class="btn btn-danger" id="btn-unload-model" style="width:100%">Unload Model</button></div>
         </div>
 
-        <div class="error-box" id="model-error"></div>
-        <div class="success-box" id="model-success"></div>
+        <div class="msg-box error-box" id="model-error"></div>
+        <div class="msg-box success-box" id="model-success"></div>
     </div>
 
     <!-- Frontend ONNX Model Config -->
     <div class="card" id="frontend-card">
-        <h2>Frontend ONNX Model Config</h2>
-        <p style="font-size:13px; color:var(--text-dim); margin-bottom:10px">
-            Load ONNX models into memory for speaker extraction from audio.
-            Once loaded, all future extractions reuse the loaded models without reloading from disk.
-        </p>
+        <div class="card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+            <h2>Frontend ONNX Model Config</h2>
+        </div>
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:10px">Load ONNX models into memory for speaker extraction from audio.</p>
         <div class="row">
-            <div>
-                <label>Speech Tokenizer path</label>
-                <input type="text" id="cfg-tokenizer" placeholder="e.g. /data/models/speech_tokenizer.onnx">
-            </div>
-            <div>
-                <label>Campplus path</label>
-                <input type="text" id="cfg-campplus" placeholder="e.g. /data/models/campplus.onnx">
-            </div>
+            <div><label>Speech Tokenizer path</label><input type="text" id="cfg-tokenizer" placeholder="e.g. /data/models/speech_tokenizer.onnx"></div>
+            <div><label>Campplus path</label><input type="text" id="cfg-campplus" placeholder="e.g. /data/models/campplus.onnx"></div>
         </div>
-
-        <!-- Not loaded state -->
-        <div id="frontend-not-loaded" style="margin-top:10px; display:flex; gap:8px;">
-            <button class="btn" id="btn-load-frontend" style="flex:1">Load Frontend Models</button>
-        </div>
-
-        <!-- Loaded state -->
-        <div id="frontend-loaded" style="display:none; margin-top:10px;">
+        <div id="frontend-not-loaded" style="margin-top:12px"><button class="btn" id="btn-load-frontend" style="width:100%">Load Frontend Models</button></div>
+        <div id="frontend-loaded" style="display:none;margin-top:12px">
             <div class="model-info" id="frontend-loaded-info">Frontend ONNX models loaded in memory</div>
-            <div style="margin-top:10px; display:flex; gap:8px;">
-                <button class="btn btn-danger" id="btn-unload-frontend" style="flex:1">Unload Frontend Models</button>
-            </div>
+            <div style="margin-top:12px"><button class="btn btn-danger" id="btn-unload-frontend" style="width:100%">Unload Frontend Models</button></div>
         </div>
-
-        <div class="error-box" id="frontend-error"></div>
-        <div class="success-box" id="frontend-success"></div>
+        <div class="msg-box error-box" id="frontend-error"></div>
+        <div class="msg-box success-box" id="frontend-success"></div>
     </div>
 
     <!-- Speaker Management -->
     <div class="card">
-        <h2>Speaker Management</h2>
+        <div class="card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <h2>Speaker Management</h2>
+            <span class="badge" id="speaker-count">0</span>
+        </div>
+
         <div class="tabs">
             <div class="tab active" data-tab="tab-load">Load GGUF</div>
             <div class="tab" data-tab="tab-extract">Extract from Audio</div>
         </div>
 
-        <!-- Tab 1: Load GGUF -->
         <div class="tab-content active" id="tab-load">
             <div class="row">
-                <div>
-                    <label>Speaker name</label>
-                    <input type="text" id="load-name" placeholder="e.g. my_voice">
-                </div>
-                <div>
-                    <label>Prompt speech GGUF path</label>
-                    <input type="text" id="load-path" placeholder="e.g. /data/speakers/speaker.gguf">
-                </div>
-                <div>
-                    <button class="btn" id="btn-load-gguf" style="width:100%">Load Speaker</button>
-                </div>
+                <div><label>Speaker name</label><input type="text" id="load-name" placeholder="e.g. my_voice"></div>
+                <div><label>Prompt speech GGUF path</label><input type="text" id="load-path" placeholder="e.g. /data/speakers/speaker.gguf"></div>
+                <div><button class="btn" id="btn-load-gguf" style="width:100%">Load Speaker</button></div>
             </div>
-            <div class="error-box" id="load-error"></div>
-            <div class="success-box" id="load-success"></div>
+            <div class="msg-box error-box" id="load-error"></div>
+            <div class="msg-box success-box" id="load-success"></div>
         </div>
 
-        <!-- Tab 2: Extract from Audio -->
         <div class="tab-content" id="tab-extract">
-            <div id="extract-disabled" style="display:none; color:var(--text-dim); padding:8px 0;">
-                Frontend ONNX models not configured. Please set Speech Tokenizer and Campplus paths in the Frontend Model Config section above.
-            </div>
+            <div id="extract-disabled" style="display:none;color:var(--text-dim);padding:8px 0;">Frontend ONNX models not configured. Please set Speech Tokenizer and Campplus paths in the Frontend Model Config section above.</div>
             <div id="extract-form">
                 <div class="row">
-                    <div>
-                        <label>Speaker name</label>
-                        <input type="text" id="extract-name" placeholder="e.g. extracted_voice">
-                    </div>
-                    <div>
-                        <label>Transcription text <span style="color:var(--text-dim);font-size:11px;">(optional — omit for cross-lingual only)</span></label>
-                        <input type="text" id="extract-text" placeholder="What is spoken in the audio">
-                    </div>
+                    <div><label>Speaker name</label><input type="text" id="extract-name" placeholder="e.g. extracted_voice"></div>
+                    <div><label>Transcription text <span style="color:var(--text-dim);font-size:11px;">(optional — omit for cross-lingual only)</span></label><input type="text" id="extract-text" placeholder="What is spoken in the audio"></div>
                 </div>
-                <div class="row" style="margin-top:10px">
-                    <div>
-                        <label>Reference audio file (WAV / MP3 / FLAC)</label>
-                        <input type="file" id="extract-audio" accept="audio/*">
-                    </div>
-                    <div>
-                        <button class="btn" id="btn-extract" style="width:100%">Extract Speaker</button>
-                    </div>
+                <div class="row" style="margin-top:12px">
+                    <div><label>Reference audio file (WAV / MP3 / FLAC)</label><input type="file" id="extract-audio" accept="audio/*"></div>
+                    <div><button class="btn" id="btn-extract" style="width:100%">Extract Speaker</button></div>
                 </div>
 
-                <!-- Audio trim controls (shown after file selection) -->
                 <div class="trim-area" id="trim-area">
                     <details>
                         <summary>Trim audio (optional)</summary>
-                        <div class="waveform-container" id="waveform-container">
-                            <canvas id="waveform-canvas" height="100"></canvas>
-                        </div>
+                        <div class="waveform-container"><canvas id="waveform-canvas" height="100"></canvas></div>
                         <div class="waveform-controls">
                             <div class="waveform-time">
                                 <span>Start: <span id="wf-start-time">0.00</span>s</span>
@@ -459,8 +194,8 @@ input[type="range"] {
                                 <span>Selected: <span id="wf-selected">0.00</span>s / <span id="wf-total">0.00</span>s</span>
                             </div>
                             <div class="waveform-buttons">
-                                <button class="btn btn-sm" id="wf-zoomin" title="Zoom in to selection">🔍+</button>
-                                <button class="btn btn-sm" id="wf-zoomout" title="Zoom out">🔍−</button>
+                                <button class="btn btn-sm" id="wf-zoomin" title="Zoom in to selection">+</button>
+                                <button class="btn btn-sm" id="wf-zoomout" title="Zoom out">−</button>
                                 <button class="btn btn-sm" id="wf-reset" title="Reset zoom">⟲</button>
                                 <button class="btn btn-sm" id="wf-preview">▶ Preview</button>
                             </div>
@@ -468,67 +203,83 @@ input[type="range"] {
                     </details>
                 </div>
 
-                <div style="margin-top:8px; font-size:12px; color:var(--text-dim)">
-                    Tip: Upload 3–30 seconds of clean voice recording for best results.
-                    Providing the transcription text enables all TTS modes (zero-shot, instruct, cross-lingual).
-                    Without transcription text, only cross-lingual mode is available.
-                </div>
+                <div style="margin-top:8px;font-size:12px;color:var(--text-dim)">Tip: Upload 3–30 seconds of clean voice recording for best results. Providing the transcription text enables all TTS modes.</div>
             </div>
-            <div class="error-box" id="extract-error"></div>
-            <div class="success-box" id="extract-success"></div>
+            <div class="msg-box error-box" id="extract-error"></div>
+            <div class="msg-box success-box" id="extract-success"></div>
         </div>
 
-        <!-- Registered speakers list -->
-        <div style="margin-top:16px">
-            <h3 style="font-size:14px; font-weight:500; margin-bottom:8px;">Registered Speakers</h3>
-            <div id="speaker-list">
-                <div class="empty-state">No speakers registered</div>
+        <div style="margin-top:18px">
+            <h3 style="font-size:14px;font-weight:500;margin-bottom:10px;">Registered Speakers</h3>
+            <div id="speaker-list"><div class="empty-state">No speakers registered</div></div>
+        </div>
+    </div>
+
+    <!-- Audio Trimmer (Standalone) -->
+    <div class="card">
+        <div class="card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+            <h2>Audio Trimmer</h2>
+            <span class="badge">Standalone</span>
+        </div>
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">Upload an audio file, select a region, and download the trimmed segment. All processing is done in your browser.</p>
+
+        <!-- Drop zone -->
+        <div class="drop-zone" id="trimmer-dropzone">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <div class="dz-text">Click to upload or drag &amp; drop an audio file</div>
+            <div class="dz-hint">Supports WAV, MP3, FLAC</div>
+            <input type="file" id="trimmer-input" accept="audio/*" style="display:none">
+        </div>
+
+        <!-- File info -->
+        <div class="file-info" id="trimmer-file-info" style="display:none"></div>
+
+        <!-- Waveform -->
+        <div id="trimmer-waveform" style="display:none;margin-top:10px">
+            <div class="waveform-container"><canvas id="trimmer-canvas" height="120"></canvas></div>
+            <div class="waveform-controls">
+                <div class="waveform-time">
+                    <span>Start: <span id="trimmer-start">0.00</span>s</span>
+                    <span>End: <span id="trimmer-end">0.00</span>s</span>
+                    <span>Selected: <span id="trimmer-selected">0.00</span>s / <span id="trimmer-total">0.00</span>s</span>
+                </div>
+                <div class="waveform-buttons">
+                    <button class="btn btn-sm" id="trimmer-zoomin" title="Zoom to selection">+</button>
+                    <button class="btn btn-sm" id="trimmer-zoomout" title="Zoom out">−</button>
+                    <button class="btn btn-sm" id="trimmer-reset" title="Reset zoom">⟲</button>
+                    <button class="btn btn-sm" id="trimmer-preview">▶ Preview</button>
+                </div>
+            </div>
+            <div style="margin-top:12px">
+                <button class="btn" id="trimmer-download" style="width:100%">Download Trimmed Audio (WAV)</button>
             </div>
         </div>
     </div>
 
     <!-- TTS Synthesis -->
     <div class="card">
-        <h2>TTS Synthesis</h2>
+        <div class="card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+            <h2>TTS Synthesis</h2>
+            <span class="badge"><kbd>Ctrl+Enter</kbd></span>
+        </div>
+
         <div class="row">
-            <div>
-                <label>Voice</label>
-                <select id="tts-voice">
-                    <option value="">— Register a speaker first —</option>
-                </select>
-            </div>
-            <div>
-                <label>Mode</label>
+            <div><label>Voice</label><select id="tts-voice"><option value="">— No speakers —</option></select></div>
+            <div><label>Mode</label>
                 <select id="tts-mode">
                     <option value="auto">Auto</option>
                     <option value="zero_shot">Zero-shot</option>
                     <option value="cross_lingual">Cross-lingual</option>
                     <option value="instruct">Instruct</option>
-                </select>
-            </div>
-            <div>
-                <label>Output format</label>
-                <select id="tts-format">
-                    <option value="wav">WAV</option>
-                    <option value="mp3">MP3</option>
-                    <option value="opus">Opus</option>
-                    <option value="flac">FLAC</option>
-                    <option value="pcm">PCM</option>
-                </select>
-            </div>
+                </select></div>
+            <div><label>Output format</label><select id="tts-format"><option value="wav">WAV</option></select></div>
         </div>
-        <div style="margin-top:10px">
-            <label>Synthesis text</label>
-            <textarea id="tts-text" placeholder="Enter text to synthesize..."></textarea>
-        </div>
-        <div style="margin-top:8px">
-            <label>Instructions (optional — used in instruct mode)</label>
-            <input type="text" id="tts-instructions" placeholder="e.g. Speak slowly and softly">
-        </div>
-        <div style="margin-top:8px">
-            <label>Speed: <span id="speed-val">1.0</span>x</label>
-            <input type="range" id="tts-speed" min="0.5" max="2.0" step="0.05" value="1.0">
-        </div>
+
+        <div style="margin-top:12px"><label>Synthesis text</label><textarea id="tts-text" placeholder="Enter text to synthesize…"></textarea></div>
+        <div style="margin-top:8px"><label>Instructions <span class="hint">(optional — used in instruct mode)</span></label><input type="text" id="tts-instructions" placeholder="e.g. Speak slowly and softly"></div>
+        <div style="margin-top:8px"><label>Speed: <span id="speed-val">1.0</span>x</label><input type="range" id="tts-speed" min="0.5" max="2.0" step="0.05" value="1.0"></div>
 
         <details>
             <summary>Advanced parameters</summary>
@@ -540,1150 +291,48 @@ input[type="range"] {
                 <div><label>Win Size</label><input type="number" id="tts-winsize" min="1" placeholder="Default"></div>
                 <div><label>Tau-R</label><input type="number" id="tts-taur" step="0.1" min="0" placeholder="Default"></div>
             </div>
-            <div style="margin-top:12px; padding-top:10px; border-top:1px solid var(--border)">
-                <label style="font-size:13px; color:var(--text-dim); margin-bottom:6px;">Generation Flags</label>
+            <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+                <label style="font-size:13px;color:var(--text-dim);margin-bottom:6px;">Generation Flags</label>
                 <div class="params">
                     <div><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="tts-fadein" checked> Fade In</label></div>
                     <div><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="tts-textnorm" checked> Text Normalization</label></div>
                     <div><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="tts-split" checked> Text Splitting</label></div>
                     <div><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="tts-fastsplit" checked> Fast Split</label></div>
                 </div>
-                <div style="margin-top:12px">
-                    <button class="btn btn-sm" id="btn-reset-gen-config" style="width:100%">↻ Reset Generation Params to Defaults</button>
-                </div>
+                <div style="margin-top:12px"><button class="btn btn-sm" id="btn-reset-gen-config" style="width:100%">Reset Generation Params to Defaults</button></div>
             </div>
         </details>
 
-        <div style="margin-top:12px">
-            <button class="btn" id="btn-tts" style="width:100%; padding:10px">Generate Speech</button>
-        </div>
+        <div style="margin-top:14px"><button class="btn" id="btn-tts" style="width:100%;padding:10px;font-size:15px">Generate Speech</button></div>
 
         <div class="player-area" id="player-area" style="display:none">
             <audio id="audio-player" controls></audio>
-            <a id="download-link" class="download-link" download>Download audio file</a>
+            <div class="player-controls">
+                <a id="download-link" class="download-link" download>Download audio file</a>
+            </div>
         </div>
 
-        <div class="error-box" id="tts-error"></div>
+        <div class="msg-box error-box" id="tts-error"></div>
     </div>
+
+    <!-- TTS History -->
+    <div class="card" id="history-area" style="display:none">
+        <div class="card-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <h2>Generation History</h2>
+            <span class="badge" id="history-count">0</span>
+        </div>
+        <div class="history-clear">
+            <button class="btn btn-sm btn-danger" id="btn-clear-history">Clear All</button>
+        </div>
+        <div class="history-list" id="history-list">
+            <div class="empty-state">No generation history yet</div>
+        </div>
+    </div>
+
 </div>
 
-<script>
-const CFG = window.__COSYVOICE_CONFIG__ || {};
-
-// ---- State ----
-let speakers = [];
-let statusData = {};
-let isGenerating = false;
-let seedLocked = false;
-
-// Audio trim state
-let waveformState = null;
-let previewAudio = null;
-
-// ---- localStorage persistence for advanced params ----
-const ADV_PARAM_IDS = ['tts-seed','tts-temp','tts-topk','tts-topp','tts-winsize','tts-taur','tts-fadein','tts-textnorm','tts-split','tts-fastsplit','tts-mode','tts-format','model-max-llm','model-kv-k','model-kv-v','model-buffer-policy','model-threads','model-backend'];
-
-function saveAdvParam(id) {
-    try {
-        const el = document.getElementById(id);
-        if (!el) return;
-        const key = 'cosyvoice_' + id;
-        if (el.type === 'checkbox') localStorage.setItem(key, el.checked ? '1' : '0');
-        else if (el.tagName === 'SELECT') localStorage.setItem(key, el.value);
-        else localStorage.setItem(key, el.value);
-    } catch(e) { /* ignore */ }
-}
-
-function restoreAdvParams() {
-    try {
-        ADV_PARAM_IDS.forEach(id => {
-            const key = 'cosyvoice_' + id;
-            const saved = localStorage.getItem(key);
-            if (saved === null) return;
-            const el = document.getElementById(id);
-            if (!el) return;
-            if (el.type === 'checkbox') el.checked = saved === '1';
-            else if (el.tagName === 'SELECT') {
-                for (let i = 0; i < el.options.length; i++) {
-                    if (el.options[i].value === saved) { el.selectedIndex = i; break; }
-                }
-            } else el.value = saved;
-        });
-    } catch(e) { /* ignore */ }
-}
-
-function clearAdvParams() {
-    ADV_PARAM_IDS.forEach(id => localStorage.removeItem('cosyvoice_' + id));
-}
-
-// ---- DOM references ----
-const $ = id => document.getElementById(id);
-const els = {
-    // Status
-    serverStatus: $('server-status'),
-    infoCard: $('info-card'),
-    serverInfoGrid: $('server-info-grid'),
-
-    // Model management
-    modelPath: $('model-path'),
-    modelBackend: $('model-backend'),
-    modelThreads: $('model-threads'),
-    modelKvK: $('model-kv-k'),
-    modelKvV: $('model-kv-v'),
-    modelBufferPolicy: $('model-buffer-policy'),
-    modelMaxLlm: $('model-max-llm'),
-    btnResetModelConfig: $('btn-reset-model-config'),
-    btnLoadModel: $('btn-load-model'),
-    btnUnloadModel: $('btn-unload-model'),
-    modelLoadArea: $('model-load-area'),
-    modelLoadedArea: $('model-loaded-area'),
-    modelLoadedInfo: $('model-loaded-info'),
-    modelError: $('model-error'),
-    modelSuccess: $('model-success'),
-
-    // Frontend config
-    cfgTokenizer: $('cfg-tokenizer'),
-    cfgCampplus: $('cfg-campplus'),
-    btnLoadFrontend: $('btn-load-frontend'),
-    btnUnloadFrontend: $('btn-unload-frontend'),
-    frontendNotLoaded: $('frontend-not-loaded'),
-    frontendLoaded: $('frontend-loaded'),
-    frontendLoadedInfo: $('frontend-loaded-info'),
-    frontendError: $('frontend-error'),
-    frontendSuccess: $('frontend-success'),
-
-    // Speakers
-    speakerList: $('speaker-list'),
-    loadName: $('load-name'),
-    loadPath: $('load-path'),
-    btnLoadGguf: $('btn-load-gguf'),
-    loadError: $('load-error'),
-    loadSuccess: $('load-success'),
-    extractName: $('extract-name'),
-    extractText: $('extract-text'),
-    extractAudio: $('extract-audio'),
-    btnExtract: $('btn-extract'),
-    extractError: $('extract-error'),
-    extractSuccess: $('extract-success'),
-    extractDisabled: $('extract-disabled'),
-    extractForm: $('extract-form'),
-    trimArea: $('trim-area'),
-    waveformCanvas: $('waveform-canvas'),
-    wfStartTime: $('wf-start-time'),
-    wfEndTime: $('wf-end-time'),
-    wfSelected: $('wf-selected'),
-    wfTotal: $('wf-total'),
-    wfZoomIn: $('wf-zoomin'),
-    wfZoomOut: $('wf-zoomout'),
-    wfReset: $('wf-reset'),
-    wfPreview: $('wf-preview'),
-
-    // Frontend card
-    frontendCard: $('frontend-card'),
-
-    // TTS
-    ttsVoice: $('tts-voice'),
-    ttsMode: $('tts-mode'),
-    ttsFormat: $('tts-format'),
-    ttsText: $('tts-text'),
-    ttsInstructions: $('tts-instructions'),
-    ttsSpeed: $('tts-speed'),
-    speedVal: $('speed-val'),
-    ttsSeed: $('tts-seed'),
-    ttsTemp: $('tts-temp'),
-    ttsTopk: $('tts-topk'),
-    ttsTopp: $('tts-topp'),
-    ttsWinsize: $('tts-winsize'),
-    ttsTaur: $('tts-taur'),
-    ttsFadein: $('tts-fadein'),
-    ttsTextnorm: $('tts-textnorm'),
-    ttsSplit: $('tts-split'),
-    ttsFastsplit: $('tts-fastsplit'),
-    seedDice: $('seed-dice'),
-    seedLock: $('seed-lock'),
-    btnTts: $('btn-tts'),
-    btnResetGenConfig: $('btn-reset-gen-config'),
-    playerArea: $('player-area'),
-    audioPlayer: $('audio-player'),
-    downloadLink: $('download-link'),
-    ttsError: $('tts-error'),
-};
-
-// ---- Utilities ----
-function showError(el, msg) {
-    el.textContent = msg;
-    el.classList.add('show');
-}
-function hideError(el) { el.classList.remove('show'); el.textContent = ''; }
-function showSuccess(el, msg) {
-    el.textContent = msg;
-    el.classList.add('show');
-}
-function hideSuccess(el) { el.classList.remove('show'); el.textContent = ''; }
-
-async function apiFetch(url, opts) {
-    const res = await fetch(url, opts);
-    if (!res.ok) {
-        let msg = `HTTP ${res.status}`;
-        try { const j = await res.json(); msg = j.error || j.message || msg; } catch(e) {}
-        throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
-    }
-    return res;
-}
-
-function jsonBody(data) {
-    return {
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-    };
-}
-
-function escapeHtml(s) {
-    if (!s) return '';
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-// ---- Tab switching ----
-document.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-        if (tab.disabled) return;
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        $(tab.dataset.tab).classList.add('active');
-    });
-});
-
-// ---- Speed display ----
-els.ttsSpeed.addEventListener('input', () => {
-    els.speedVal.textContent = parseFloat(els.ttsSpeed.value).toFixed(2);
-});
-
-// ---- Fetch server status ----
-async function fetchStatus() {
-    try {
-        const res = await apiFetch('/status');
-        statusData = await res.json();
-        renderStatus();
-        renderFrontendConfig();
-        checkExtractAvailability();
-        updateModelUI();
-        updateFrontendUI();
-    } catch(e) {
-        els.serverStatus.textContent = 'Connection failed: ' + e.message;
-    }
-}
-
-function renderStatus() {
-    els.infoCard.style.display = 'block';
-    const modelName = statusData.model_loaded ? statusData.model : null;
-    els.serverStatus.textContent = modelName
-        ? `Model: ${modelName}`
-        : 'Ready (no model)';
-
-    const grid = [
-        ['Status', 'Running'],
-        ['Frontend', statusData.frontend_available ? 'Configured' : 'Not configured'],
-        ['Speakers', (statusData.speakers && statusData.speakers.length) || 0],
-    ];
-
-    els.serverInfoGrid.innerHTML = grid.map(([k,v]) =>
-        `<span class="label">${k}</span><span class="value">${v}</span>`
-    ).join('');
-}
-
-function renderFrontendConfig() {
-    // Only update if user hasn't modified them
-    els.cfgTokenizer.value = CFG.speechTokenizer || '';
-    els.cfgCampplus.value = CFG.campplus || '';
-}
-
-function updateModelUI() {
-    const hasModel = statusData.model_loaded;
-    els.modelLoadArea.style.display = hasModel ? 'none' : 'block';
-    els.modelLoadedArea.style.display = hasModel ? 'block' : 'none';
-    if (hasModel) {
-        const arch = statusData.model_arch || statusData.model || 'Model';
-        const kv_k = statusData.k_cache_type || '?';
-        const kv_v = statusData.v_cache_type || '?';
-        const buf = statusData.buffer_policy || '?';
-        const mll = statusData.max_llm_len || '?';
-        els.modelLoadedInfo.innerHTML = '<b>' + arch + '</b><br>'
-            + 'KV Cache: K=' + kv_k + ', V=' + kv_v + '<br>'
-            + 'Buffer Policy: ' + buf + '<br>'
-            + 'Max LLM Length: ' + mll + '<br>'
-            + 'Sample Rate: ' + (statusData.sample_rate || '?') + ' Hz';
-    }
-}
-
-function updateFrontendUI() {
-    const avail = statusData.frontend_available;
-    els.frontendNotLoaded.style.display = avail ? 'none' : 'block';
-    els.frontendLoaded.style.display = avail ? 'block' : 'none';
-}
-
-function checkExtractAvailability() {
-    const avail = statusData.frontend_available;
-    if (!avail) {
-        els.extractDisabled.style.display = 'block';
-        els.extractForm.style.display = 'none';
-    } else {
-        els.extractDisabled.style.display = 'none';
-        els.extractForm.style.display = 'block';
-    }
-}
-
-// ---- Fetch speakers ----
-async function fetchSpeakers() {
-    try {
-        const res = await apiFetch('/speaker');
-        const data = await res.json();
-        if (Array.isArray(data)) {
-            speakers = data.length > 0 && typeof data[0] === 'object' ? data : data.map(n => ({ name: n }));
-        } else {
-            speakers = data.speakers || [];
-            if (speakers.length > 0 && typeof speakers[0] === 'string')
-                speakers = speakers.map(n => ({ name: n }));
-        }
-        renderSpeakers();
-    } catch(e) {
-        console.error('Failed to load speakers:', e);
-    }
-}
-
-function renderSpeakers() {
-    const names = speakers.map(s => (typeof s === 'string' ? s : s.name)).filter(Boolean);
-
-    if (names.length === 0) {
-        els.speakerList.innerHTML = '<div class="empty-state">No speakers registered</div>';
-    } else {
-        els.speakerList.innerHTML = names.map(n =>
-            `<div class="speaker-item">
-                <span>${escapeHtml(n)}</span>
-                <span style="display:flex;gap:8px;align-items:center">
-                    <span class="save-link" data-name="${escapeHtml(n)}" onclick="saveSpeaker('${escapeHtml(n)}')">💾 保存到服务器</span>
-                    <span class="del" data-name="${escapeHtml(n)}" onclick="deleteSpeaker('${escapeHtml(n)}')">✕</span>
-                </span>
-            </div>`
-        ).join('');
-    }
-
-    // Update voice selector
-    els.ttsVoice.innerHTML = '';
-    if (names.length === 0) {
-        els.ttsVoice.innerHTML = '<option value="">— Register a speaker first —</option>';
-    } else {
-        names.forEach(n => {
-            const opt = document.createElement('option');
-            opt.value = n;
-            opt.textContent = n;
-            els.ttsVoice.appendChild(opt);
-        });
-    }
-}
-
-// ---- Delete speaker ----
-async function deleteSpeaker(name) {
-    try {
-        await apiFetch(`/speaker/${encodeURIComponent(name)}`, { method: 'DELETE' });
-        await fetchStatus();
-        await fetchSpeakers();
-    } catch(e) {
-        alert('Failed to delete: ' + e.message);
-    }
-}
-
-// ---- Save speaker prompt speech to server path ----
-async function saveSpeaker(name) {
-    const path = prompt('为 "' + name + '" 指定服务器端保存路径：', '');
-    if (!path) return;
-    try {
-        await apiFetch('/speaker/save', {
-            method: 'POST',
-            ...jsonBody({ name, path }),
-        });
-        alert('说话人特征已保存至：' + path);
-    } catch(e) {
-        alert('保存失败：' + e.message);
-    }
-}
-
-// ==== Model Management ====
-
-// Load model
-els.btnLoadModel.addEventListener('click', async () => {
-    hideError(els.modelError);
-    hideSuccess(els.modelSuccess);
-    const model = els.modelPath.value.trim();
-    if (!model) { showError(els.modelError, 'Please enter a model file path'); return; }
-    if (!els.modelMaxLlm.value) { showError(els.modelError, 'Max LLM Length is required'); return; }
-
-    els.btnLoadModel.disabled = true;
-    els.btnLoadModel.innerHTML = '<span class="spinner"></span>Loading...';
-    try {
-        const body = {
-            model: model,
-            backend: els.modelBackend.value,
-            n_threads: parseInt(els.modelThreads.value, 10) || 0,
-        };
-        // Advanced config (optional)
-        const kt = els.modelKvK.value;
-        const vt = els.modelKvV.value;
-        body.llm_kv_cache_type = (kt === vt) ? kt : `k=${kt},v=${vt}`;
-        const bp = els.modelBufferPolicy.value;
-        if (bp) body.inference_buffer_policy = bp;
-        const ml = parseInt(els.modelMaxLlm.value, 10);
-        if (ml > 0) body.max_llm_len = ml;
-
-        await apiFetch('/model/load', { method: 'POST', ...jsonBody(body) });
-        showSuccess(els.modelSuccess, 'Model loaded successfully');
-        await fetchStatus();
-        await fetchDefaults();
-        // Clear any stale speakers after model change
-        await fetchSpeakers();
-    } catch(e) {
-        showError(els.modelError, 'Failed to load model: ' + e.message);
-    }
-    els.btnLoadModel.disabled = false;
-    els.btnLoadModel.textContent = 'Load Model';
-});
-
-// Unload model
-els.btnUnloadModel.addEventListener('click', async () => {
-    hideError(els.modelError);
-    hideSuccess(els.modelSuccess);
-    if (!confirm('Unload the current model? All speakers will be removed.')) return;
-
-    els.btnUnloadModel.disabled = true;
-    els.btnUnloadModel.innerHTML = '<span class="spinner"></span>Unloading...';
-    try {
-        await apiFetch('/model/unload', { method: 'POST' });
-        showSuccess(els.modelSuccess, 'Model unloaded');
-        await fetchStatus();
-        await fetchSpeakers();
-    } catch(e) {
-        showError(els.modelError, 'Failed to unload: ' + e.message);
-    }
-    els.btnUnloadModel.disabled = false;
-    els.btnUnloadModel.textContent = 'Unload Model';
-});
-
-// ==== Frontend Model Management ====
-
-// Load frontend ONNX models
-els.btnLoadFrontend.addEventListener('click', async () => {
-    hideError(els.frontendError);
-    hideSuccess(els.frontendSuccess);
-    const st = els.cfgTokenizer.value.trim();
-    const cp = els.cfgCampplus.value.trim();
-    if (!st || !cp) { showError(els.frontendError, 'Both Speech Tokenizer and Campplus paths are required'); return; }
-
-    const body = { speech_tokenizer: st, campplus: cp };
-
-    els.btnLoadFrontend.disabled = true;
-    els.btnLoadFrontend.innerHTML = '<span class="spinner"></span>Loading...';
-    try {
-        await apiFetch('/frontend/model/load', { method: 'POST', ...jsonBody(body) });
-        showSuccess(els.frontendSuccess, 'Frontend ONNX models loaded');
-        await fetchStatus();
-    } catch(e) {
-        showError(els.frontendError, 'Failed to load frontend: ' + e.message);
-    }
-    els.btnLoadFrontend.disabled = false;
-    els.btnLoadFrontend.textContent = 'Load Frontend Models';
-});
-
-// Unload frontend ONNX models
-els.btnUnloadFrontend.addEventListener('click', async () => {
-    hideError(els.frontendError);
-    hideSuccess(els.frontendSuccess);
-
-    els.btnUnloadFrontend.disabled = true;
-    els.btnUnloadFrontend.innerHTML = '<span class="spinner"></span>Unloading...';
-    try {
-        await apiFetch('/frontend/model/unload', { method: 'POST' });
-        showSuccess(els.frontendSuccess, 'Frontend models unloaded');
-        await fetchStatus();
-    } catch(e) {
-        showError(els.frontendError, 'Failed to unload: ' + e.message);
-    }
-    els.btnUnloadFrontend.disabled = false;
-    els.btnUnloadFrontend.textContent = 'Unload Frontend Models';
-});
-
-// ==== Load GGUF Speaker ====
-els.btnLoadGguf.addEventListener('click', async () => {
-    hideError(els.loadError);
-    hideSuccess(els.loadSuccess);
-    const name = els.loadName.value.trim();
-    const path = els.loadPath.value.trim();
-    if (!name) { showError(els.loadError, 'Please enter a speaker name'); return; }
-    if (!path) { showError(els.loadError, 'Please enter a GGUF file path'); return; }
-
-    els.btnLoadGguf.disabled = true;
-    els.btnLoadGguf.innerHTML = '<span class="spinner"></span>Loading...';
-    try {
-        await apiFetch('/speaker', {
-            method: 'POST',
-            ...jsonBody({ type: 'gguf', name, path }),
-        });
-        showSuccess(els.loadSuccess, `Speaker "${name}" loaded successfully`);
-        els.loadName.value = '';
-        els.loadPath.value = '';
-        await fetchStatus();
-        await fetchSpeakers();
-    } catch(e) {
-        showError(els.loadError, 'Load failed: ' + e.message);
-    }
-    els.btnLoadGguf.disabled = false;
-    els.btnLoadGguf.textContent = 'Load Speaker';
-});
-
-// ==== Extract Speaker from Audio ====
-
-// ---- Waveform editor ----
-function initWaveform(canvas, audioBuffer) {
-    const total = audioBuffer.duration;
-    const wf = {
-        canvas, audioBuffer,
-        startPct: 0, endPct: 100,           // trim positions (% of original)
-        zoomStart: 0, zoomEnd: 100,          // visible range (% of original)
-        dragging: null,                       // 'start' | 'end' | null
-        totalDuration: total,
-    };
-
-    canvas.width = canvas.clientWidth * 2;   // retina
-    canvas.height = 100 * 2;
-    canvas.style.width = canvas.clientWidth + 'px';
-    canvas.style.height = '100px';
-
-    drawWaveform(wf);
-    return wf;
-}
-
-function drawWaveform(wf) {
-    const ctx = wf.canvas.getContext('2d');
-    const W = wf.canvas.width;
-    const H = wf.canvas.height;
-    const buffer = wf.audioBuffer;
-
-    ctx.clearRect(0, 0, W, H);
-
-    // Compute waveform data for visible range
-    const visStart = wf.zoomStart / 100;
-    const visEnd = wf.zoomEnd / 100;
-    const visLen = visEnd - visStart;
-    if (visLen <= 0) return;
-
-    const totalFrames = buffer.length;
-    const startFrame = Math.round(totalFrames * visStart);
-    const endFrame = Math.round(totalFrames * visEnd);
-    const frameRange = endFrame - startFrame;
-
-    const channelData = buffer.getChannelData(0);
-    const midY = H / 2;
-    const halfH = H * 0.4;
-
-    // Selection highlight
-    const selStartX = ((wf.startPct / 100) - visStart) / visLen * W;
-    const selEndX = ((wf.endPct / 100) - visStart) / visLen * W;
-    ctx.fillStyle = 'rgba(124,111,240,0.2)';
-    ctx.fillRect(selStartX, 0, selEndX - selStartX, H);
-
-    // Waveform
-    ctx.strokeStyle = '#7c6ff0';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let i = 0; i < W; i += 2) {
-        const pct = i / W;
-        const idx = startFrame + Math.round(frameRange * pct);
-        const idx2 = startFrame + Math.round(frameRange * ((i + 1) / W));
-        if (idx >= buffer.length) break;
-
-        let maxVal = 0;
-        for (let j = idx; j <= idx2 && j < buffer.length; j++) {
-            const v = Math.abs(channelData[j]);
-            if (v > maxVal) maxVal = v;
-        }
-
-        const barH = Math.max(1, maxVal * halfH);
-        const y1 = midY - barH;
-        const y2 = midY + barH;
-
-        if (i === 0) ctx.moveTo(i, y1);
-        else ctx.lineTo(i, y1);
-        ctx.moveTo(i, y2);
-        ctx.lineTo(i, y2);
-    }
-    ctx.stroke();
-
-    // Center line
-    ctx.strokeStyle = 'rgba(144,144,176,0.3)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, midY);
-    ctx.lineTo(W, midY);
-    ctx.stroke();
-
-    // Markers
-    ctx.strokeStyle = '#e06060';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(selStartX, 0);
-    ctx.lineTo(selStartX, H);
-    ctx.stroke();
-    ctx.strokeStyle = '#60c080';
-    ctx.beginPath();
-    ctx.moveTo(selEndX, 0);
-    ctx.lineTo(selEndX, H);
-    ctx.stroke();
-
-    // Update time labels
-    const total = wf.totalDuration;
-    const startTime = total * wf.startPct / 100;
-    const endTime = total * wf.endPct / 100;
-    els.wfStartTime.textContent = startTime.toFixed(2);
-    els.wfEndTime.textContent = endTime.toFixed(2);
-    els.wfSelected.textContent = (endTime - startTime).toFixed(2);
-    els.wfTotal.textContent = total.toFixed(2);
-
-    // Playback cursor (yellow vertical line)
-    if (previewAudio && !previewAudio.paused && !previewAudio.ended && previewAudio.duration > 0) {
-        const rangeDur = total * (wf.endPct - wf.startPct) / 100;
-        if (rangeDur > 0) {
-            const audioPct = wf.startPct + (previewAudio.currentTime / previewAudio.duration) * (wf.endPct - wf.startPct);
-            if (audioPct >= visStart * 100 && audioPct <= visEnd * 100) {
-                const cursorX = ((audioPct / 100) - visStart) / visLen * W;
-                ctx.strokeStyle = '#ffcc00';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(cursorX, 0);
-                ctx.lineTo(cursorX, H);
-                ctx.stroke();
-            }
-        }
-    }
-}
-
-// Audio file selection → decode + init waveform
-els.extractAudio.addEventListener('change', async () => {
-    const file = els.extractAudio.files[0];
-    if (!file) {
-        els.trimArea.classList.remove('show');
-        waveformState = null;
-        return;
-    }
-
-    try {
-        const arrayBuffer = await file.arrayBuffer();
-        const audioCtx = new AudioContext();
-        const decoded = await audioCtx.decodeAudioData(arrayBuffer);
-        await audioCtx.close();
-
-        // Always show trim area (waveform)
-        els.trimArea.classList.add('show');
-        // Wait a tick for layout
-        await new Promise(r => setTimeout(r, 50));
-
-        const canvas = els.waveformCanvas;
-        waveformState = initWaveform(canvas, decoded);
-
-        // Canvas mouse handling
-        canvas.onmousedown = (e) => {
-            const rect = canvas.getBoundingClientRect();
-            const x = (e.clientX - rect.left) / rect.width;
-            const ws = waveformState.zoomStart / 100;
-            const we = waveformState.zoomEnd / 100;
-            const pct = (ws + x * (we - ws)) * 100;
-
-            const distStart = Math.abs(pct - waveformState.startPct);
-            const distEnd = Math.abs(pct - waveformState.endPct);
-            const threshold = (we - ws) * 5; // 5% of visible range
-
-            if (distEnd < threshold && distEnd <= distStart) {
-                waveformState.dragging = 'end';
-            } else if (distStart < threshold) {
-                waveformState.dragging = 'start';
-            } else {
-                // Click in region → move nearest marker
-                waveformState.dragging = (pct - waveformState.startPct < waveformState.endPct - pct) ? 'start' : 'end';
-                if (waveformState.dragging === 'start') waveformState.startPct = pct;
-                else waveformState.endPct = pct;
-                drawWaveform(waveformState);
-            }
-        };
-
-        canvas.onmousemove = (e) => {
-            if (!waveformState.dragging) return;
-            const rect = canvas.getBoundingClientRect();
-            const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-            const ws = waveformState.zoomStart / 100;
-            const we = waveformState.zoomEnd / 100;
-            const pct = (ws + x * (we - ws)) * 100;
-
-            if (waveformState.dragging === 'start') {
-                waveformState.startPct = Math.max(waveformState.zoomStart, Math.min(pct, waveformState.endPct - 0.5));
-            } else {
-                waveformState.endPct = Math.min(waveformState.zoomEnd, Math.max(pct, waveformState.startPct + 0.5));
-            }
-            drawWaveform(waveformState);
-        };
-
-        canvas.onmouseup = () => { waveformState.dragging = null; };
-        canvas.onmouseleave = () => { waveformState.dragging = null; };
-
-        // Restart preview when markers change during playback
-        const origOnUp = canvas.onmouseup;
-        canvas.onmouseup = () => {
-            waveformState.dragging = null;
-            if (previewAudio && !previewAudio.paused) {
-                previewAudio.pause();
-                previewAudio = null;
-                els.wfPreview.click();
-            }
-        };
-
-    } catch(e) {
-        console.warn('Audio decode failed (trimming disabled):', e);
-        els.trimArea.classList.remove('show');
-    }
-});
-
-// Zoom in to selection
-els.wfZoomIn.addEventListener('click', () => {
-    if (!waveformState) return;
-    const range = waveformState.endPct - waveformState.startPct;
-    if (range < 0.5) return;
-    waveformState.zoomStart = waveformState.startPct;
-    waveformState.zoomEnd = waveformState.endPct;
-    drawWaveform(waveformState);
-});
-
-// Zoom out
-els.wfZoomOut.addEventListener('click', () => {
-    if (!waveformState) return;
-    const range = waveformState.zoomEnd - waveformState.zoomStart;
-    const expand = range * 0.5;
-    waveformState.zoomStart = Math.max(0, waveformState.zoomStart - expand);
-    waveformState.zoomEnd = Math.min(100, waveformState.zoomEnd + expand);
-    drawWaveform(waveformState);
-});
-
-// Reset zoom
-els.wfReset.addEventListener('click', () => {
-    if (!waveformState) return;
-    waveformState.zoomStart = 0;
-    waveformState.zoomEnd = 100;
-    drawWaveform(waveformState);
-});
-
-// Preview selected portion
-els.wfPreview.addEventListener('click', () => {
-    if (!waveformState) return;
-
-    // Stop any previous preview
-    if (previewAudio) { previewAudio.pause(); previewAudio = null; }
-
-    const buffer = waveformState.audioBuffer;
-    const totalFrames = buffer.length;
-    const startFrame = Math.round(totalFrames * waveformState.startPct / 100);
-    const endFrame = Math.round(totalFrames * waveformState.endPct / 100);
-    const frames = endFrame - startFrame;
-
-    if (frames <= 0) return;
-
-    const channels = buffer.numberOfChannels;
-    const out = new Float32Array(frames * channels);
-    for (let ch = 0; ch < channels; ch++) {
-        const src = buffer.getChannelData(ch);
-        for (let i = 0; i < frames; i++) {
-            out[i * channels + ch] = src[startFrame + i];
-        }
-    }
-
-    const blob = encodeWav(out, buffer.sampleRate, channels);
-    const url = URL.createObjectURL(blob);
-
-    // Use a temporary audio element for preview
-    previewAudio = new Audio(url);
-    previewAudio.play().catch(e => console.warn('Preview playback failed:', e));
-
-    // Animate cursor during playback
-    function animateCursor() {
-        if (!previewAudio || previewAudio.paused || previewAudio.ended) {
-            drawWaveform(waveformState);
-            return;
-        }
-        drawWaveform(waveformState);
-        requestAnimationFrame(animateCursor);
-    }
-    requestAnimationFrame(animateCursor);
-});
-
-// Canvas click → seek during preview
-els.waveformCanvas.addEventListener('click', (e) => {
-    if (!waveformState || !previewAudio || previewAudio.paused) return;
-    const rect = els.waveformCanvas.getBoundingClientRect();
-    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const ws = waveformState.zoomStart / 100;
-    const we = waveformState.zoomEnd / 100;
-    const pct = (ws + x * (we - ws)) * 100;
-    if (pct < waveformState.startPct || pct > waveformState.endPct) return;
-
-    const rangeDur = previewAudio.duration || 0;
-    const previewPct = (pct - waveformState.startPct) / (waveformState.endPct - waveformState.startPct);
-    previewAudio.currentTime = Math.max(0, Math.min(rangeDur, previewPct * rangeDur));
-});
-
-// Crop audio buffer to selected range (used by extract)
-function cropAudioBuffer(buffer, startPct, endPct) {
-    const totalFrames = buffer.length;
-    const channels = buffer.numberOfChannels;
-    const startFrame = Math.round(totalFrames * startPct / 100);
-    const endFrame = Math.round(totalFrames * endPct / 100);
-    const outFrames = endFrame - startFrame;
-    if (outFrames <= 0) return buffer;
-
-    const out = new Float32Array(outFrames * channels);
-    for (let ch = 0; ch < channels; ch++) {
-        const src = buffer.getChannelData(ch);
-        for (let i = 0; i < outFrames; i++) {
-            out[i * channels + ch] = src[startFrame + i];
-        }
-    }
-    return { data: out, channels, sampleRate: buffer.sampleRate, frames: outFrames };
-}
-
-// Encode Float32 PCM → WAV Blob
-function encodeWav(pcm, sampleRate, channels) {
-    const bitsPerSample = 16;
-    const bytesPerSample = bitsPerSample / 8;
-    const dataBytes = pcm.length * bytesPerSample;
-    const buffer = new ArrayBuffer(44 + dataBytes);
-    const view = new DataView(buffer);
-
-    function writeString(offset, str) {
-        for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-    }
-
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + dataBytes, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true); // PCM
-    view.setUint16(22, channels, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * channels * bytesPerSample, true);
-    view.setUint16(32, channels * bytesPerSample, true);
-    view.setUint16(34, bitsPerSample, true);
-    writeString(36, 'data');
-    view.setUint32(40, dataBytes, true);
-
-    let offset = 44;
-    for (let i = 0; i < pcm.length; i++) {
-        let s = pcm[i];
-        s = Math.max(-1, Math.min(1, s));
-        const val = s < 0 ? s * 0x8000 : s * 0x7FFF;
-        view.setInt16(offset, val, true);
-        offset += 2;
-    }
-    return new Blob([buffer], { type: 'audio/wav' });
-}
-
-// Extract speaker
-els.btnExtract.addEventListener('click', async () => {
-    hideError(els.extractError);
-    hideSuccess(els.extractSuccess);
-    const name = els.extractName.value.trim();
-    const text = els.extractText.value.trim();
-    const file = els.extractAudio.files[0];
-    if (!name) { showError(els.extractError, 'Please enter a speaker name'); return; }
-    if (!file) { showError(els.extractError, 'Please select a reference audio file'); return; }
-
-    els.btnExtract.disabled = true;
-    els.btnExtract.innerHTML = '<span class="spinner"></span>Extracting...';
-    try {
-        let audioBlob;
-
-        // Use waveform trim if available
-        if (waveformState) {
-            const cropped = cropAudioBuffer(
-                waveformState.audioBuffer,
-                waveformState.startPct,
-                waveformState.endPct);
-            audioBlob = encodeWav(cropped.data, cropped.sampleRate, cropped.channels);
-        } else {
-            audioBlob = file;
-        }
-
-        const fd = new FormData();
-        fd.append('name', name);
-        fd.append('text', text);
-        fd.append('audio', audioBlob, 'reference.wav');
-        await apiFetch('/speaker?type=extract', { method: 'POST', body: fd });
-        showSuccess(els.extractSuccess, `Speaker "${name}" extracted successfully`);
-        els.extractName.value = '';
-        els.extractText.value = '';
-        els.extractAudio.value = '';
-        waveformState = null;
-        els.trimArea.classList.remove('show');
-        await fetchStatus();
-        await fetchSpeakers();
-    } catch(e) {
-        showError(els.extractError, 'Extraction failed: ' + e.message);
-    }
-    els.btnExtract.disabled = false;
-    els.btnExtract.textContent = 'Extract Speaker';
-});
-
-// ==== TTS Generation ====
-els.btnTts.addEventListener('click', async () => {
-    hideError(els.ttsError);
-    const voice = els.ttsVoice.value;
-    const text = els.ttsText.value.trim();
-    if (!voice) { showError(els.ttsError, 'Please select a voice'); return; }
-    if (!text) { showError(els.ttsError, 'Please enter synthesis text'); return; }
-
-    const body = {
-        text,
-        voice,
-        mode: els.ttsMode.value,
-        speed: parseFloat(els.ttsSpeed.value),
-        format: els.ttsFormat.value,
-        fade_in: els.ttsFadein.checked,
-        text_normalization: els.ttsTextnorm.checked,
-        split_text: els.ttsSplit.checked,
-        fast_split: els.ttsFastsplit.checked,
-    };
-
-    const instr = els.ttsInstructions.value.trim();
-    if (instr) body.instructions = instr;
-
-    const adv = [
-        ['seed', els.ttsSeed],
-        ['temperature', els.ttsTemp],
-        ['top_k', els.ttsTopk],
-        ['top_p', els.ttsTopp],
-        ['win_size', els.ttsWinsize],
-        ['tau_r', els.ttsTaur],
-    ];
-    for (const [k, el] of adv) {
-        const v = el.value.trim();
-        if (v === '') {
-            showError(els.ttsError, `Advanced parameter "${k}" is required. Please fill in a value (use 🎲 for seed).`);
-            isGenerating = false;
-            els.btnTts.disabled = false;
-            els.btnTts.textContent = 'Generate Speech';
-            return;
-        }
-        body[k] = k === 'seed' || k === 'top_k' || k === 'win_size'
-            ? parseInt(v, 10) : parseFloat(v);
-    }
-
-    isGenerating = true;
-    els.btnTts.disabled = true;
-    els.btnTts.innerHTML = '<span class="spinner"></span>Generating...';
-
-    try {
-        const res = await apiFetch('/tts', {
-            method: 'POST',
-            ...jsonBody(body),
-        });
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        els.audioPlayer.src = url;
-        els.playerArea.style.display = 'block';
-
-        const ext = body.format || 'wav';
-        els.downloadLink.href = url;
-        els.downloadLink.download = `cosyvoice_${voice}.${ext}`;
-        els.downloadLink.textContent = `Download ${ext.toUpperCase()} (${
-            blob.size > 1024*1024
-                ? (blob.size/1024/1024).toFixed(1) + ' MB'
-                : (blob.size/1024).toFixed(0) + ' KB'
-        })`;
-
-        els.audioPlayer.play().catch(() => {});
-        // Auto-roll seed if not locked
-        if (!seedLocked) els.seedDice.click();
-    } catch(e) {
-        showError(els.ttsError, 'Synthesis failed: ' + e.message);
-    }
-    isGenerating = false;
-    els.btnTts.disabled = false;
-    els.btnTts.textContent = 'Generate Speech';
-});
-
-// Mode helper text
-els.ttsMode.addEventListener('change', () => {
-    const mode = els.ttsMode.value;
-    if (mode === 'instruct') {
-        els.ttsInstructions.parentElement.style.display = 'block';
-    } else {
-        els.ttsInstructions.parentElement.style.display = 'block';
-    }
-});
-
-// ---- Init ----
-// Dice button: generate random seed
-els.seedDice.addEventListener('click', () => {
-    els.ttsSeed.value = Math.floor(Math.random() * 2147483647) + 1;
-});
-
-// Lock toggle: fixed seed across generations
-els.seedLock.addEventListener('click', () => {
-    seedLocked = !seedLocked;
-    els.seedLock.textContent = seedLocked ? '🔒' : '🔓';
-    // Ensure seed is populated when locking
-    if (seedLocked && !els.ttsSeed.value) els.seedDice.click();
-});
-
-// Reset model config to defaults
-els.btnResetModelConfig.addEventListener('click', () => {
-    clearAdvParams();
-    fetchDefaults().then(() => {
-        restoreAdvParams();
-        if (!els.ttsSeed.value) els.seedDice.click();
-    });
-});
-
-// Reset generation params to defaults
-els.btnResetGenConfig.addEventListener('click', () => {
-    ADV_PARAM_IDS.forEach(id => {
-        if (id.startsWith('tts') || id === 'modelMaxLlm') localStorage.removeItem('cosyvoice_' + id);
-    });
-    fetchDefaults().then(() => {
-        updateFastSplitState();
-    });
-});
-
-// ---- Fetch model defaults and populate ALL configurable params ----
-async function fetchDefaults() {
-    try {
-        const res = await apiFetch('/model/defaults');
-        const d = await res.json();
-
-        // Helper: round float to 6 decimal places
-        const r = (v, n) => v !== undefined ? parseFloat(Number(v).toFixed(n)) : undefined;
-
-        // === Model loading defaults ===
-        if (d.default_max_llm_len) els.modelMaxLlm.value = d.default_max_llm_len;
-        if (d.max_llm_len) els.modelMaxLlm.value = d.max_llm_len; // overrides with loaded value
-        if (d.default_k_cache_type) {
-            // Find matching option
-            const kSel = els.modelKvK;
-            for (let i = 0; i < kSel.options.length; i++) {
-                if (kSel.options[i].value === d.default_k_cache_type) {
-                    kSel.selectedIndex = i; break;
-                }
-            }
-        }
-        if (d.default_v_cache_type) {
-            const vSel = els.modelKvV;
-            for (let i = 0; i < vSel.options.length; i++) {
-                if (vSel.options[i].value === d.default_v_cache_type) {
-                    vSel.selectedIndex = i; break;
-                }
-            }
-        }
-        // Backend & threads (safe defaults)
-        els.modelThreads.value = d.default_n_threads !== undefined ? d.default_n_threads : 0;
-
-        // === Generation params ===
-        if (d.temperature !== undefined) els.ttsTemp.value = r(d.temperature, 6);
-        if (d.top_k !== undefined) els.ttsTopk.value = d.top_k;
-        if (d.top_p !== undefined) els.ttsTopp.value = r(d.top_p, 6);
-        if (d.win_size !== undefined) els.ttsWinsize.value = d.win_size;
-        if (d.tau_r !== undefined) els.ttsTaur.value = r(d.tau_r, 6);
-
-        // === Flags ===
-        if (d.text_normalization !== undefined) els.ttsTextnorm.checked = d.text_normalization;
-        if (d.split_text !== undefined) els.ttsSplit.checked = d.split_text;
-        if (d.fast_split !== undefined) els.ttsFastsplit.checked = d.fast_split;
-        if (d.fade_in !== undefined) els.ttsFadein.checked = d.fade_in;
-
-        // Auto-populate seed if empty
-        if (!els.ttsSeed.value && els.seedDice) {
-            els.seedDice.click();
-        }
-    } catch(e) {
-        console.warn('Failed to fetch defaults:', e);
-    }
-}
-
-// Fast split depends on split_text being enabled
-function updateFastSplitState() {
-    els.ttsFastsplit.disabled = !els.ttsSplit.checked;
-    if (!els.ttsSplit.checked) els.ttsFastsplit.checked = false;
-}
-els.ttsSplit.addEventListener('change', updateFastSplitState);
-async function fetchBackends() {
-    try {
-        const res = await apiFetch('/backends');
-        const list = await res.json();
-        const sel = els.modelBackend;
-        while (sel.options.length > 1) sel.remove(1);
-        for (const b of list) {
-            if (b.name === 'auto') continue;
-            const opt = document.createElement('option');
-            opt.value = b.name;
-            opt.textContent = b.description
-                ? `${b.name} — ${b.description}`
-                : b.name;
-            sel.appendChild(opt);
-        }
-    } catch(e) {
-        console.warn('Failed to fetch backend list:', e);
-    }
-}
-
-// ---- Fetch supported output formats and populate selector ----
-async function fetchFormats() {
-    try {
-        const res = await apiFetch('/formats');
-        const list = await res.json();
-        const sel = els.ttsFormat;
-        sel.innerHTML = '';
-        list.forEach(f => {
-            const opt = document.createElement('option');
-            opt.value = f;
-            opt.textContent = f.toUpperCase();
-            if (f === 'wav' || f === 'mp3') opt.selected = true;
-            sel.appendChild(opt);
-        });
-    } catch(e) {
-        console.warn('Failed to fetch format list:', e);
-    }
-}
-
-async function init() {
-    try {
-        if (CFG.speechTokenizer) els.cfgTokenizer.value = CFG.speechTokenizer;
-        if (CFG.campplus) els.cfgCampplus.value = CFG.campplus;
-        if (CFG.defaultMaxLlmLen) els.modelMaxLlm.value = CFG.defaultMaxLlmLen;
-
-        await fetchBackends();
-        await fetchFormats();
-        await fetchDefaults();
-        restoreAdvParams();
-        updateFastSplitState();
-        await fetchStatus();
-        await fetchSpeakers();
-
-        // After init, track changes on all advanced param elements for localStorage
-        ADV_PARAM_IDS.forEach(id => {
-            const el = document.getElementById(id);
-            if (!el) return;
-            const evt = el.type === 'checkbox' ? 'change' : 'input';
-            el.addEventListener(evt, () => saveAdvParam(id));
-        });
-    } catch(e) {
-        console.error('Init error:', e);
-    }
-}
-
-try { init(); } catch(e) { console.error('Fatal init error:', e); }
-</script>
+<!-- Config injection point (server fills this before </body>) -->
+<script src="/cosyvoice-webui.js"></script>
 </body>
 </html>

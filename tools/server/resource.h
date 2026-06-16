@@ -3,6 +3,8 @@
 
 /* Resource identifiers */
 #define IDR_WEBUI_HTML  100
+#define IDR_WEBUI_CSS   101
+#define IDR_WEBUI_JS    102
 
 #ifdef __cplusplus
 extern "C" {
