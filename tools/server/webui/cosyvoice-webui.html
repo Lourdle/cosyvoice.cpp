@@ -140,6 +140,8 @@ input[readonly] { opacity: 0.7; }
 .player-area audio { width: 100%; }
 .download-link { font-size: 13px; color: var(--accent); text-decoration: none; margin-top: 4px; display: inline-block; }
 .download-link:hover { text-decoration: underline; }
+.save-link { font-size: 13px; color: var(--success); text-decoration: none; margin-top: 4px; display: inline-block; cursor: pointer; }
+.save-link:hover { text-decoration: underline; }
 
 .error-box {
     background: rgba(224,96,96,0.15);
@@ -859,7 +861,7 @@ function renderSpeakers() {
             `<div class="speaker-item">
                 <span>${escapeHtml(n)}</span>
                 <span style="display:flex;gap:8px;align-items:center">
-                    <a href="/speaker/${encodeURIComponent(n)}/download.gguf" class="download-link" style="font-size:12px" download>⬇ GGUF</a>
+                    <span class="save-link" data-name="${escapeHtml(n)}" onclick="saveSpeaker('${escapeHtml(n)}')">💾 保存到服务器</span>
                     <span class="del" data-name="${escapeHtml(n)}" onclick="deleteSpeaker('${escapeHtml(n)}')">✕</span>
                 </span>
             </div>`
@@ -888,6 +890,21 @@ async function deleteSpeaker(name) {
         await fetchSpeakers();
     } catch(e) {
         alert('Failed to delete: ' + e.message);
+    }
+}
+
+// ---- Save speaker prompt speech to server path ----
+async function saveSpeaker(name) {
+    const path = prompt('为 "' + name + '" 指定服务器端保存路径：', '');
+    if (!path) return;
+    try {
+        await apiFetch('/speaker/save', {
+            method: 'POST',
+            ...jsonBody({ name, path }),
+        });
+        alert('说话人特征已保存至：' + path);
+    } catch(e) {
+        alert('保存失败：' + e.message);
     }
 }
 

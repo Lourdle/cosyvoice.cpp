@@ -90,3 +90,4 @@ inline uint32_t get_or_assign_thread_slot(server_runtime& runtime)
 }
 
 int cosyvoice_server_backend_run(server_runtime& runtime);
+int cosyvoice_server_webui_run(server_runtime& runtime);

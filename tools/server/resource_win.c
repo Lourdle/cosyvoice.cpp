@@ -1,5 +1,5 @@
-#include "resource.h"
-#include <windows.h>
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
 
 const void* server_resource_load(unsigned int id, size_t* out_size)
 {
@@ -9,7 +9,7 @@ const void* server_resource_load(unsigned int id, size_t* out_size)
         *out_size = 0;
         return NULL;
     }
-    HRSRC res = FindResourceW(mod, MAKEINTRESOURCEW(id), RT_RCDATA);
+    HRSRC res = FindResource(mod, MAKEINTRESOURCE(id), RT_RCDATA);
     if (!res)
     {
         *out_size = 0;

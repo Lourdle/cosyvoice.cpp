@@ -1,134 +1,31 @@
-#include "cosyvoice-server-webui.h"
+﻿#include "pch.h"
+#include "cosyvoice-server.h"
+#include "server_common.h"
 #include "resource.h"
 #include "tool_common_cosyvoice.h"
 #include "common.h"
 
-#include "httplib.h"
 #include "nlohmann/json.hpp"
+#include "httplib.h"
 
 #include <ggml-backend.h>
 
-#include <cstdarg>
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
 
 #ifndef COSYVOICE_NO_AUDIO
-#include "cosyvoice-audio.h"
+    #include "cosyvoice-audio.h"
 #endif
 
 #ifndef COSYVOICE_NO_FRONTEND
-#include "cosyvoice-frontend.h"
+    #include "cosyvoice-frontend.h"
 #endif
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
-
-// ---------------------------------------------------------------------------
-// Logging helpers
-// ---------------------------------------------------------------------------
-
-static void print_info_log(server_log_level level, const char* format, ...)
-{
-    if (level == server_log_level::quiet)
-        return;
-    va_list args;
-    va_start(args, format);
-    vprintf(format, args);
-    va_end(args);
-}
-
-static void print_error_log(const char* format, ...)
-{
-    va_list args;
-    va_start(args, format);
-    vfprintf(stderr, format, args);
-    va_end(args);
-}
-
-// Activity log: always printed (unless quiet), timestamped, prefixed
-static void log_activity(const server_runtime&, const char* format, ...)
-{
-    va_list args;
-    va_start(args, format);
-    printf("[cosyvoice] ");
-    vprintf(format, args);
-    printf("\n");
-    va_end(args);
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-static std::string join_strings(const std::vector<std::string>& items, const char* sep)
-{
-    std::string r;
-    for (size_t i = 0; i < items.size(); ++i)
-    {
-        if (i > 0) r += sep;
-        r += items[i];
-    }
-    return r;
-}
-
-// Build a minimal WAV payload from float PCM by converting to 16-bit.
-static bool build_wav_payload(const cosyvoice_generated_speech& speech, uint32_t sample_rate, std::string* out)
-{
-    if (!speech.data || speech.length == 0)
-        return false;
-
-    const uint32_t num_samples = speech.length;
-    const uint32_t data_bytes  = num_samples * sizeof(int16_t);
-    const uint32_t file_size   = 44 + data_bytes;
-
-    out->resize(file_size);
-    auto* buf = out->data();
-
-    // Convert float PCM to 16-bit signed PCM inline in the buffer
-    auto* pcm16 = reinterpret_cast<int16_t*>(buf + 44);
-    for (uint32_t i = 0; i < num_samples; ++i)
-    {
-        float s = speech.data[i];
-        if (s < -1.0f) s = -1.0f;
-        if (s >  1.0f) s =  1.0f;
-        pcm16[i] = static_cast<int16_t>(s * 32767.0f);
-    }
-
-    // RIFF header
-    memcpy(buf, "RIFF", 4);
-    const uint32_t riff_size = file_size - 8;
-    memcpy(buf + 4, &riff_size, 4);
-    memcpy(buf + 8, "WAVE", 4);
-
-    // fmt chunk (PCM, mono, 16-bit)
-    memcpy(buf + 12, "fmt ", 4);
-    const uint32_t fmt_chunk_size = 16;
-    memcpy(buf + 16, &fmt_chunk_size, 4);
-    const uint16_t audio_format = 1;   // PCM
-    memcpy(buf + 20, &audio_format, 2);
-    const uint16_t num_channels = 1;
-    memcpy(buf + 22, &num_channels, 2);
-    memcpy(buf + 24, &sample_rate, 4);
-    const uint32_t byte_rate = sample_rate * 2;
-    memcpy(buf + 28, &byte_rate, 4);
-    const uint16_t block_align = 2;
-    memcpy(buf + 32, &block_align, 2);
-    const uint16_t bits_per_sample = 16;
-    memcpy(buf + 34, &bits_per_sample, 2);
-
-    // data chunk
-    memcpy(buf + 36, "data", 4);
-    memcpy(buf + 40, &data_bytes, 4);
-
-    return true;
-}
 
 // ---------------------------------------------------------------------------
 // Dynamic speaker registration (helpers called from route handlers)
@@ -187,64 +84,26 @@ static bool register_speaker_from_audio(
     const std::string& name,
     const std::string& prompt_text,
     const void* audio_data,
-    size_t audio_size,
-    const char* temp_ext)
+    size_t audio_size)
 {
     if (runtime.model_slots.empty())
         return false;
 
-    // Write audio data to a temp file so the audio loader can read it.
-    // Generate a unique temp file path (cross-platform).
-#ifdef _WIN32
-    char temp_dir[MAX_PATH];
-    DWORD ret = GetTempPathA(MAX_PATH, temp_dir);
-    if (ret == 0 || ret > MAX_PATH) return false;
+    // Decode audio from memory
+    using cosyvoice_audio_decoder_handle = std::unique_ptr<cosyvoice_audio_decoder, tool_deleter<cosyvoice_audio_decoder, &cosyvoice_audio_decoder_destroy>>;
+    cosyvoice_audio_decoder_handle decoder(cosyvoice_audio_decoder_create());
+    if (!decoder)
+        return false;
 
-    char temp_file[MAX_PATH];
-    if (!GetTempFileNameA(temp_dir, "csw", 0, temp_file)) return false;
+    if (!cosyvoice_audio_decoder_decode(decoder.get(), audio_data, static_cast<uint32_t>(audio_size)))
+        return false;
 
-    char temp_path[MAX_PATH];
-    strncpy(temp_path, temp_file, MAX_PATH - 1);
-    temp_path[MAX_PATH - 1] = '\0';
-#else
-    char temp_path[] = "/tmp/cosyvoice_audio_XXXXXX.wav";
-    int fd = mkstemp(temp_path);
-    if (fd == -1) return false;
-    close(fd);
-    // mkstemp modifies in-place; strip the .wav suffix we'll re-add below
-    temp_path[strlen(temp_path) - 4] = '\0';
-#endif
-
-    // Append the correct extension
-    std::string final_path = std::string(temp_path) + "." + (temp_ext && *temp_ext ? temp_ext : "wav");
-
-    // Write file
-    {
-        auto f = fopen(final_path.c_str(), "wb");
-        if (!f) { (void)remove(final_path.c_str()); return false; }
-        (void)fwrite(audio_data, 1, audio_size, f);
-        fclose(f);
-    }
-
-    // Remove the original temp file (without extension) — Windows creates it as empty
-    (void)remove(temp_path);
-
-    // Load audio
     float* audio_float = nullptr;
     uint32_t audio_length = 0;
     uint32_t audio_sample_rate = 0;
-    bool ok = cosyvoice_audio_load_from_file(
-        final_path.c_str(),
-        &audio_float,
-        &audio_length,
-        &audio_sample_rate);
-    if (!ok || !audio_float)
-    {
-        (void)remove(final_path.c_str());
+    cosyvoice_audio_decoder_get_decoded_data(decoder.get(), &audio_float, &audio_length, &audio_sample_rate);
+    if (!audio_float || audio_length == 0 || audio_sample_rate == 0)
         return false;
-    }
-
-    audio_buffer_handle audio_buf(audio_float);
 
     // Use pre-loaded frontend if available, otherwise load on-the-fly
     cosyvoice_frontend_context_t frontend = runtime.frontend_ctx.get();
@@ -255,10 +114,7 @@ static bool register_speaker_from_audio(
             runtime.speech_tokenizer.c_str(),
             runtime.campplus.c_str());
         if (!frontend)
-        {
-            (void)remove(final_path.c_str());
             return false;
-        }
         own_frontend = true;
     }
 
@@ -266,14 +122,13 @@ static bool register_speaker_from_audio(
     cosyvoice_prompt_speech_handle ps(
         cosyvoice_frontend_prompt_speech(
             frontend,
-            audio_buf.get(),
+            audio_float,
             audio_length,
             audio_sample_rate,
             prompt_text.c_str()));
 
     if (own_frontend)
         cosyvoice_frontend_free(frontend);
-    (void)remove(final_path.c_str());
 
     if (!ps)
         return false;
@@ -300,25 +155,6 @@ static bool register_speaker_from_audio(
 }
 #endif // !COSYVOICE_NO_FRONTEND
 #endif // !COSYVOICE_NO_AUDIO
-
-// Build raw 16-bit PCM from float PCM (no WAV header).
-static bool build_pcm_raw(const cosyvoice_generated_speech& speech, std::string* out)
-{
-    if (!speech.data || speech.length == 0)
-        return false;
-
-    const uint32_t data_bytes = speech.length * sizeof(int16_t);
-    out->resize(data_bytes);
-    auto* pcm16 = reinterpret_cast<int16_t*>(out->data());
-    for (uint32_t i = 0; i < speech.length; ++i)
-    {
-        float s = speech.data[i];
-        if (s < -1.0f) s = -1.0f;
-        if (s >  1.0f) s =  1.0f;
-        pcm16[i] = static_cast<int16_t>(s * 32767.0f);
-    }
-    return true;
-}
 
 // ---------------------------------------------------------------------------
 // Route handlers — WebUI mode
@@ -578,8 +414,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             const auto& audio_formdata = audio_entry.second;
             if (!register_speaker_from_audio(
                     runtime, name, text,
-                    audio_formdata.content.data(), audio_formdata.content.size(),
-                    audio_formdata.filename.c_str()))
+                    audio_formdata.content.data(), audio_formdata.content.size()))
             {
                 res.status = 500;
                 nlohmann::json err = {{"error", "Failed to extract speaker features from audio"}};
@@ -607,7 +442,8 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         nlohmann::json ok = {{"success", true}, {"name", name}};
         res.status = 200;
         res.set_content(ok.dump(), "application/json");
-        log_activity(runtime, "Speaker registered: %s (type=%s)", name.c_str(), type.c_str());
+        log_message(runtime.log_level, server_log_level::concise, "WEBUI",
+            "Speaker registered: %s (type=%s, total=%zu)", name.c_str(), type.c_str(), runtime.voice_names.size());
     });
 
     // ---- DELETE /speaker/<name> — remove a speaker ----
@@ -653,72 +489,13 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         nlohmann::json ok = {{"success", true}};
         res.status = 200;
         res.set_content(ok.dump(), "application/json");
-        log_activity(runtime, "Speaker removed: %s", name.c_str());
+        log_message(runtime.log_level, server_log_level::concise, "WEBUI",
+            "Speaker removed: %s (remaining=%zu)", name.c_str(), runtime.voice_names.size());
     });
 
-    // ---- GET /speaker/<name>/download.gguf — download prompt_speech as GGUF ----
-    server.Get(R"(/speaker/(.*)/download\.gguf)", [&runtime](const httplib::Request& req, httplib::Response& res)
+    // ---- POST /speaker/save — save speaker prompt speech to a server-side path ----
+    server.Post("/speaker/save", [&runtime](const httplib::Request& req, httplib::Response& res)
     {
-        std::string name = req.matches[1];
-
-        auto it = runtime.voices.find(name);
-        if (it == runtime.voices.end())
-        {
-            res.status = 404;
-            nlohmann::json err = {{"error", "Speaker '" + name + "' not found"}};
-            res.set_content(err.dump(), "application/json");
-            return;
-        }
-
-        // Save prompt_speech to a temp file, read it back, send as download
-#ifdef _WIN32
-        char temp_dir[MAX_PATH];
-        DWORD ret = GetTempPathA(MAX_PATH, temp_dir);
-        if (ret == 0 || ret > MAX_PATH) { res.status = 500; return; }
-
-        char temp_path[MAX_PATH];
-        if (!GetTempFileNameA(temp_dir, "csd", 0, temp_path)) { res.status = 500; return; }
-        std::string gguf_path = temp_path;
-#else
-        char temp_path[] = "/tmp/cosyvoice_dl_XXXXXX.gguf";
-        int fd = mkstemp(temp_path);
-        if (fd == -1) { res.status = 500; return; }
-        close(fd);
-        std::string gguf_path = temp_path;
-#endif
-
-        if (!cosyvoice_prompt_speech_save_to_file(it->second.prompt_speech.get(), gguf_path.c_str()))
-        {
-            (void)remove(gguf_path.c_str());
-            res.status = 500;
-            nlohmann::json err = {{"error", "Failed to serialize prompt speech"}};
-            res.set_content(err.dump(), "application/json");
-            return;
-        }
-
-        // Read file
-        FILE* f = fopen(gguf_path.c_str(), "rb");
-        if (!f)
-        {
-            (void)remove(gguf_path.c_str());
-            res.status = 500;
-            return;
-        }
-        fseek(f, 0, SEEK_END);
-        long fsize = ftell(f);
-        rewind(f);
-        std::string payload(static_cast<size_t>(fsize), '\0');
-        (void)fread(&payload[0], 1, static_cast<size_t>(fsize), f);
-        fclose(f);
-        (void)remove(gguf_path.c_str());
-
-        res.status = 200;
-        res.set_header("Content-Disposition", "attachment; filename=\"" + name + ".gguf\"");
-        res.set_content(std::move(payload), "application/octet-stream");
-    });
-    server.Post("/tts", [&runtime](const httplib::Request& req, httplib::Response& res)
-    {
-        // Parse JSON body
         nlohmann::json body;
         try { body = nlohmann::json::parse(req.body); }
         catch (...)
@@ -729,12 +506,71 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             return;
         }
 
+        std::string name = body.value("name", "");
+        std::string path = body.value("path", "");
+        if (name.empty())
+        {
+            res.status = 400;
+            nlohmann::json err = {{"error", "Missing 'name' field"}};
+            res.set_content(err.dump(), "application/json");
+            return;
+        }
+        if (path.empty())
+        {
+            res.status = 400;
+            nlohmann::json err = {{"error", "Missing 'path' field"}};
+            res.set_content(err.dump(), "application/json");
+            return;
+        }
+
+        auto it = runtime.voices.find(name);
+        if (it == runtime.voices.end())
+        {
+            res.status = 404;
+            nlohmann::json err = {{"error", "Speaker '" + name + "' not found"}};
+            res.set_content(err.dump(), "application/json");
+            return;
+        }
+
+        if (!cosyvoice_prompt_speech_save_to_file(it->second.prompt_speech.get(), path.c_str()))
+        {
+            res.status = 500;
+            nlohmann::json err = {{"error", "Failed to save prompt speech to: " + path}};
+            res.set_content(err.dump(), "application/json");
+            return;
+        }
+
+        nlohmann::json ok = {{"success", true}, {"path", path}};
+        res.status = 200;
+        res.set_content(ok.dump(), "application/json");
+        log_message(runtime.log_level, server_log_level::concise, "WEBUI",
+            "Speaker prompt speech saved: %s -> %s", name.c_str(), path.c_str());
+    });
+
+    server.Post("/tts", [&runtime](const httplib::Request& req, httplib::Response& res)
+    {
+        request_log_context log_ctx = make_request_log_context(req, "/tts");
+        log_request_start(runtime.log_level, log_ctx);
+
+        // Parse JSON body
+        nlohmann::json body;
+        try { body = nlohmann::json::parse(req.body); }
+        catch (...)
+        {
+            res.status = 400;
+            nlohmann::json err = {{"error", "Invalid JSON body"}};
+            res.set_content(err.dump(), "application/json");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "invalid_json");
+            return;
+        }
+
         // Validate
         if (runtime.model_slots.empty())
         {
             res.status = 503;
             nlohmann::json err = {{"error", "No model loaded"}};
             res.set_content(err.dump(), "application/json");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, 0, res.body.size(), "no_model");
             return;
         }
 
@@ -744,6 +580,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             res.status = 400;
             nlohmann::json err = {{"error", "Missing 'text' or 'input' field"}};
             res.set_content(err.dump(), "application/json");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "missing_text");
             return;
         }
 
@@ -753,6 +590,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             res.status = 400;
             nlohmann::json err = {{"error", "Missing 'voice' field"}};
             res.set_content(err.dump(), "application/json");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "missing_voice");
             return;
         }
 
@@ -762,27 +600,29 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             res.status = 400;
             nlohmann::json err = {{"error", "Unknown voice '" + voice + "'. Available: " + join_strings(runtime.voice_names, ", ")}};
             res.set_content(err.dump(), "application/json");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "unknown_voice");
             return;
         }
 
-        // Get TTS context (WebUI mode: only slot 0)
-        auto& sessions = runtime.voice_sessions[0];
-        cosyvoice_tts_context_t tts_ctx = nullptr;
-        for (auto& s : sessions)
-        {
-            if (s.first == voice)
-            {
-                tts_ctx = s.second.get();
-                break;
-            }
-        }
+        // Get TTS context using shared inline helper (WebUI: slot 0)
+        cosyvoice_tts_context_t tts_ctx = get_slot_voice_session(runtime, 0, voice);
         if (!tts_ctx)
         {
             res.status = 500;
             nlohmann::json err = {{"error", "TTS context not initialized for voice '" + voice + "'"}};
             res.set_content(err.dump(), "application/json");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, 0, res.body.size(), "no_tts_ctx");
             return;
         }
+
+        // Fill request context fields for detailed logging
+        log_ctx.voice = voice;
+        log_ctx.response_format = body.value("format", "wav");
+        log_ctx.has_instructions = body.contains("instructions") || body.contains("instruction");
+        log_ctx.has_seed = body.contains("seed");
+        if (log_ctx.has_seed)
+            log_ctx.seed = body["seed"].get<uint32_t>();
+        log_request_details(runtime.log_level, log_ctx);
 
         // Speed
         float speed = body.value("speed", 1.0f);
@@ -798,44 +638,26 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         if (body.contains("fast_split"))
             cosyvoice_tts_context_set_fast_split_text_enabled(tts_ctx, body["fast_split"].get<bool>());
 
-        // Apply generation overrides (temperature, sampling, seed)
+        // Apply generation overrides (shared function)
+        uint32_t applied_seed = 0;
         {
             auto model_ctx = runtime.model_slots[0].get();
 
-            cosyvoice_generation_config_t cfg = runtime.default_generation_config;
-            if (body.contains("temperature"))
-                cfg.temperature = body["temperature"].get<float>();
-            if (body.contains("top_k"))
-                cfg.sampling.top_k = body["top_k"].get<int>();
-            if (body.contains("top_p"))
-                cfg.sampling.top_p = body["top_p"].get<float>();
-            if (body.contains("win_size"))
-                cfg.sampling.win_size = body["win_size"].get<int>();
-            if (body.contains("tau_r"))
-                cfg.sampling.tau_r = body["tau_r"].get<float>();
+            generation_config_overrides go;
+            if (body.contains("temperature")) { go.has_temperature = true; go.temperature = body["temperature"].get<float>(); }
+            if (body.contains("top_k"))       { go.has_top_k = true; go.top_k = body["top_k"].get<int>(); }
+            if (body.contains("top_p"))       { go.has_top_p = true; go.top_p = body["top_p"].get<float>(); }
+            if (body.contains("win_size"))    { go.has_win_size = true; go.win_size = body["win_size"].get<int>(); }
+            if (body.contains("tau_r"))       { go.has_tau_r = true; go.tau_r = body["tau_r"].get<float>(); }
+            if (body.contains("seed"))        { go.has_seed = true; go.seed = body["seed"].get<uint32_t>(); }
 
-            if (!cosyvoice_set_generation_config(model_ctx, &cfg))
+            std::string gen_error;
+            if (!apply_generation_overrides(go, runtime, model_ctx, &applied_seed, &gen_error))
             {
                 res.status = 400;
-                nlohmann::json err = {{"error", "Invalid generation parameter values."}};
+                nlohmann::json err = {{"error", gen_error}};
                 res.set_content(err.dump(), "application/json");
-                return;
-            }
-
-            // Seed
-            uint32_t effective_seed;
-            if (body.contains("seed"))
-                effective_seed = body["seed"].get<uint32_t>();
-            else if (runtime.has_seed)
-                effective_seed = runtime.seed;
-            else
-                effective_seed = cosyvoice_generate_random_seed() ^ static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&req));
-
-            if (!cosyvoice_set_sampler_seed(model_ctx, effective_seed))
-            {
-                res.status = 400;
-                nlohmann::json err = {{"error", "Failed to apply seed."}};
-                res.set_content(err.dump(), "application/json");
+                log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, applied_seed, res.body.size(), "generation_override");
                 return;
             }
         }
@@ -865,68 +687,34 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             res.status = 500;
             nlohmann::json err = {{"error", "TTS generation failed"}};
             res.set_content(err.dump(), "application/json");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "generation_failed");
             return;
         }
 
-        // Encode output
+        // Encode output using shared utilities
         std::string audio_payload;
-        const std::string format = body.value("format", "wav");
-        bool encode_ok = false;
+        const std::string format_str = body.value("format", "wav");
+        auto fmt = parse_response_format(format_str);
+        if (fmt == response_audio_format::unknown)
+            fmt = response_audio_format::wav;
 
-#ifndef COSYVOICE_NO_AUDIO
-        if (format != "wav" && runtime.audio_encoder)
-        {
-            // Use audio encoder for compressed formats
-            cosyvoice_audio_encoding_format_t af = COSYVOICE_AUDIO_ENCODING_FORMAT_WAV;
-            if (format == "mp3")       af = COSYVOICE_AUDIO_ENCODING_FORMAT_MP3;
-            else if (format == "opus") af = COSYVOICE_AUDIO_ENCODING_FORMAT_OPUS;
-            else if (format == "flac") af = COSYVOICE_AUDIO_ENCODING_FORMAT_FLAC;
-            else if (format == "aac")  af = COSYVOICE_AUDIO_ENCODING_FORMAT_AAC;
-            else if (format == "m4a")  af = COSYVOICE_AUDIO_ENCODING_FORMAT_M4A;
-
-            if (cosyvoice_audio_encoder_encode(runtime.audio_encoder.get(), generated.data, generated.length, af))
-            {
-                const uint8_t* enc_data = nullptr;
-                uint32_t enc_length = 0;
-                cosyvoice_audio_encoder_get_encoded_data(runtime.audio_encoder.get(), &enc_data, &enc_length);
-                if (enc_data && enc_length > 0)
-                {
-                    audio_payload.assign(reinterpret_cast<const char*>(enc_data), enc_length);
-                    encode_ok = true;
-                }
-            }
-        }
-        else
-#endif
-        {
-            // Fall back to WAV or raw PCM
-            if (format == "pcm")
-                encode_ok = build_pcm_raw(generated, &audio_payload);
-            else
-                encode_ok = build_wav_payload(generated, runtime.sample_rate, &audio_payload);
-        }
-
-        if (!encode_ok)
+        std::string encoding_error;
+        if (!build_audio_payload(fmt, generated, runtime, &audio_payload, &encoding_error))
         {
             res.status = 500;
-            nlohmann::json err = {{"error", "Audio encoding failed"}};
+            nlohmann::json err = {{"error", "Audio encoding failed: " + encoding_error}};
             res.set_content(err.dump(), "application/json");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "audio_encode_failed");
             return;
         }
 
-        log_activity(runtime, "TTS generated: voice=%s, text_len=%zu, format=%s, samples=%u",
-            voice.c_str(), text.size(), format.c_str(), generated.length);
-
-        // Content-Type mapping
-        std::string content_type;
-        if (format == "mp3")       content_type = "audio/mpeg";
-        else if (format == "opus") content_type = "audio/opus";
-        else if (format == "flac") content_type = "audio/flac";
-        else if (format == "pcm")  content_type = "audio/pcm";
-        else                       content_type = "audio/wav";
+        log_message(runtime.log_level, server_log_level::concise, "WEBUI",
+            "TTS generated: voice=%s, text_len=%zu, format=%s, samples=%u",
+            voice.c_str(), text.size(), format_str.c_str(), generated.length);
 
         res.status = 200;
-        res.set_content(std::move(audio_payload), content_type);
+        res.set_content(std::move(audio_payload), response_format_to_content_type(fmt));
+        log_request_done(runtime.log_level, log_ctx, request_log_status::ok, res.status, applied_seed, audio_payload.size(), "tts");
     });
 
     // ---- GET /frontend/model — return frontend model paths ----
@@ -1000,7 +788,9 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         runtime.speech_tokenizer = tokenizer_path;
         runtime.campplus         = campplus_path;
 
-        log_activity(runtime, "Frontend ONNX models loaded");
+        log_message(runtime.log_level, server_log_level::concise, "WEBUI",
+            "Frontend ONNX models loaded: speech_tokenizer=%s, campplus=%s",
+            runtime.speech_tokenizer.c_str(), runtime.campplus.c_str());
 
         nlohmann::json ok2 = {{"success", true}};
         res.status = 200;
@@ -1028,7 +818,8 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         }
 
         runtime.frontend_ctx.reset();
-        log_activity(runtime, "Frontend ONNX models unloaded");
+        log_message(runtime.log_level, server_log_level::concise, "WEBUI",
+            "Frontend ONNX models unloaded");
 
         nlohmann::json ok2 = {{"success", true}};
         res.status = 200;
@@ -1046,12 +837,16 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     // ---- POST /model/load — dynamically load a GGUF model ----
     server.Post("/model/load", [&runtime](const httplib::Request& req, httplib::Response& res)
     {
+        request_log_context log_ctx = make_request_log_context(req, "/model/load");
+        log_request_start(runtime.log_level, log_ctx);
+
         // Must not already have a model loaded
         if (!runtime.model_slots.empty())
         {
             res.status = 409;
             nlohmann::json err = {{"error", "A model is already loaded. Unload it first via POST /model/unload."}};
             res.set_content(err.dump(), "application/json");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "model_loaded");
             return;
         }
 
@@ -1062,6 +857,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             res.status = 400;
             nlohmann::json err = {{"error", "Invalid JSON body"}};
             res.set_content(err.dump(), "application/json");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "invalid_json");
             return;
         }
 
@@ -1071,6 +867,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             res.status = 400;
             nlohmann::json err = {{"error", "Missing 'model' field"}};
             res.set_content(err.dump(), "application/json");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "missing_model");
             return;
         }
 
@@ -1110,6 +907,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             res.status = 500;
             nlohmann::json err = {{"error", "Failed to initialize backend: " + backend_type}};
             res.set_content(err.dump(), "application/json");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, 0, res.body.size(), "backend_init");
             return;
         }
 
@@ -1152,6 +950,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             res.status = 500;
             nlohmann::json err = {{"error", "Failed to load model: " + model_path}};
             res.set_content(err.dump(), "application/json");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, 0, res.body.size(), "model_load_failed");
             return;
         }
 
@@ -1161,7 +960,8 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         {
             cosyvoice_context_params_t p;
             cosyvoice_get_context_params(loaded_ctx, &p);
-            log_activity(runtime, "Model loaded: %s (arch=%s, backend=%s, threads=%u, kv_cache_type=%s, buffer=%s, max_llm_len=%u)",
+            log_message(runtime.log_level, server_log_level::concise, "WEBUI",
+                "Model loaded: %s (arch=%s, backend=%s, threads=%u, kv_cache_type=%s, buffer=%s, max_llm_len=%u)",
                 model_path.c_str(),
                 cosyvoice_get_architecture(loaded_ctx) ? cosyvoice_get_architecture(loaded_ctx) : "?",
                 backend_type.c_str(),
@@ -1210,16 +1010,22 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         };
         res.status = 200;
         res.set_content(ok.dump(), "application/json");
+
+        log_request_done(runtime.log_level, log_ctx, request_log_status::ok, res.status, 0, res.body.size(), "model_loaded");
     });
 
     // ---- POST /model/unload — unload the current model ----
-    server.Post("/model/unload", [&runtime](const httplib::Request&, httplib::Response& res)
+    server.Post("/model/unload", [&runtime](const httplib::Request& req, httplib::Response& res)
     {
+        request_log_context log_ctx = make_request_log_context(req, "/model/unload");
+        log_request_start(runtime.log_level, log_ctx);
+
         if (runtime.model_slots.empty())
         {
             res.status = 409;
             nlohmann::json err = {{"error", "No model is currently loaded."}};
             res.set_content(err.dump(), "application/json");
+            log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "no_model");
             return;
         }
 
@@ -1237,7 +1043,8 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         runtime.audio_encoder.reset();
     #endif
 
-        log_activity(runtime, "Model unloaded");
+        log_message(runtime.log_level, server_log_level::concise, "WEBUI",
+            "Model unloaded");
 
         // Re-initialize empty voice sessions vector
         runtime.voice_sessions.reserve(1);
@@ -1246,6 +1053,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         nlohmann::json ok = {{"success", true}};
         res.status = 200;
         res.set_content(ok.dump(), "application/json");
+        log_request_done(runtime.log_level, log_ctx, request_log_status::ok, res.status, 0, res.body.size(), "model_unloaded");
     });
 
     // ---- GET /model/defaults — return defaults for all configurable parameters ----
@@ -1306,9 +1114,24 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         res.set_content(err.dump(), "application/json");
     });
 
-    // ---- Startup banner (minimal) ----
-    print_info_log(runtime.log_level, "cosyvoice-server WebUI listening on %s:%u\n",
+    // ---- Startup banner ----
+    log_message(runtime.log_level, server_log_level::concise, "WEBUI",
+        "CosyVoice WebUI starting: host=%s, port=%u",
         runtime.host.c_str(), static_cast<unsigned>(runtime.port));
+
+    print_info_log(runtime.log_level, "  host               : %s\n", runtime.host.c_str());
+    print_info_log(runtime.log_level, "  port               : %u\n", static_cast<unsigned>(runtime.port));
+    print_info_log(runtime.log_level, "  model loaded       : %s\n",
+        runtime.model_slots.empty() ? "no" : runtime.served_model_name.c_str());
+    print_info_log(runtime.log_level, "  api_key_required   : %s\n",
+        runtime.api_key.empty() ? "no" : "yes");
+    if (runtime.sample_rate > 0)
+        print_info_log(runtime.log_level, "  sample_rate        : %u\n", runtime.sample_rate);
+    print_info_log(runtime.log_level, "  speakers           : %zu\n", runtime.voice_names.size());
+#if !defined(COSYVOICE_NO_FRONTEND)
+    print_info_log(runtime.log_level, "  frontend_available : %s\n",
+        runtime.frontend_ctx ? "yes" : "no");
+#endif
 
     if (!server.listen(runtime.host.c_str(), runtime.port))
     {
