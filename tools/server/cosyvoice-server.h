@@ -35,6 +35,9 @@ struct server_runtime
     uint32_t seed = 0;
     uint32_t concurrency = 1;
     cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
+    bool has_llm_kv_cache_override = false;
+    cosyvoice_llm_kv_cache_type_t requested_llm_kv_cache_type = static_cast<cosyvoice_llm_kv_cache_type_t>(0);
+    cosyvoice_llm_kv_cache_type_t actual_llm_kv_cache_type = static_cast<cosyvoice_llm_kv_cache_type_t>(0);
 #ifndef COSYVOICE_NO_ICU
     bool text_normalization_enabled = true;
 #endif

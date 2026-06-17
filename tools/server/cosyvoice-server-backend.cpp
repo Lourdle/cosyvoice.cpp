@@ -583,6 +583,14 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
     const auto voices_str = join_strings(runtime.voice_names, ", ");
     print_info_log(runtime.log_level, "  voices             : %s\n", voices_str.empty() ? "-" : voices_str.c_str());
     print_info_log(runtime.log_level, "  buffer_policy      : %s\n", inference_buffer_policy_to_string(runtime.inference_buffer_policy));
+    {
+        char kv_buf[256];
+        snprintf(kv_buf, sizeof(kv_buf), "requested: %s, actual: %s (%s)",
+            llm_kv_cache_type_to_string(runtime.requested_llm_kv_cache_type).c_str(),
+            llm_kv_cache_type_to_string(runtime.actual_llm_kv_cache_type).c_str(),
+            runtime.has_llm_kv_cache_override ? "user override" : "default");
+        print_info_log(runtime.log_level, "  llm_kv_cache_type  : %s\n", kv_buf);
+    }
     if (runtime.has_seed)
         print_info_log(runtime.log_level, "  seed_strategy      : server default=%u, request override allowed\n", runtime.seed);
     else

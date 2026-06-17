@@ -32,8 +32,8 @@ struct server_options
     std::string single_prompt_speech;
     bool has_single_voice_arg = false;
 
-    // WebUI options
-    bool enable_webui = false;
+    // Mode selection: default is WebUI, --api switches to API mode
+    bool enable_api = false;
     std::string frontend_model;
     std::string speech_tokenizer;
     std::string campplus;
@@ -84,7 +84,7 @@ static void print_usage(const char* argv0)
     printf("Usage:\n");
     printf("  %s --model <file.gguf> --voice-prompt <voice=prompt_speech.gguf> [--voice-prompt ...] [options]\n", argv0);
     printf("  %s --model <file.gguf> --voice <voice> --prompt-speech <prompt_speech.gguf> [options]\n", argv0);
-    printf("  %s                                       (no arguments → WebUI mode)\n", argv0);
+    printf("  %s                                       (default: WebUI mode)\n", argv0);
 
     printf("\nCore options:\n");
     printf("  --help, -h                                  Show this help message and exit.\n");
@@ -142,8 +142,10 @@ static void print_usage(const char* argv0)
     printf("  GET  /v1/models\n");
     printf("  POST /v1/audio/speech\n");
 
-    printf("\nWebUI mode:\n");
-    printf("  --webui                                     Enable WebUI interface (disables /v1/ endpoints).\n");
+    printf("\nMode selection:\n");
+    printf("  --api                                       Enable OpenAI-compatible API server (requires --model and --voice-prompt).\n");
+    printf("                                                Default: WebUI mode.\n");
+    printf("\nWebUI options:\n");
     printf("  --frontend-model <dir>                      Frontend ONNX model directory (for speaker extraction).\n");
     printf("  --speech-tokenizer <file>                   Speech tokenizer ONNX model file.\n");
     printf("  --campplus <file>                           Campplus ONNX model file.\n");
@@ -381,6 +383,9 @@ static bool build_runtime(const server_options& options, server_runtime* runtime
     {
         cosyvoice_context_params_t actual_params;
         cosyvoice_get_context_params(runtime->model_slots.front().get(), &actual_params);
+        runtime->has_llm_kv_cache_override  = options.has_llm_kv_cache_type;
+        runtime->requested_llm_kv_cache_type = options.llm_kv_cache_type;
+        runtime->actual_llm_kv_cache_type    = actual_params.llm_kv_cache_type;
         if (!options.quiet)
             fprintf(stderr, "llm_kv_cache_type: requested: %s, actual: %s\n",
                 llm_kv_cache_type_to_string(options.llm_kv_cache_type).c_str(),
@@ -626,8 +631,8 @@ int tool_entry(int argc, char** argv)
             }
             else if (str_casecmp(arg, "--prompt-speech") == 0)
                 options.single_prompt_speech = get_arg_value();
-            else if (str_casecmp(arg, "--webui") == 0)
-                options.enable_webui = true;
+            else if (str_casecmp(arg, "--api") == 0)
+                options.enable_api = true;
             else if (str_casecmp(arg, "--frontend-model") == 0)
                 options.frontend_model = get_arg_value();
             else if (str_casecmp(arg, "--speech-tokenizer") == 0)
@@ -809,17 +814,19 @@ int tool_entry(int argc, char** argv)
             }
         }
 
-        // Determine mode: WebUI or API (still within options scope)
-        bool auto_webui = false;
-        if (!options.enable_webui)
+        // API mode: explicitly requested via --api
+        if (options.enable_api)
         {
-            if (options.model.empty() || options.voice_prompts.empty())
-                auto_webui = true;
-            else if (!validate_options(options))
-                auto_webui = true;
+            if (!validate_options(options))
+                return 1;
+
+            if (!build_runtime(options, &runtime))
+                return 1;
+
+            return cosyvoice_server_backend_run(runtime);
         }
 
-        if (options.enable_webui || auto_webui)
+        // WebUI mode (default)
         {
             runtime.webui_enabled = true;
             runtime.frontend_model  = options.frontend_model;
@@ -839,30 +846,13 @@ int tool_entry(int argc, char** argv)
             {
                 if (!webui_build_runtime(options, &runtime))
                 {
-                    if (options.enable_webui)
-                    {
-                        // Explicit --webui: model load failure is fatal
-                        return 1;
-                    }
-                    else
-                    {
-                        // Auto-WebUI: model load failure is OK, start without model
-                        fprintf(stderr, "Warning: failed to load model, starting WebUI without model.\n");
-                        runtime.model_slots.clear();
-                        runtime.sample_rate = 0;
-                    }
+                    fprintf(stderr, "Warning: failed to load model, starting WebUI without model.\n");
+                    runtime.model_slots.clear();
+                    runtime.sample_rate = 0;
                 }
             }
 
             return cosyvoice_server_webui_run(runtime);
-        }
-        else
-        {
-            // API mode (existing path, unchanged)
-            if (!build_runtime(options, &runtime))
-                return 1;
-
-            return cosyvoice_server_backend_run(runtime);
         }
     }
 }
