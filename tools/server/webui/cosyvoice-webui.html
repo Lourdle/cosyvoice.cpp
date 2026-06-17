@@ -4,12 +4,21 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CosyVoice TTS WebUI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/cosyvoice-webui.css">
 </head>
 <body>
 
 <!-- Accent bar -->
 <div class="top-bar"></div>
+
+<!-- Animated Background Orbs -->
+<div class="bg-orb" id="orb-1"></div>
+<div class="bg-orb" id="orb-2"></div>
+<div class="bg-orb" id="orb-3"></div>
+<div class="bg-orb" id="orb-4"></div>
 
 <!-- Toast container -->
 <div class="toast-container" id="toast-container"></div>
@@ -180,7 +189,22 @@
                 </div>
                 <div class="row" style="margin-top:12px">
                     <div><label>Reference audio file (WAV / MP3 / FLAC)</label><input type="file" id="extract-audio" accept="audio/*"></div>
-                    <div><button class="btn" id="btn-extract" style="width:100%">Extract Speaker</button></div>
+                    <div style="flex:0 0 auto;min-width:auto"><button class="btn" id="btn-extract" style="width:100%">Extract Speaker</button></div>
+                </div>
+
+                <!-- Inline Recording -->
+                <div class="extract-record-bar" id="extract-record-bar">
+                    <button class="extract-record-btn" id="extract-record-btn">
+                        <svg class="erm-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+                        <svg class="erm-stop" viewBox="0 0 24 24" fill="currentColor" style="display:none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                        <span class="erm-label" id="erm-label">Record</span>
+                    </button>
+                    <span class="erm-status" id="erm-status">Record from microphone as alternative to file upload</span>
+                    <span class="erm-timer" id="erm-timer"></span>
+                    <div class="erm-waveform" id="erm-waveform" style="display:none">
+                        <canvas id="erm-canvas" height="60"></canvas>
+                        <div class="erm-level" id="erm-level"></div>
+                    </div>
                 </div>
 
                 <div class="trim-area" id="trim-area">
@@ -198,6 +222,7 @@
                                 <button class="btn btn-sm" id="wf-zoomout" title="Zoom out">−</button>
                                 <button class="btn btn-sm" id="wf-reset" title="Reset zoom">⟲</button>
                                 <button class="btn btn-sm" id="wf-preview">▶ Preview</button>
+                                <button class="btn btn-sm" id="wf-download" title="Download cropped audio">↓ Save</button>
                             </div>
                         </div>
                     </details>
@@ -212,48 +237,6 @@
         <div style="margin-top:18px">
             <h3 style="font-size:14px;font-weight:500;margin-bottom:10px;">Registered Speakers</h3>
             <div id="speaker-list"><div class="empty-state">No speakers registered</div></div>
-        </div>
-    </div>
-
-    <!-- Audio Trimmer (Standalone) -->
-    <div class="card">
-        <div class="card-header">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
-            <h2>Audio Trimmer</h2>
-            <span class="badge">Standalone</span>
-        </div>
-        <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">Upload an audio file, select a region, and download the trimmed segment. All processing is done in your browser.</p>
-
-        <!-- Drop zone -->
-        <div class="drop-zone" id="trimmer-dropzone">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            <div class="dz-text">Click to upload or drag &amp; drop an audio file</div>
-            <div class="dz-hint">Supports WAV, MP3, FLAC</div>
-            <input type="file" id="trimmer-input" accept="audio/*" style="display:none">
-        </div>
-
-        <!-- File info -->
-        <div class="file-info" id="trimmer-file-info" style="display:none"></div>
-
-        <!-- Waveform -->
-        <div id="trimmer-waveform" style="display:none;margin-top:10px">
-            <div class="waveform-container"><canvas id="trimmer-canvas" height="120"></canvas></div>
-            <div class="waveform-controls">
-                <div class="waveform-time">
-                    <span>Start: <span id="trimmer-start">0.00</span>s</span>
-                    <span>End: <span id="trimmer-end">0.00</span>s</span>
-                    <span>Selected: <span id="trimmer-selected">0.00</span>s / <span id="trimmer-total">0.00</span>s</span>
-                </div>
-                <div class="waveform-buttons">
-                    <button class="btn btn-sm" id="trimmer-zoomin" title="Zoom to selection">+</button>
-                    <button class="btn btn-sm" id="trimmer-zoomout" title="Zoom out">−</button>
-                    <button class="btn btn-sm" id="trimmer-reset" title="Reset zoom">⟲</button>
-                    <button class="btn btn-sm" id="trimmer-preview">▶ Preview</button>
-                </div>
-            </div>
-            <div style="margin-top:12px">
-                <button class="btn" id="trimmer-download" style="width:100%">Download Trimmed Audio (WAV)</button>
-            </div>
         </div>
     </div>
 
@@ -284,22 +267,22 @@
         <details>
             <summary>Advanced parameters</summary>
             <div class="params">
-                <div><label>Seed <span id="seed-dice" style="cursor:pointer;font-size:18px" title="Generate random seed">🎲</span> <span id="seed-lock" style="cursor:pointer;font-size:16px" title="Lock seed (fixed across generations)">🔓</span></label><input type="number" id="tts-seed" placeholder="Auto"></div>
-                <div><label>Temperature</label><input type="number" id="tts-temp" step="0.05" min="0.05" placeholder="Default"></div>
-                <div><label>Top-K</label><input type="number" id="tts-topk" min="0" placeholder="Default"></div>
-                <div><label>Top-P</label><input type="number" id="tts-topp" step="0.05" min="0" max="1" placeholder="Default"></div>
-                <div><label>Win Size</label><input type="number" id="tts-winsize" min="1" placeholder="Default"></div>
-                <div><label>Tau-R</label><input type="number" id="tts-taur" step="0.1" min="0" placeholder="Default"></div>
+                <div><label>Seed <span id="seed-dice" style="cursor:pointer;font-size:16px;vertical-align:middle;line-height:1" title="Generate random seed">🎲</span> <span id="seed-lock" style="cursor:pointer;font-size:14px;vertical-align:middle;line-height:1" title="Lock seed (fixed across generations)">🔓</span></label><input type="number" id="tts-seed" placeholder=""></div>
+                <div><label>Temperature</label><input type="number" id="tts-temp" step="0.05" min="0.05" placeholder=""></div>
+                <div><label>Top-K</label><input type="number" id="tts-topk" min="0" placeholder=""></div>
+                <div><label>Top-P</label><input type="number" id="tts-topp" step="0.05" min="0" max="1" placeholder=""></div>
+                <div><label>Win Size</label><input type="number" id="tts-winsize" min="1" placeholder=""></div>
+                <div><label>Tau-R</label><input type="number" id="tts-taur" step="0.1" min="0" placeholder=""></div>
             </div>
-            <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
-                <label style="font-size:13px;color:var(--text-dim);margin-bottom:6px;">Generation Flags</label>
-                <div class="params">
-                    <div><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="tts-fadein" checked> Fade In</label></div>
-                    <div><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="tts-textnorm" checked> Text Normalization</label></div>
-                    <div><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="tts-split" checked> Text Splitting</label></div>
-                    <div><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="tts-fastsplit" checked> Fast Split</label></div>
+            <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+                <label style="font-size:13px;color:var(--text-dim);margin-bottom:4px;display:block">Generation Flags</label>
+                <div class="flag-grid">
+                    <label class="flag-item"><input type="checkbox" id="tts-fadein" checked><span>Fade In</span></label>
+                    <label class="flag-item"><input type="checkbox" id="tts-textnorm" checked><span>Text Normalization</span></label>
+                    <label class="flag-item"><input type="checkbox" id="tts-split" checked><span>Text Splitting</span></label>
+                    <label class="flag-item"><input type="checkbox" id="tts-fastsplit" checked><span>Fast Split</span></label>
                 </div>
-                <div style="margin-top:12px"><button class="btn btn-sm" id="btn-reset-gen-config" style="width:100%">Reset Generation Params to Defaults</button></div>
+                <div style="margin-top:10px"><button class="btn btn-sm" id="btn-reset-gen-config" style="width:100%">Reset Generation Params to Defaults</button></div>
             </div>
         </details>
 

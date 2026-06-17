@@ -17,10 +17,8 @@ const MAX_HISTORY = 20;
 let waveformState = null;
 let previewAudio = null;
 
-// Audio trimmer state (standalone)
-let trimmerState = null;
-let trimmerAudioBuffer = null;
-let trimmerPreviewAudio = null;
+// Recording state (inside Extract tab)
+let extractRecState = null; // { mediaRecorder, chunks, startTime, stream, analyser, dataArray, audioCtx, source, animId }
 
 // Toast timer IDs
 let toastTimers = [];
@@ -174,13 +172,6 @@ function initEls() {
         // History
         'history-list', 'history-area', 'btn-clear-history',
 
-        // Trimmer
-        'trimmer-dropzone', 'trimmer-input', 'trimmer-file-info',
-        'trimmer-waveform', 'trimmer-canvas',
-        'trimmer-start', 'trimmer-end', 'trimmer-selected', 'trimmer-total',
-        'trimmer-zoomin', 'trimmer-zoomout', 'trimmer-reset', 'trimmer-preview',
-        'trimmer-download', 'trimmer-format',
-
         // Stats
         'stat-model', 'stat-speakers', 'stat-frontend', 'stat-sample-rate',
 
@@ -189,6 +180,10 @@ function initEls() {
 
         // Frontend card
         'frontend-card',
+
+        // Extract tab recording
+        'extract-record-btn', 'erm-label', 'erm-status', 'erm-timer',
+        'erm-waveform', 'erm-canvas', 'erm-level',
     ];
 
     ids.forEach(id => { els[id] = $(id); });
@@ -252,10 +247,15 @@ document.querySelectorAll('.tab').forEach(tab => {
 });
 
 // ---- Speed Display ----
-if (els['tts-speed']) {
-    els['tts-speed'].addEventListener('input', () => {
-        if (els['speed-val']) els['speed-val'].textContent = parseFloat(els['tts-speed'].value).toFixed(2);
-    });
+function initSpeedDisplay() {
+    const slider = document.getElementById('tts-speed');
+    const display = document.getElementById('speed-val');
+    if (slider && display) {
+        display.textContent = parseFloat(slider.value).toFixed(2);
+        slider.addEventListener('input', () => {
+            display.textContent = parseFloat(slider.value).toFixed(2);
+        });
+    }
 }
 
 // ---- Fetch Server Status ----
@@ -636,6 +636,7 @@ function drawWaveform(wf, canvasId) {
     const W = cvs.width;
     const H = cvs.height;
     const buffer = wf.audioBuffer;
+    const isRetina = W !== cvs.clientWidth;
 
     ctx.clearRect(0, 0, W, H);
 
@@ -651,81 +652,154 @@ function drawWaveform(wf, canvasId) {
 
     const channelData = buffer.getChannelData(0);
     const midY = H / 2;
-    const halfH = H * 0.4;
+    const halfH = H * 0.42;
 
-    // Background grid
-    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    // ---- Background ----
+    ctx.fillStyle = 'rgba(10, 10, 30, 0.3)';
+    ctx.fillRect(0, 0, W, H);
+
+    // ---- Background grid ----
+    ctx.strokeStyle = 'rgba(255,255,255,0.025)';
     ctx.lineWidth = 1;
-    for (let g = 0; g < 10; g++) {
+    for (let g = 1; g < 10; g++) {
         const gx = (g / 10) * W;
         ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke();
     }
-    for (let g = 0; g < 5; g++) {
+    for (let g = 1; g < 5; g++) {
         const gy = (g / 4) * H;
         ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
     }
 
-    // Selection highlight
     const selStartX = ((wf.startPct / 100) - visStart) / visLen * W;
     const selEndX = ((wf.endPct / 100) - visStart) / visLen * W;
-    ctx.fillStyle = 'rgba(124,111,240,0.15)';
+
+    // ---- Darken area outside selection ----
+    if (selStartX > 0) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+        ctx.fillRect(0, 0, selStartX, H);
+    }
+    if (selEndX < W) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+        ctx.fillRect(selEndX, 0, W - selEndX, H);
+    }
+
+    // ---- Selection gradient highlight ----
+    const selGrad = ctx.createLinearGradient(selStartX, 0, selEndX, 0);
+    selGrad.addColorStop(0, 'rgba(139, 124, 247, 0.08)');
+    selGrad.addColorStop(0.3, 'rgba(139, 124, 247, 0.18)');
+    selGrad.addColorStop(0.7, 'rgba(139, 124, 247, 0.18)');
+    selGrad.addColorStop(1, 'rgba(139, 124, 247, 0.08)');
+    ctx.fillStyle = selGrad;
     ctx.fillRect(selStartX, 0, selEndX - selStartX, H);
 
-    // Waveform bars
-    ctx.strokeStyle = '#7c6ff0';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let i = 0; i < W; i += 2) {
-        const pct = i / W;
-        const idx = startFrame + Math.round(frameRange * pct);
-        const idx2 = startFrame + Math.round(frameRange * ((i + 1) / W));
-        if (idx >= buffer.length) break;
+    // ---- Waveform bars (inside selection = brighter) ----
+    for (let pass = 0; pass < 2; pass++) {
+        ctx.beginPath();
+        for (let i = 0; i < W; i += 1) {
+            const pct = i / W;
+            const idx = startFrame + Math.round(frameRange * pct);
+            const idx2 = startFrame + Math.round(frameRange * ((i + 1) / W));
+            if (idx >= buffer.length) break;
 
-        let maxVal = 0;
-        for (let j = idx; j <= idx2 && j < buffer.length; j++) {
-            const v = Math.abs(channelData[j]);
-            if (v > maxVal) maxVal = v;
+            let maxVal = 0;
+            for (let j = idx; j <= idx2 && j < buffer.length; j++) {
+                const v = Math.abs(channelData[j]);
+                if (v > maxVal) maxVal = v;
+            }
+
+            const barH = Math.max(1, maxVal * halfH);
+            const inside = i >= selStartX && i <= selEndX;
+            const y1 = midY - barH;
+            const y2 = midY + barH;
+
+            if (pass === 0 && !inside) {
+                if (i === 0) ctx.moveTo(i, y1);
+                else ctx.lineTo(i, y1);
+                ctx.moveTo(i, y2);
+                ctx.lineTo(i, y2);
+            } else if (pass === 1 && inside) {
+                if (i === 0) ctx.moveTo(i, y1);
+                else ctx.lineTo(i, y1);
+                ctx.moveTo(i, y2);
+                ctx.lineTo(i, y2);
+            }
         }
-
-        const barH = Math.max(1, maxVal * halfH);
-        const y1 = midY - barH;
-        const y2 = midY + barH;
-
-        if (i === 0) ctx.moveTo(i, y1);
-        else ctx.lineTo(i, y1);
-        ctx.moveTo(i, y2);
-        ctx.lineTo(i, y2);
+        if (pass === 0) {
+            ctx.strokeStyle = 'rgba(144, 144, 176, 0.35)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        } else {
+            ctx.strokeStyle = '#8b7cf7';
+            ctx.lineWidth = 1.5;
+            ctx.shadowColor = 'rgba(139, 124, 247, 0.3)';
+            ctx.shadowBlur = 4;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
     }
-    ctx.stroke();
 
-    // Center line
-    ctx.strokeStyle = 'rgba(144,144,176,0.2)';
+    // ---- Center line ----
+    ctx.strokeStyle = 'rgba(139, 124, 247, 0.15)';
     ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
     ctx.beginPath();
     ctx.moveTo(0, midY);
     ctx.lineTo(W, midY);
     ctx.stroke();
+    ctx.setLineDash([]);
 
-    // Boundary markers
-    ctx.strokeStyle = '#e06060';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(selStartX, 0);
-    ctx.lineTo(selStartX, H);
-    ctx.stroke();
-
-    ctx.strokeStyle = '#60c080';
-    ctx.beginPath();
-    ctx.moveTo(selEndX, 0);
-    ctx.lineTo(selEndX, H);
-    ctx.stroke();
-
-    // Time labels
+    // ---- Boundary markers + handles ----
     const total = wf.totalDuration;
     const sTime = total * wf.startPct / 100;
     const eTime = total * wf.endPct / 100;
+    const markerScale = isRetina ? 1 : 1;
 
-    // Update display
+    function drawMarker(x, color, label) {
+        // Vertical line
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = color + '40';
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, H);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        // Top circle handle
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x, 8 * markerScale, 5 * markerScale, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Bottom circle handle
+        ctx.beginPath();
+        ctx.arc(x, H - 8 * markerScale, 5 * markerScale, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Time label at top
+        ctx.fillStyle = color;
+        ctx.font = 'bold ' + (10 * markerScale) + 'px ' + getComputedStyle(document.body).fontFamily;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(label + 's', x, 18 * markerScale);
+    }
+
+    drawMarker(selStartX, '#ff6b6b', sTime.toFixed(2));
+    drawMarker(selEndX, '#51cf66', eTime.toFixed(2));
+
+    // ---- Selection time in center ----
+    const selW = selEndX - selStartX;
+    if (selW > 80) {
+        ctx.fillStyle = 'rgba(139, 124, 247, 0.5)';
+        ctx.font = '11px ' + getComputedStyle(document.body).fontFamily;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const selTime = total * (wf.endPct - wf.startPct) / 100;
+        ctx.fillText('▎' + formatTime(selTime) + '▎', (selStartX + selEndX) / 2, midY);
+    }
+
+    // ---- Update time display ----
     const startEl = document.getElementById('wf-start-time');
     const endEl = document.getElementById('wf-end-time');
     const selEl = document.getElementById('wf-selected');
@@ -770,16 +844,23 @@ function initExtractAudio() {
 }
 
 function setupWaveformEvents(wf, canvas, prefix) {
-    canvas.onmousedown = (e) => {
+    function getMousePct(e) {
         const rect = canvas.getBoundingClientRect();
-        const x = (e.clientX - rect.left) / rect.width;
+        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
         const ws = wf.zoomStart / 100;
         const we = wf.zoomEnd / 100;
-        const pct = (ws + x * (we - ws)) * 100;
+        return (ws + x * (we - ws)) * 100;
+    }
 
+    function getThreshold() {
+        return (wf.zoomEnd - wf.zoomStart) / 100 * 4;
+    }
+
+    canvas.onmousedown = (e) => {
+        const pct = getMousePct(e);
+        const threshold = getThreshold();
         const distStart = Math.abs(pct - wf.startPct);
         const distEnd = Math.abs(pct - wf.endPct);
-        const threshold = (we - ws) * 5;
 
         if (distEnd < threshold && distEnd <= distStart) {
             wf.dragging = 'end';
@@ -794,30 +875,39 @@ function setupWaveformEvents(wf, canvas, prefix) {
     };
 
     canvas.onmousemove = (e) => {
-        if (!wf.dragging) return;
-        const rect = canvas.getBoundingClientRect();
-        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-        const ws = wf.zoomStart / 100;
-        const we = wf.zoomEnd / 100;
-        const pct = (ws + x * (we - ws)) * 100;
+        const pct = getMousePct(e);
+        const threshold = getThreshold();
+        const distStart = Math.abs(pct - wf.startPct);
+        const distEnd = Math.abs(pct - wf.endPct);
 
-        if (wf.dragging === 'start') {
-            wf.startPct = Math.max(wf.zoomStart, Math.min(pct, wf.endPct - 0.5));
+        if (wf.dragging) {
+            canvas.style.cursor = 'ew-resize';
+            if (wf.dragging === 'start') {
+                wf.startPct = Math.max(wf.zoomStart, Math.min(pct, wf.endPct - 0.5));
+            } else {
+                wf.endPct = Math.min(wf.zoomEnd, Math.max(pct, wf.startPct + 0.5));
+            }
+            drawWaveform(wf);
         } else {
-            wf.endPct = Math.min(wf.zoomEnd, Math.max(pct, wf.startPct + 0.5));
+            // Cursor feedback based on position
+            if (distStart < threshold || distEnd < threshold) {
+                canvas.style.cursor = 'ew-resize';
+            } else {
+                canvas.style.cursor = 'crosshair';
+            }
         }
-        drawWaveform(wf);
     };
 
     const onUp = () => { wf.dragging = null; };
     canvas.onmouseup = onUp;
-    canvas.onmouseleave = onUp;
+    canvas.onmouseleave = (e) => { wf.dragging = null; canvas.style.cursor = 'crosshair'; };
 
     // Waveform buttons
     const zoomIn = document.getElementById(prefix + 'zoomin');
     const zoomOut = document.getElementById(prefix + 'zoomout');
     const reset = document.getElementById(prefix + 'reset');
     const preview = document.getElementById(prefix + 'preview');
+    const downloadBtn = document.getElementById(prefix + 'download');
 
     if (zoomIn) zoomIn.addEventListener('click', () => {
         const range = wf.endPct - wf.startPct;
@@ -875,6 +965,37 @@ function setupWaveformEvents(wf, canvas, prefix) {
             requestAnimationFrame(animateCursor);
         }
         requestAnimationFrame(animateCursor);
+    });
+
+    // Download cropped audio
+    if (downloadBtn) downloadBtn.addEventListener('click', () => {
+        if (!wf) return;
+        const buffer = wf.audioBuffer;
+        const totalFrames = buffer.length;
+        const startFrame = Math.round(totalFrames * wf.startPct / 100);
+        const endFrame = Math.round(totalFrames * wf.endPct / 100);
+        const frames = endFrame - startFrame;
+        if (frames <= 0) { showToast('Selected range is empty', 'warning'); return; }
+
+        const channels = buffer.numberOfChannels;
+        const out = new Float32Array(frames * channels);
+        for (let ch = 0; ch < channels; ch++) {
+            const src = buffer.getChannelData(ch);
+            for (let i = 0; i < frames; i++) {
+                out[i * channels + ch] = src[startFrame + i];
+            }
+        }
+
+        const blob = encodeWav(out, buffer.sampleRate, channels);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'cropped_audio.wav';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast('Cropped audio downloaded (' + formatFileSize(blob.size) + ')', 'success');
     });
 
     // Seek on canvas click during preview
@@ -960,7 +1081,7 @@ function initExtractSpeaker() {
         const text = els['extract-text'].value.trim();
         const file = els['extract-audio'].files[0];
         if (!name) { showError(els['extract-error'], 'Please enter a speaker name'); return; }
-        if (!file) { showError(els['extract-error'], 'Please select a reference audio file'); return; }
+        if (!file && !waveformState) { showError(els['extract-error'], 'Please select an audio file or record from microphone'); return; }
 
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner"></span>Extracting...';
@@ -993,392 +1114,6 @@ function initExtractSpeaker() {
         btn.disabled = false;
         btn.innerHTML = ICONS.user + ' Extract Speaker';
     });
-}
-
-// ==========================================================
-// Standalone Audio Trimmer
-// ==========================================================
-
-function initAudioTrimmer() {
-    const dropzone = els['trimmer-dropzone'];
-    const input = els['trimmer-input'];
-    if (!dropzone || !input) return;
-
-    // File selection via click
-    dropzone.addEventListener('click', () => input.click());
-
-    // File selection via input
-    input.addEventListener('change', () => handleTrimmerFile(input.files[0]));
-
-    // Drag & drop
-    dropzone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropzone.classList.add('drag-over');
-    });
-    dropzone.addEventListener('dragleave', () => {
-        dropzone.classList.remove('drag-over');
-    });
-    dropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropzone.classList.remove('drag-over');
-        if (e.dataTransfer.files.length > 0) {
-            input.files = e.dataTransfer.files;
-            handleTrimmerFile(e.dataTransfer.files[0]);
-        }
-    });
-
-    // Download trimmed audio
-    const downloadBtn = els['trimmer-download'];
-    if (downloadBtn) {
-        downloadBtn.addEventListener('click', downloadTrimmedAudio);
-    }
-}
-
-async function handleTrimmerFile(file) {
-    if (!file) {
-        resetTrimmer();
-        return;
-    }
-
-    // Show file info
-    const fileInfo = els['trimmer-file-info'];
-    if (fileInfo) {
-        fileInfo.innerHTML = ICONS.music + ' <span class="fi-name">' + escapeHtml(file.name) + '</span> <span class="fi-size">' + formatFileSize(file.size) + '</span>';
-        fileInfo.style.display = 'flex';
-    }
-
-    try {
-        const arrayBuffer = await file.arrayBuffer();
-        const audioCtx = new AudioContext();
-        const decoded = await audioCtx.decodeAudioData(arrayBuffer);
-        await audioCtx.close();
-
-        trimmerAudioBuffer = decoded;
-
-        const canvas = els['trimmer-canvas'];
-        if (!canvas) return;
-
-        // Show waveform area
-        const container = document.getElementById('trimmer-waveform');
-        if (container) container.style.display = 'block';
-
-        await new Promise(r => setTimeout(r, 50));
-
-        canvas.width = canvas.clientWidth * 2;
-        canvas.height = 120 * 2;
-        canvas.style.width = canvas.clientWidth + 'px';
-        canvas.style.height = '120px';
-
-        trimmerState = {
-            canvas: canvas,
-            audioBuffer: decoded,
-            startPct: 0,
-            endPct: 100,
-            zoomStart: 0,
-            zoomEnd: 100,
-            dragging: null,
-            totalDuration: decoded.duration,
-        };
-
-        drawTrimmerWaveform();
-        setupTrimmerEvents();
-
-        showToast('Audio loaded: ' + formatTime(decoded.duration), 'info');
-
-    } catch(e) {
-        console.warn('Audio decode failed:', e);
-        showToast('Failed to decode audio file', 'error');
-        resetTrimmer();
-    }
-}
-
-function drawTrimmerWaveform() {
-    const wf = trimmerState;
-    if (!wf) return;
-    const cvs = wf.canvas;
-    const ctx = cvs.getContext('2d');
-    const W = cvs.width;
-    const H = cvs.height;
-    const buffer = wf.audioBuffer;
-
-    ctx.clearRect(0, 0, W, H);
-
-    const visStart = wf.zoomStart / 100;
-    const visEnd = wf.zoomEnd / 100;
-    const visLen = visEnd - visStart;
-    if (visLen <= 0) return;
-
-    const totalFrames = buffer.length;
-    const startFrame = Math.round(totalFrames * visStart);
-    const endFrame = Math.round(totalFrames * visEnd);
-    const frameRange = endFrame - startFrame;
-
-    const channelData = buffer.getChannelData(0);
-    const midY = H / 2;
-    const halfH = H * 0.42;
-
-    // Background grid
-    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-    ctx.lineWidth = 1;
-    for (let g = 1; g < 10; g++) {
-        const gx = (g / 10) * W;
-        ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke();
-    }
-    for (let g = 1; g < 5; g++) {
-        const gy = (g / 4) * H;
-        ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
-    }
-
-    // Selection highlight
-    const selStartX = ((wf.startPct / 100) - visStart) / visLen * W;
-    const selEndX = ((wf.endPct / 100) - visStart) / visLen * W;
-    ctx.fillStyle = 'rgba(124,111,240,0.18)';
-    ctx.fillRect(selStartX, 0, selEndX - selStartX, H);
-
-    // Selection labels inside the bar
-    ctx.fillStyle = 'rgba(124,111,240,0.5)';
-    const labelW = selEndX - selStartX;
-    if (labelW > 60) {
-        ctx.font = '11px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillStyle = 'rgba(255,255,255,0.4)';
-        const selTime = wf.totalDuration * (wf.endPct - wf.startPct) / 100;
-        ctx.fillText(formatTime(selTime), (selStartX + selEndX) / 2, H / 2 + 4);
-    }
-
-    // Waveform
-    ctx.strokeStyle = '#7c6ff0';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    for (let i = 0; i < W; i += 1) {
-        const pct = i / W;
-        const idx = startFrame + Math.round(frameRange * pct);
-        const idx2 = startFrame + Math.round(frameRange * ((i + 1) / W));
-        if (idx >= buffer.length) break;
-
-        let maxVal = 0;
-        for (let j = idx; j <= idx2 && j < buffer.length; j++) {
-            const v = Math.abs(channelData[j]);
-            if (v > maxVal) maxVal = v;
-        }
-
-        const barH = Math.max(1, maxVal * halfH);
-        const y1 = midY - barH;
-        const y2 = midY + barH;
-
-        if (i === 0) ctx.moveTo(i, y1);
-        else ctx.lineTo(i, y1);
-        ctx.moveTo(i, y2);
-        ctx.lineTo(i, y2);
-    }
-    ctx.stroke();
-
-    // Center line
-    ctx.strokeStyle = 'rgba(144,144,176,0.15)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, midY);
-    ctx.lineTo(W, midY);
-    ctx.stroke();
-
-    // Markers
-    ctx.strokeStyle = '#ff6b6b';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(selStartX, 0);
-    ctx.lineTo(selStartX, H);
-    ctx.stroke();
-
-    ctx.strokeStyle = '#51cf66';
-    ctx.beginPath();
-    ctx.moveTo(selEndX, 0);
-    ctx.lineTo(selEndX, H);
-    ctx.stroke();
-
-    // Render time labels
-    const total = wf.totalDuration;
-    const sTime = total * wf.startPct / 100;
-    const eTime = total * wf.endPct / 100;
-
-    if (els['trimmer-start']) els['trimmer-start'].textContent = sTime.toFixed(2);
-    if (els['trimmer-end']) els['trimmer-end'].textContent = eTime.toFixed(2);
-    if (els['trimmer-selected']) els['trimmer-selected'].textContent = (eTime - sTime).toFixed(2);
-    if (els['trimmer-total']) els['trimmer-total'].textContent = total.toFixed(2);
-
-    // Preview cursor
-    if (trimmerPreviewAudio && !trimmerPreviewAudio.paused && !trimmerPreviewAudio.ended && trimmerPreviewAudio.duration > 0) {
-        const rangeDur = total * (wf.endPct - wf.startPct) / 100;
-        if (rangeDur > 0) {
-            const audioPct = wf.startPct + (trimmerPreviewAudio.currentTime / trimmerPreviewAudio.duration) * (wf.endPct - wf.startPct);
-            if (audioPct >= visStart * 100 && audioPct <= visEnd * 100) {
-                const cursorX = ((audioPct / 100) - visStart) / visLen * W;
-                ctx.strokeStyle = '#ffd43b';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(cursorX, 0);
-                ctx.lineTo(cursorX, H);
-                ctx.stroke();
-            }
-        }
-    }
-}
-
-function setupTrimmerEvents() {
-    const wf = trimmerState;
-    if (!wf) return;
-    const canvas = wf.canvas;
-
-    canvas.onmousedown = (e) => {
-        const rect = canvas.getBoundingClientRect();
-        const x = (e.clientX - rect.left) / rect.width;
-        const ws = wf.zoomStart / 100;
-        const we = wf.zoomEnd / 100;
-        const pct = (ws + x * (we - ws)) * 100;
-
-        const distStart = Math.abs(pct - wf.startPct);
-        const distEnd = Math.abs(pct - wf.endPct);
-        const threshold = (we - ws) * 4;
-
-        if (distEnd < threshold && distEnd <= distStart) {
-            wf.dragging = 'end';
-        } else if (distStart < threshold) {
-            wf.dragging = 'start';
-        } else {
-            wf.dragging = (pct - wf.startPct < wf.endPct - pct) ? 'start' : 'end';
-            if (wf.dragging === 'start') wf.startPct = pct;
-            else wf.endPct = pct;
-            drawTrimmerWaveform();
-        }
-    };
-
-    canvas.onmousemove = (e) => {
-        if (!wf.dragging) return;
-        const rect = canvas.getBoundingClientRect();
-        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-        const ws = wf.zoomStart / 100;
-        const we = wf.zoomEnd / 100;
-        const pct = (ws + x * (we - ws)) * 100;
-
-        if (wf.dragging === 'start') {
-            wf.startPct = Math.max(wf.zoomStart, Math.min(pct, wf.endPct - 0.5));
-        } else {
-            wf.endPct = Math.min(wf.zoomEnd, Math.max(pct, wf.startPct + 0.5));
-        }
-        drawTrimmerWaveform();
-    };
-
-    const onUp = () => { wf.dragging = null; };
-    canvas.onmouseup = onUp;
-    canvas.onmouseleave = onUp;
-
-    // Buttons
-    if (els['trimmer-zoomin']) els['trimmer-zoomin'].addEventListener('click', () => {
-        const range = wf.endPct - wf.startPct;
-        if (range < 0.5) return;
-        wf.zoomStart = wf.startPct;
-        wf.zoomEnd = wf.endPct;
-        drawTrimmerWaveform();
-    });
-
-    if (els['trimmer-zoomout']) els['trimmer-zoomout'].addEventListener('click', () => {
-        const range = wf.zoomEnd - wf.zoomStart;
-        const expand = range * 0.5;
-        wf.zoomStart = Math.max(0, wf.zoomStart - expand);
-        wf.zoomEnd = Math.min(100, wf.zoomEnd + expand);
-        drawTrimmerWaveform();
-    });
-
-    if (els['trimmer-reset']) els['trimmer-reset'].addEventListener('click', () => {
-        wf.zoomStart = 0;
-        wf.zoomEnd = 100;
-        drawTrimmerWaveform();
-    });
-
-    if (els['trimmer-preview']) els['trimmer-preview'].addEventListener('click', () => {
-        if (!wf) return;
-        if (trimmerPreviewAudio) { trimmerPreviewAudio.pause(); trimmerPreviewAudio = null; }
-
-        const buffer = wf.audioBuffer;
-        const totalFrames = buffer.length;
-        const startFrame = Math.round(totalFrames * wf.startPct / 100);
-        const endFrame = Math.round(totalFrames * wf.endPct / 100);
-        const frames = endFrame - startFrame;
-        if (frames <= 0) return;
-
-        const channels = buffer.numberOfChannels;
-        const out = new Float32Array(frames * channels);
-        for (let ch = 0; ch < channels; ch++) {
-            const src = buffer.getChannelData(ch);
-            for (let i = 0; i < frames; i++) {
-                out[i * channels + ch] = src[startFrame + i];
-            }
-        }
-
-        const blob = encodeWav(out, buffer.sampleRate, channels);
-        const url = URL.createObjectURL(blob);
-        trimmerPreviewAudio = new Audio(url);
-        trimmerPreviewAudio.play().catch(() => {});
-
-        function animate() {
-            if (!trimmerPreviewAudio || trimmerPreviewAudio.paused || trimmerPreviewAudio.ended) {
-                drawTrimmerWaveform();
-                return;
-            }
-            drawTrimmerWaveform();
-            requestAnimationFrame(animate);
-        }
-        requestAnimationFrame(animate);
-    });
-}
-
-function downloadTrimmedAudio() {
-    const wf = trimmerState;
-    if (!wf || !trimmerAudioBuffer) {
-        showToast('No audio loaded to trim', 'warning');
-        return;
-    }
-
-    const buffer = wf.audioBuffer;
-    const totalFrames = buffer.length;
-    const startFrame = Math.round(totalFrames * wf.startPct / 100);
-    const endFrame = Math.round(totalFrames * wf.endPct / 100);
-    const frames = endFrame - startFrame;
-    if (frames <= 0) {
-        showToast('Selected range is empty', 'warning');
-        return;
-    }
-
-    const channels = buffer.numberOfChannels;
-    const out = new Float32Array(frames * channels);
-    for (let ch = 0; ch < channels; ch++) {
-        const src = buffer.getChannelData(ch);
-        for (let i = 0; i < frames; i++) {
-            out[i * channels + ch] = src[startFrame + i];
-        }
-    }
-
-    const blob = encodeWav(out, buffer.sampleRate, channels);
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'trimmed_audio.wav';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    showToast('Trimmed audio downloaded (' + formatFileSize(blob.size) + ')', 'success');
-}
-
-function resetTrimmer() {
-    trimmerAudioBuffer = null;
-    trimmerState = null;
-    if (trimmerPreviewAudio) { trimmerPreviewAudio.pause(); trimmerPreviewAudio = null; }
-    if (els['trimmer-file-info']) els['trimmer-file-info'].style.display = 'none';
-    const container = document.getElementById('trimmer-waveform');
-    if (container) container.style.display = 'none';
-    if (els['trimmer-input']) els['trimmer-input'].value = '';
 }
 
 // ==========================================================
@@ -1435,10 +1170,7 @@ async function generateTts() {
     for (const [k, el] of adv) {
         const v = el.value.trim();
         if (v === '') {
-            showError(els['tts-error'], 'Advanced parameter "' + k + '" is required. Please fill in a value.');
-            isGenerating = false;
-            els['btn-tts'].disabled = false;
-            els['btn-tts'].innerHTML = ICONS.speaker + ' Generate Speech';
+            showError(els['tts-error'], 'Please fill in all advanced parameters (empty: "' + k + '").');
             return;
         }
         body[k] = k === 'seed' || k === 'top_k' || k === 'win_size'
@@ -1558,6 +1290,218 @@ function clearHistory() {
 }
 
 // ==========================================================
+// Inline Recording (inside Extract tab)
+// ==========================================================
+
+function initExtractRecording() {
+    const btn = els['extract-record-btn'];
+    if (!btn) return;
+
+    btn.addEventListener('click', () => {
+        if (!extractRecState) {
+            startExtractRecording();
+        } else {
+            stopExtractRecording();
+        }
+    });
+}
+
+async function startExtractRecording() {
+    // Check support
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder === 'undefined') {
+        showToast('Recording not supported in this browser', 'error');
+        return;
+    }
+
+    // Update UI
+    const btn = els['extract-record-btn'];
+    const status = els['erm-status'];
+    if (btn) btn.classList.add('recording');
+    if (status) { status.textContent = 'Recording...'; status.className = 'erm-status recording'; }
+
+    // Clear any previous recording
+    if (els['erm-waveform']) els['erm-waveform'].style.display = 'none';
+
+    // Clear file input if previously set
+    if (els['extract-audio']) els['extract-audio'].value = '';
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 }
+        });
+
+        const audioCtx = new AudioContext();
+        const source = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+        const mimeType = getBestMimeType();
+        const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+        const chunks = [];
+        const startTime = Date.now();
+
+        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+        mediaRecorder.onstop = () => {
+            if (extractRecState && extractRecState.animId) {
+                cancelAnimationFrame(extractRecState.animId);
+            }
+            stream.getTracks().forEach(t => t.stop());
+            const blob = new Blob(chunks, { type: mimeType || 'audio/webm' });
+
+            // Update UI
+            if (status) { status.textContent = 'Processing audio...'; status.className = 'erm-status'; }
+
+            // Decode and feed into trim area
+            decodeAndShowTrim(blob);
+            extractRecState = null;
+            if (audioCtx.state !== 'closed') audioCtx.close();
+        };
+
+        mediaRecorder.start(100);
+
+        extractRecState = {
+            mediaRecorder, chunks, startTime, stream, analyser, dataArray, audioCtx, source, animId: null
+        };
+
+        // Show live waveform
+        if (els['erm-waveform']) els['erm-waveform'].style.display = 'block';
+        drawExtractLiveWaveform();
+
+    } catch (e) {
+        if (btn) btn.classList.remove('recording');
+        if (status) { status.textContent = 'Microphone unavailable'; status.className = 'erm-status'; }
+        showToast('Recording failed: ' + (e.name === 'NotAllowedError' ? 'microphone access denied' : e.message), 'error');
+    }
+}
+
+function stopExtractRecording() {
+    if (!extractRecState) return;
+    const rs = extractRecState;
+    if (els['erm-status']) els['erm-status'].textContent = 'Processing...';
+
+    try {
+        if (rs.mediaRecorder && rs.mediaRecorder.state !== 'inactive') rs.mediaRecorder.stop();
+    } catch(e) { /* ignore */ }
+    if (rs.stream) rs.stream.getTracks().forEach(t => t.stop());
+}
+
+function getBestMimeType() {
+    const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4', ''];
+    for (const t of types) {
+        if (!t || MediaRecorder.isTypeSupported(t)) return t || '';
+    }
+    return '';
+}
+
+function decodeAndShowTrim(blob) {
+    const reader = new FileReader();
+    reader.onload = async () => {
+        try {
+            const audioCtx = new AudioContext();
+            const decoded = await audioCtx.decodeAudioData(reader.result);
+            await audioCtx.close();
+
+            // Set up trim area with recorded audio (same as file upload flow)
+            if (els['trim-area']) els['trim-area'].classList.add('show');
+            await new Promise(r => setTimeout(r, 50));
+
+            const canvas = els['waveform-canvas'];
+            if (!canvas) return;
+
+            waveformState = initWaveform(canvas, decoded);
+            setupWaveformEvents(waveformState, canvas, 'wf-');
+
+            // Update status
+            if (els['erm-status']) {
+                els['erm-status'].textContent = 'Recorded ' + formatTime(decoded.duration) + ' — trim below or extract';
+                els['erm-status'].className = 'erm-status';
+            }
+            const btn = els['extract-record-btn'];
+            if (btn) btn.classList.remove('recording');
+
+            // Reset timer
+            if (els['erm-timer']) { els['erm-timer'].textContent = ''; els['erm-timer'].className = 'erm-timer'; }
+
+            showToast('Recorded ' + formatTime(decoded.duration), 'success');
+
+        } catch(e) {
+            showToast('Failed to process recorded audio', 'error');
+        }
+    };
+    reader.readAsArrayBuffer(blob);
+}
+
+function drawExtractLiveWaveform() {
+    if (!extractRecState) return;
+
+    const canvas = els['erm-canvas'];
+    const levelBar = els['erm-level'];
+    if (!canvas) return;
+
+    canvas.width = canvas.clientWidth * 2;
+    canvas.height = 60 * 2;
+    canvas.style.width = canvas.clientWidth + 'px';
+    canvas.style.height = '60px';
+
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width;
+    const H = canvas.height;
+    const { analyser, dataArray, startTime } = extractRecState;
+
+    function animate() {
+        if (!extractRecState) return;
+        extractRecState.animId = requestAnimationFrame(animate);
+
+        // Timer
+        const elapsed = (Date.now() - startTime) / 1000;
+        const mins = Math.floor(elapsed / 60);
+        const secs = Math.floor(elapsed % 60);
+        if (els['erm-timer']) {
+            els['erm-timer'].textContent = String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+            els['erm-timer'].className = 'erm-timer recording';
+        }
+
+        // Frequency data
+        analyser.getByteFrequencyData(dataArray);
+
+        // Level
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+        const avg = sum / dataArray.length;
+        const level = Math.min(100, (avg / 255) * 100);
+        if (levelBar) levelBar.style.width = level + '%';
+
+        // Draw bars
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = 'rgba(10, 10, 30, 0.4)';
+        ctx.fillRect(0, 0, W, H);
+
+        const barCount = 48;
+        const barW = W / barCount;
+        const midY = H / 2;
+
+        for (let i = 0; i < barCount; i++) {
+            const idx = Math.floor((i / barCount) * dataArray.length * 0.8) + 1;
+            const val = dataArray[idx] || 0;
+            const pct = val / 255;
+            const barH = Math.max(1, pct * H * 0.8);
+
+            let color;
+            if (pct < 0.3) color = 'rgba(139, 124, 247, ' + (0.4 + pct * 1.5) + ')';
+            else if (pct < 0.6) color = 'rgba(0, 206, 201, ' + (0.5 + (pct - 0.3) * 1.5) + ')';
+            else color = 'rgba(232, 67, 147, ' + (0.5 + (pct - 0.6) * 1.5) + ')';
+
+            ctx.fillStyle = color;
+            ctx.fillRect(i * barW + 1, midY - barH / 2, barW - 2, barH);
+        }
+    }
+    animate();
+}
+
+// ==========================================================
 // Keyboard Shortcuts
 // ==========================================================
 
@@ -1581,46 +1525,59 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ==========================================================
-// Init / Seed / Defaults
+// Init Helpers / Seed / Defaults
 // ==========================================================
 
-if (els['seed-dice']) {
-    els['seed-dice'].addEventListener('click', () => {
-        els['tts-seed'].value = Math.floor(Math.random() * 2147483647) + 1;
-    });
-}
-
-if (els['seed-lock']) {
-    els['seed-lock'].addEventListener('click', () => {
-        seedLocked = !seedLocked;
-        els['seed-lock'].textContent = seedLocked ? '🔒' : '🔓';
-        if (seedLocked && !els['tts-seed'].value && els['seed-dice']) els['seed-dice'].click();
-    });
-}
-
-if (els['btn-reset-model-config']) {
-    els['btn-reset-model-config'].addEventListener('click', () => {
-        clearAdvParams();
-        fetchDefaults().then(() => {
-            restoreAdvParams();
-            if (!els['tts-seed'].value && els['seed-dice']) els['seed-dice'].click();
+function initSeedControls() {
+    const dice = document.getElementById('seed-dice');
+    const lock = document.getElementById('seed-lock');
+    if (dice) {
+        dice.addEventListener('click', () => {
+            const input = document.getElementById('tts-seed');
+            if (input) input.value = Math.floor(Math.random() * 2147483647) + 1;
         });
-    });
+    }
+    if (lock) {
+        lock.addEventListener('click', () => {
+            seedLocked = !seedLocked;
+            lock.textContent = seedLocked ? '🔒' : '🔓';
+            if (seedLocked) {
+                const input = document.getElementById('tts-seed');
+                if (input && !input.value && dice) dice.click();
+            }
+        });
+    }
 }
 
-if (els['btn-reset-gen-config']) {
-    els['btn-reset-gen-config'].addEventListener('click', () => {
-        ADV_PARAM_IDS.forEach(id => {
-            if (id.startsWith('tts') || id === 'modelMaxLlm') localStorage.removeItem('cosyvoice_' + id);
+function initResetButtons() {
+    const resetModel = document.getElementById('btn-reset-model-config');
+    if (resetModel) {
+        resetModel.addEventListener('click', () => {
+            clearAdvParams();
+            fetchDefaults().then(() => {
+                restoreAdvParams();
+                const input = document.getElementById('tts-seed');
+                const dice = document.getElementById('seed-dice');
+                if (input && !input.value && dice) dice.click();
+            });
         });
-        fetchDefaults().then(() => {
-            updateFastSplitState();
-        });
-    });
-}
+    }
 
-if (els['btn-clear-history']) {
-    els['btn-clear-history'].addEventListener('click', clearHistory);
+    const resetGen = document.getElementById('btn-reset-gen-config');
+    if (resetGen) {
+        resetGen.addEventListener('click', () => {
+            ADV_PARAM_IDS.forEach(id => {
+                if (id.startsWith('tts') || id === 'modelMaxLlm') localStorage.removeItem('cosyvoice_' + id);
+            });
+            fetchDefaults().then(() => updateFastSplitState());
+        });
+    }
+
+    const clearHist = document.getElementById('btn-clear-history');
+    if (clearHist) clearHist.addEventListener('click', clearHistory);
+
+    const splitCheck = document.getElementById('tts-split');
+    if (splitCheck) splitCheck.addEventListener('change', updateFastSplitState);
 }
 
 // ---- Fetch Defaults ----
@@ -1671,10 +1628,6 @@ function updateFastSplitState() {
         els['tts-fastsplit'].disabled = !els['tts-split'].checked;
         if (!els['tts-split'].checked) els['tts-fastsplit'].checked = false;
     }
-}
-
-if (els['tts-split']) {
-    els['tts-split'].addEventListener('change', updateFastSplitState);
 }
 
 // ---- Fetch Backends ----
@@ -1738,8 +1691,11 @@ async function init() {
     initLoadGguf();
     initExtractAudio();
     initExtractSpeaker();
-    initAudioTrimmer();
+    initExtractRecording();
     initTts();
+    initSpeedDisplay();
+    initSeedControls();
+    initResetButtons();
 
     // Fetch data
     await fetchBackends();
