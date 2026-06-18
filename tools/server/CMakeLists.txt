@@ -1,12 +1,15 @@
 set(SERVER_SOURCES
-    nlohmann-json.ixx
-    httplib.ixx
     cosyvoice-server.h
     cosyvoice-server.cpp
     server_common.h
     cosyvoice-server-backend.cpp
     cosyvoice-server-webui.cpp
     server_common.cpp
+)
+
+set(SERVER_MODULE_INTERFACES
+    nlohmann-json.ixx
+    httplib.ixx
 )
 
 # Embedded resources: Windows uses RC, others use C23 #embed
@@ -31,6 +34,11 @@ set(SERVER_COMMON_INCLUDES
 set(SERVER_COMMON_LIBS cosyvoice common ggml tools_common)
 
 add_executable(cosyvoice-server ${SERVER_SOURCES})
+target_sources(cosyvoice-server PRIVATE
+    FILE_SET CXX_MODULES
+    FILES ${SERVER_MODULE_INTERFACES}
+)
+
 target_link_libraries(cosyvoice-server PRIVATE ${SERVER_COMMON_LIBS})
 target_include_directories(cosyvoice-server PRIVATE ${SERVER_COMMON_INCLUDES})
 
