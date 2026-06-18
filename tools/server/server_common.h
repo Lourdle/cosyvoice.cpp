@@ -2,6 +2,11 @@
 
 #include "cosyvoice-server.h"
 
+#include <chrono>
+#include <cstdint>
+#include <string>
+#include <vector>
+
 namespace httplib { class Request; }
 
 // ---------------------------------------------------------------------------

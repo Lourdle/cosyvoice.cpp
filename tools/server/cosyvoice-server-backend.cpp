@@ -5,6 +5,17 @@
     #include "cosyvoice-audio.h"
 #endif
 
+#include <cmath>
+#include <cstdint>
+#include <ctime>
+#include <limits>
+#include <string>
+#include <unordered_map>
+#include <utility>
+
+import httplib;
+import nlohmann_json;
+
 using json = nlohmann::json;
 
 struct speech_request
@@ -36,7 +47,7 @@ struct speech_request
     float max_token_text_ratio = 0.0f;
 };
 
-static void set_openai_error(httplib::Response& res, int status, const std::string& message, const std::string& type, const char* param, const char* code)
+static void set_openai_error(Response& res, int status, const std::string& message, const std::string& type, const char* param, const char* code)
 {
     json payload;
     payload["error"] = {
@@ -50,7 +61,7 @@ static void set_openai_error(httplib::Response& res, int status, const std::stri
     res.set_content(payload.dump(), "application/json");
 }
 
-static bool require_auth(const httplib::Request& req, const server_runtime& runtime, httplib::Response& res)
+static bool require_auth(const Request& req, const server_runtime& runtime, Response& res)
 {
     if (runtime.api_key.empty())
         return true;
@@ -77,7 +88,7 @@ static bool require_auth(const httplib::Request& req, const server_runtime& runt
     return true;
 }
 
-static bool parse_required_string_field(const json& body, const char* key, std::string* value, httplib::Response& res)
+static bool parse_required_string_field(const json& body, const char* key, std::string* value, Response& res)
 {
     const auto it = body.find(key);
     if (it == body.end())
@@ -102,7 +113,7 @@ static bool parse_required_string_field(const json& body, const char* key, std::
     return true;
 }
 
-static bool parse_speech_request_json(const json& body, speech_request* request, httplib::Response& res)
+static bool parse_speech_request_json(const json& body, speech_request* request, Response& res)
 {
     if (!parse_required_string_field(body, "model", &request->model, res))
         return false;
@@ -340,12 +351,12 @@ static void fill_request_log_context_from_request(request_log_context* ctx, cons
 
 int cosyvoice_server_backend_run(server_runtime& runtime)
 {
-    httplib::Server server;
+    Server server;
     server.new_task_queue = [&runtime]() {
-        return new httplib::ThreadPool(runtime.concurrency, runtime.concurrency);
+        return new ThreadPool(runtime.concurrency, runtime.concurrency);
     };
 
-    server.set_exception_handler([&](const httplib::Request& req, httplib::Response& res, std::exception_ptr ep)
+    server.set_exception_handler([&](const Request& req, Response& res, std::exception_ptr ep)
     {
         (void)ep;
         if (req.path.rfind("/v1/", 0) == 0)
@@ -354,13 +365,13 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
             res.status = 500;
     });
 
-    server.Get("/", [](const httplib::Request&, httplib::Response& res)
+    server.Get("/", [](const Request&, Response& res)
     {
         res.status = 200;
         res.set_content("CosyVoice OpenAI Speech API Server is running.\n", "text/plain");
     });
 
-    server.Get("/healthz", [&](const httplib::Request&, httplib::Response& res)
+    server.Get("/healthz", [&](const Request&, Response& res)
     {
         json payload = {
             { "status", "ok" },
@@ -371,7 +382,7 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
         res.set_content(payload.dump(), "application/json");
     });
 
-    server.Get("/v1/models", [&](const httplib::Request& req, httplib::Response& res)
+    server.Get("/v1/models", [&](const Request& req, Response& res)
     {
         request_log_context log_ctx = make_request_log_context(req, "/v1/models");
         log_request_start(runtime.log_level, log_ctx);
@@ -404,7 +415,7 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
         log_request_done(runtime.log_level, log_ctx, request_log_status::ok, res.status, 0, res.body.size(), "models");
     });
 
-    server.Post("/v1/audio/speech", [&](const httplib::Request& req, httplib::Response& res)
+    server.Post("/v1/audio/speech", [&](const Request& req, Response& res)
     {
         request_log_context log_ctx = make_request_log_context(req, "/v1/audio/speech");
         log_request_start(runtime.log_level, log_ctx);
@@ -560,7 +571,7 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
         log_request_done(runtime.log_level, log_ctx, request_log_status::ok, res.status, applied_seed, res.body.size(), "speech");
     });
 
-    server.set_error_handler([&](const httplib::Request& req, httplib::Response& res)
+    server.set_error_handler([&](const Request& req, Response& res)
     {
         if (!res.body.empty())
             return;

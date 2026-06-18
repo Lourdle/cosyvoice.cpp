@@ -6,6 +6,10 @@
 
 #include <ggml-backend.h>
 
+#include <cstring>
+#include <memory>
+#include <string>
+#include <vector>
 
 #ifndef COSYVOICE_NO_AUDIO
     #include "cosyvoice-audio.h"
@@ -14,6 +18,9 @@
 #ifndef COSYVOICE_NO_FRONTEND
     #include "cosyvoice-frontend.h"
 #endif
+
+import nlohmann_json;
+import httplib;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -154,10 +161,10 @@ static bool register_speaker_from_audio(
 
 int cosyvoice_server_webui_run(server_runtime& runtime)
 {
-    httplib::Server server;
+    Server server;
     // Use default task queue (no explicit override)
 
-    server.set_exception_handler([](const httplib::Request&, httplib::Response& res, std::exception_ptr ep)
+    server.set_exception_handler([](const Request&, Response& res, std::exception_ptr ep)
     {
         (void)ep;
         res.status = 500;
@@ -167,7 +174,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 
     // ---- GET / — serve the WebUI HTML ----
-    server.Get("/", [&runtime](const httplib::Request&, httplib::Response& res)
+    server.Get("/", [&runtime](const Request&, Response& res)
     {
         res.status = 200;
 
@@ -202,7 +209,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 
     // ---- GET /cosyvoice-webui.css — serve embedded CSS ----
-    server.Get("/cosyvoice-webui.css", [](const httplib::Request&, httplib::Response& res)
+    server.Get("/cosyvoice-webui.css", [](const Request&, Response& res)
     {
         size_t size = 0;
         const void* data = server_resource_load(IDR_WEBUI_CSS, &size);
@@ -217,7 +224,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 
     // ---- GET /cosyvoice-webui.js — serve embedded JavaScript ----
-    server.Get("/cosyvoice-webui.js", [](const httplib::Request&, httplib::Response& res)
+    server.Get("/cosyvoice-webui.js", [](const Request&, Response& res)
     {
         size_t size = 0;
         const void* data = server_resource_load(IDR_WEBUI_JS, &size);
@@ -232,13 +239,13 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 
     // ---- Simple ping endpoint (always works) ----
-    server.Get("/ping", [](const httplib::Request&, httplib::Response& res)
+    server.Get("/ping", [](const Request&, Response& res)
     {
         res.set_content("pong", "text/plain");
     });
 
     // ---- GET /backends — list available GGML backends ----
-    server.Get("/backends", [](const httplib::Request&, httplib::Response& res)
+    server.Get("/backends", [](const Request&, Response& res)
     {
         nlohmann::json list = nlohmann::json::array();
 
@@ -267,7 +274,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 
     // ---- GET /formats — list supported audio output formats ----
-    server.Get("/formats", [](const httplib::Request&, httplib::Response& res)
+    server.Get("/formats", [](const Request&, Response& res)
     {
         nlohmann::json list = nlohmann::json::array();
         list.push_back("wav");
@@ -290,7 +297,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 
     // ---- GET /status — server status ----
-    server.Get("/status", [&runtime](const httplib::Request&, httplib::Response& res)
+    server.Get("/status", [&runtime](const Request&, Response& res)
     {
         // Use manual JSON building — avoids an issue with nlohmann::json in this handler
         std::string json = "{\"status\":\"ok\"";
@@ -333,7 +340,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 
     // ---- GET /speaker — list registered speakers ----
-    server.Get("/speaker", [&runtime](const httplib::Request&, httplib::Response& res)
+    server.Get("/speaker", [&runtime](const Request&, Response& res)
     {
         nlohmann::json payload = runtime.voice_names;
         res.status = 200;
@@ -341,7 +348,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 
     // ---- POST /speaker — register a new speaker ----
-    server.Post("/speaker", [&runtime](const httplib::Request& req, httplib::Response& res)
+    server.Post("/speaker", [&runtime](const Request& req, Response& res)
     {
         // Detect multipart vs JSON
         bool is_multipart = req.has_header("Content-Type") &&
@@ -469,7 +476,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 
     // ---- DELETE /speaker/<name> — remove a speaker ----
-    server.Delete(R"(/speaker/(.*))", [&runtime](const httplib::Request& req, httplib::Response& res)
+    server.Delete(R"(/speaker/(.*))", [&runtime](const Request& req, Response& res)
     {
         std::string name = req.matches[1];
 
@@ -516,7 +523,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 
     // ---- POST /speaker/save — save speaker prompt speech to a server-side path ----
-    server.Post("/speaker/save", [&runtime](const httplib::Request& req, httplib::Response& res)
+    server.Post("/speaker/save", [&runtime](const Request& req, Response& res)
     {
         nlohmann::json body;
         try { body = nlohmann::json::parse(req.body); }
@@ -569,7 +576,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             "Speaker prompt speech saved: %s -> %s", name.c_str(), path.c_str());
     });
 
-    server.Post("/tts", [&runtime](const httplib::Request& req, httplib::Response& res)
+    server.Post("/tts", [&runtime](const Request& req, Response& res)
     {
         request_log_context log_ctx = make_request_log_context(req, "/tts");
         log_request_start(runtime.log_level, log_ctx);
@@ -740,7 +747,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 
     // ---- GET /frontend/model — return frontend model paths ----
-    server.Get("/frontend/model", [&runtime](const httplib::Request&, httplib::Response& res)
+    server.Get("/frontend/model", [&runtime](const Request&, Response& res)
     {
         nlohmann::json payload;
         payload["speech_tokenizer"] = runtime.speech_tokenizer;
@@ -750,7 +757,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 
     // ---- PUT /frontend/model — update frontend model paths ----
-    server.Put("/frontend/model", [&runtime](const httplib::Request& req, httplib::Response& res)
+    server.Put("/frontend/model", [&runtime](const Request& req, Response& res)
     {
         nlohmann::json body;
         try { body = nlohmann::json::parse(req.body); }
@@ -774,7 +781,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
 
     // ---- POST /frontend/model/load — load ONNX frontend models into memory ----
 #if !defined(COSYVOICE_NO_FRONTEND)
-    server.Post("/frontend/model/load", [&runtime](const httplib::Request& req, httplib::Response& res)
+    server.Post("/frontend/model/load", [&runtime](const Request& req, Response& res)
     {
         nlohmann::json body;
         try { body = nlohmann::json::parse(req.body); }
@@ -819,7 +826,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         res.set_content(ok2.dump(), "application/json");
     });
 #else
-    server.Post("/frontend/model/load", [](const httplib::Request&, httplib::Response& res)
+    server.Post("/frontend/model/load", [](const Request&, Response& res)
     {
         res.status = 501;
         nlohmann::json err = {{"error", "Frontend support is not available in this build (COSYVOICE_NO_FRONTEND)."}};
@@ -829,7 +836,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
 
     // ---- POST /frontend/model/unload — unload ONNX frontend models ----
 #if !defined(COSYVOICE_NO_FRONTEND)
-    server.Post("/frontend/model/unload", [&runtime](const httplib::Request&, httplib::Response& res)
+    server.Post("/frontend/model/unload", [&runtime](const Request&, Response& res)
     {
         if (!runtime.frontend_ctx)
         {
@@ -848,7 +855,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         res.set_content(ok2.dump(), "application/json");
     });
 #else
-    server.Post("/frontend/model/unload", [](const httplib::Request&, httplib::Response& res)
+    server.Post("/frontend/model/unload", [](const Request&, Response& res)
     {
         res.status = 501;
         nlohmann::json err = {{"error", "Frontend support is not available in this build (COSYVOICE_NO_FRONTEND)."}};
@@ -857,7 +864,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
 #endif
 
     // ---- POST /model/load — dynamically load a GGUF model ----
-    server.Post("/model/load", [&runtime](const httplib::Request& req, httplib::Response& res)
+    server.Post("/model/load", [&runtime](const Request& req, Response& res)
     {
         request_log_context log_ctx = make_request_log_context(req, "/model/load");
         log_request_start(runtime.log_level, log_ctx);
@@ -1037,7 +1044,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 
     // ---- POST /model/unload — unload the current model ----
-    server.Post("/model/unload", [&runtime](const httplib::Request& req, httplib::Response& res)
+    server.Post("/model/unload", [&runtime](const Request& req, Response& res)
     {
         request_log_context log_ctx = make_request_log_context(req, "/model/unload");
         log_request_start(runtime.log_level, log_ctx);
@@ -1080,7 +1087,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
 
     // ---- GET /model/defaults — return defaults for all configurable parameters ----
     // Works even without a loaded model (sensible fallbacks for generation params).
-    server.Get("/model/defaults", [&runtime](const httplib::Request&, httplib::Response& res)
+    server.Get("/model/defaults", [&runtime](const Request&, Response& res)
     {
         nlohmann::json d;
 
@@ -1122,7 +1129,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 
     // ---- Error handler (404) ----
-    server.set_error_handler([&runtime](const httplib::Request& req, httplib::Response& res)
+    server.set_error_handler([&runtime](const Request& req, Response& res)
     {
         (void)runtime;
         if (!res.body.empty())
