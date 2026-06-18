@@ -8,7 +8,7 @@
 
 ```bash
 pkg update
-apt install clang cmake make simde
+apt install clang cmake ninja git simde
 ```
 
 如需 FFmpeg 后端则加装 `apt install ffmpeg`，如需 ICU 则加装 `apt install libicu`。如需前端，则安装 `apt install onnxruntime`，CMake 会自动通过 `find_package` 找到系统版本。
@@ -46,7 +46,7 @@ cmake -S /path/to/cosyvoice.cpp -B build-termux-opencl \
   -DCMAKE_INCLUDE_PATH=/path/to/OpenCL-Headers \
   -DGGML_OPENCL=ON \
   -DGGML_OPENCL_USE_ADRENO_KERNELS=OFF
-make -C build-termux-opencl -j8
+ninja -C build-termux-opencl
 ```
 
 > `GGML_OPENCL_USE_ADRENO_KERNELS` 即使目标 GPU 是 Adreno 也需要设为 `OFF`，因为内部优化的 kernel 对 tensor 形状有特定要求，CosyVoice 不满足这些形状约束。

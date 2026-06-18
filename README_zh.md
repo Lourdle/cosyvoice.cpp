@@ -18,7 +18,7 @@
 本项目提供：
 - 核心 C/C++ 推理库（`cosyvoice`）
 - 命令行合成工具（`cosyvoice-cli`）
-- OpenAI Speech 兼容 API 服务（`cosyvoice-server`）
+- OpenAI Speech 兼容 API 服务，含嵌入式 WebUI（`cosyvoice-server`）
 - GGUF 量化工具（`quantize`）
 
 ## 目录
@@ -46,7 +46,8 @@
 
 | 特性 | 说明 |
 |---|---|
-| **OpenAI Speech API 服务** | 即插即用的 `POST /v1/audio/speech` 端点，支持多音色、鉴权和 CORS |
+| **OpenAI Speech API 服务** | 即插即用的 `POST /v1/audio/speech` 端点，支持多音色、鉴权和 CORS——内置 **WebUI** 用于模型/音色管理和 TTS 生成 |
+| **WebUI 仪表盘** | 现代化浏览器界面，支持运行时加载/卸载模型、注册音色（GGUF 导入/音频提取/麦克风录音）、TTS 生成（实时播放、历史记录、完整采样控制） |
 | **交互式 REPL** | CLI 交互模式，支持 /play、/save、/list、/query、/seed 等斜杠命令 |
 | **并发服务** | Server 的 `--concurrency` 参数，支持并行请求处理 |
 | **模型量化** | 内置 `quantize` 工具，支持 Q2_K 到 F16 多种量化格式 |
@@ -106,6 +107,10 @@
 
 ### 从源码构建
 
+> **C++20 模块说明（Linux/macOS）：** `cosyvoice-server` 目标现已使用 C++20 模块。
+> GNU Make 不支持模块依赖扫描，因此在 Linux 和 macOS 上需通过添加 `-G Ninja` 来使用 Ninja 生成器。
+> Windows 上可继续使用默认的 Visual Studio 生成器（完整支持 C++20 模块）。详见[构建](#构建)章节。
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
@@ -146,6 +151,32 @@ flowchart TD
 - Git（当本地缺少 GGML 源码时用于自动拉取）
 - 目前 CPU 路径中的部分数据处理要求 x86 CPU 支持 AVX2
 - 对 CPU 侧数学运算较重的路径（如 `log`、三角函数），当前仅 MSVC 构建可启用 SIMD 加速；其他工具链目前回退为标量实现
+
+> **Server WebUI 构建说明（非 Windows 平台）：** `cosyvoice-server` 通过 C23 的 `#embed` 指令
+> （`resource_embed.c`）将 WebUI 资源（HTML/CSS/JS）嵌入可执行文件。在 Linux/macOS 上，
+> 这要求 **C 编译器**支持 C23 `#embed`——即 GCC 15+ 或 Clang 19+；**C++ 编译器**仅需
+> C++20 即可。Windows 通过原生 RC 工具嵌入资源，无需特殊编译器。
+>
+> 示例：
+> ```bash
+> # Ubuntu/Debian — 用 clang-20 作为 C 编译器
+> sudo apt install clang-20
+> cmake -B build -DCMAKE_C_COMPILER=clang-20 -DCMAKE_BUILD_TYPE=Release
+> cmake --build build --config Release
+> ```
+
+> **Server C++20 模块说明（非 Windows 平台）：** `cosyvoice-server` 的 C++ 源码现已改用
+> C++20 模块（`.ixx` 接口文件，封装了 nlohmann-json 和 cpp-httplib）。
+> GNU Make（Linux/macOS 上 CMake 的默认生成器）**不支持**模块依赖自动扫描，
+> 因此在这些平台上需要使用 **Ninja** 生成器。
+> Windows 上的 Visual Studio 生成器完整支持 C++20 模块扫描，在使用 VS 工具链时无需
+> 额外指定生成器。
+>
+> Linux/macOS 示例：
+> ```bash
+> cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+> cmake --build build --config Release
+> ```
 
 后端/运行时依赖会随构建选项变化（CUDA/Vulkan/CPU、ONNX Runtime、ICU 等）。
 

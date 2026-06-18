@@ -184,6 +184,120 @@ Gets the encoded payload from the last successful encode call.
 
 The returned `data` pointer remains valid until the next encode call on the same encoder, or until the encoder is destroyed.
 
+## cosyvoice_audio_decoder_t
+
+### Syntax
+
+```c
+typedef struct cosyvoice_audio_decoder* cosyvoice_audio_decoder_t;
+```
+
+### Description
+
+Opaque handle for the in-memory audio decoder. Decodes encoded audio from a memory buffer to mono float PCM without touching the filesystem.
+
+## cosyvoice_audio_decoding_format_supported
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_audio_decoding_format_supported(cosyvoice_audio_encoding_format_t format);
+```
+
+### Description
+
+Checks whether an audio format is supported for decoding.
+
+### Parameters
+
+- `format`: Format to test.
+
+### Returns
+
+`true` if the format is supported for decoding; otherwise `false`.
+
+## cosyvoice_audio_decoder_create
+
+### Syntax
+
+```c
+COSYVOICE_API cosyvoice_audio_decoder_t cosyvoice_audio_decoder_create(void);
+```
+
+### Description
+
+Creates an in-memory audio decoder. The decoder auto-detects the audio format from the buffer content.
+
+### Returns
+
+Decoder handle on success; otherwise `NULL`.
+
+## cosyvoice_audio_decoder_destroy
+
+### Syntax
+
+```c
+COSYVOICE_API void cosyvoice_audio_decoder_destroy(cosyvoice_audio_decoder_t decoder);
+```
+
+### Description
+
+Destroys a decoder created by `cosyvoice_audio_decoder_create`.
+
+### Parameters
+
+- `decoder`: Decoder handle. `NULL` is allowed.
+
+## cosyvoice_audio_decoder_decode
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_audio_decoder_decode(
+    cosyvoice_audio_decoder_t decoder,
+    const void*               input,
+    uint32_t                  input_length
+);
+```
+
+### Description
+
+Decodes audio from a memory buffer to mono float PCM. The decoder auto-detects the audio format from the buffer content. After a successful decode, call `cosyvoice_audio_decoder_get_decoded_data` to retrieve the PCM data.
+
+### Parameters
+
+- `decoder`: Decoder handle.
+- `input`: Pointer to encoded audio data.
+- `input_length`: Length of encoded data in bytes.
+
+### Returns
+
+`true` on success; otherwise `false`.
+
+## cosyvoice_audio_decoder_get_decoded_data
+
+### Syntax
+
+```c
+COSYVOICE_API void cosyvoice_audio_decoder_get_decoded_data(
+    cosyvoice_audio_decoder_t decoder,
+    float**                   data,
+    uint32_t*                 length,
+    uint32_t*                 sample_rate
+);
+```
+
+### Description
+
+Gets the decoded PCM data from the last successful decode call. The returned `data` pointer remains valid until the next decode call on the same decoder, or until the decoder is destroyed. The caller must NOT free the data.
+
+### Parameters
+
+- `decoder`: Decoder handle.
+- `data`: Receives pointer to mono float PCM buffer (`[-1, 1]`).
+- `length`: Receives number of samples.
+- `sample_rate`: Receives sample rate in Hz.
+
 ## cosyvoice_audio_load_from_file
 
 ### Syntax

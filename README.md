@@ -18,7 +18,7 @@ This repository ships independent engineering work and does not contain official
 This project provides:
 - A core C/C++ inference library (`cosyvoice`)
 - A CLI synthesis tool (`cosyvoice-cli`)
-- An OpenAI Speech-compatible API server (`cosyvoice-server`)
+- An OpenAI Speech-compatible API server with embedded WebUI (`cosyvoice-server`)
 - A GGUF quantization tool (`quantize`)
 
 ## Contents
@@ -46,7 +46,8 @@ This project provides:
 
 | Feature | Description |
 |---|---|
-| **OpenAI Speech API Server** | Drop-in compatible `POST /v1/audio/speech` endpoint with multi-voice, auth, and CORS support |
+| **OpenAI Speech API Server** | Drop-in compatible `POST /v1/audio/speech` endpoint with multi-voice, auth, and CORS support — includes an embedded **WebUI** for model/speaker management and TTS generation |
+| **WebUI Dashboard** | Modern browser-based interface for loading/unloading models, registering speakers (via GGUF/audio extraction/mic recording), TTS generation with live playback, history, and full sampling control |
 | **Interactive REPL** | CLI interactive mode with slash commands for play, save, list, query, and seed control |
 | **Concurrent Serving** | Server `--concurrency` for parallel request handling |
 | **Model Quantization** | Quantize GGUF models to smaller formats (Q2_K through F16) with the built-in `quantize` tool |
@@ -106,6 +107,11 @@ The releases provided in this repository do not bundle the GGML backend librarie
 
 ### Build from Source
 
+> **C++20 modules note (Linux/macOS):** The `cosyvoice-server` target now uses C++20 modules.
+> GNU Make does not support module dependency scanning, so on Linux and macOS you must configure
+> with the Ninja generator by adding `-G Ninja`. Windows can continue using the default Visual
+> Studio generator (full module support). See the [Build](#build) section for details.
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
@@ -146,6 +152,33 @@ flowchart TD
 - Git (used to fetch GGML automatically when missing)
 - x86 CPU with AVX2 support is currently required for parts of the CPU data path
 - For CPU math-heavy paths (for example `log` and trigonometric functions), SIMD acceleration is currently enabled only in MSVC builds; other toolchains currently fall back to scalar implementations
+
+> **Server WebUI build note (non-Windows):** The `cosyvoice-server` embeds its WebUI resources
+> (HTML/CSS/JS) via the C23 `#embed` directive (`resource_embed.c`). On Linux/macOS this requires
+> a **C compiler** that supports C23 `#embed` — GCC 15+ or Clang 19+ — while the **C++ compiler**
+> only needs C++20 support. Windows embeds resources via the native RC tool, so no special
+> compiler is needed.
+>
+> Example:
+> ```bash
+> # Ubuntu/Debian — use clang-20 as the C compiler
+> sudo apt install clang-20
+> cmake -B build -DCMAKE_C_COMPILER=clang-20 -DCMAKE_BUILD_TYPE=Release
+> cmake --build build --config Release
+> ```
+
+> **Server C++20 modules note (non-Windows):** The `cosyvoice-server` C++ sources now use
+> C++20 modules (`.ixx` interface files for nlohmann-json and cpp-httplib wrappers).
+> GNU Make (CMake's default generator on Linux/macOS) does **not** support automatic module
+> dependency scanning, so you must use the **Ninja** generator on those platforms.
+> The Visual Studio generator on Windows fully supports C++20 module scanning, so no
+> generator override is needed when using a VS toolchain.
+>
+> Linux/macOS example:
+> ```bash
+> cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+> cmake --build build --config Release
+> ```
 
 Backend/runtime requirements depend on your build options (CUDA/Vulkan/CPU, ONNX Runtime, ICU, etc.).
 

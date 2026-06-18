@@ -184,6 +184,120 @@ COSYVOICE_API void cosyvoice_audio_encoder_get_encoded_data(cosyvoice_audio_enco
 
 返回的 `data` 指针在下一次编码调用之前，或者编码器销毁之前保持有效。
 
+## cosyvoice_audio_decoder_t
+
+### 语法
+
+```c
+typedef struct cosyvoice_audio_decoder* cosyvoice_audio_decoder_t;
+```
+
+### 说明
+
+内存音频解码器的不透明句柄。将编码音频从内存缓冲区解码为单声道 float PCM，无需访问文件系统。
+
+## cosyvoice_audio_decoding_format_supported
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_audio_decoding_format_supported(cosyvoice_audio_encoding_format_t format);
+```
+
+### 说明
+
+检查指定音频格式是否支持解码。
+
+### 参数
+
+- `format`：待测试的格式。
+
+### 返回值
+
+支持解码返回 `true`；否则返回 `false`。
+
+## cosyvoice_audio_decoder_create
+
+### 语法
+
+```c
+COSYVOICE_API cosyvoice_audio_decoder_t cosyvoice_audio_decoder_create(void);
+```
+
+### 说明
+
+创建内存音频解码器。解码器会自动从缓冲区内容中检测音频格式。
+
+### 返回值
+
+成功返回解码器句柄；失败返回 `NULL`。
+
+## cosyvoice_audio_decoder_destroy
+
+### 语法
+
+```c
+COSYVOICE_API void cosyvoice_audio_decoder_destroy(cosyvoice_audio_decoder_t decoder);
+```
+
+### 说明
+
+销毁由 `cosyvoice_audio_decoder_create` 创建的解码器。
+
+### 参数
+
+- `decoder`：解码器句柄。允许传入 `NULL`。
+
+## cosyvoice_audio_decoder_decode
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_audio_decoder_decode(
+    cosyvoice_audio_decoder_t decoder,
+    const void*               input,
+    uint32_t                  input_length
+);
+```
+
+### 说明
+
+将内存缓冲区中的编码音频解码为单声道 float PCM。解码器会自动从缓冲区内容中检测音频格式。解码成功后，调用 `cosyvoice_audio_decoder_get_decoded_data` 获取 PCM 数据。
+
+### 参数
+
+- `decoder`：解码器句柄。
+- `input`：编码音频数据指针。
+- `input_length`：编码数据长度（字节）。
+
+### 返回值
+
+成功返回 `true`；失败返回 `false`。
+
+## cosyvoice_audio_decoder_get_decoded_data
+
+### 语法
+
+```c
+COSYVOICE_API void cosyvoice_audio_decoder_get_decoded_data(
+    cosyvoice_audio_decoder_t decoder,
+    float**                   data,
+    uint32_t*                 length,
+    uint32_t*                 sample_rate
+);
+```
+
+### 说明
+
+获取上一次成功解码得到的 PCM 数据。返回的 `data` 指针在下一次解码调用之前，或者解码器销毁之前保持有效。调用者不得释放该数据。
+
+### 参数
+
+- `decoder`：解码器句柄。
+- `data`：接收单声道 float PCM 缓冲区的指针（`[-1, 1]`）。
+- `length`：接收采样点数。
+- `sample_rate`：接收采样率（Hz）。
+
 ## cosyvoice_audio_load_from_file
 
 ### 语法

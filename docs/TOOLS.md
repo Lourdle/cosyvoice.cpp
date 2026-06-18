@@ -80,9 +80,331 @@ Custom metadata strings are supported with repeated `-c/--custom-string`.
 ## Server Tool (`tools/server`)
 Executable name: `cosyvoice-server`
 
-Provides an OpenAI Speech-compatible API (no WebUI).
+The server runs in **two modes**:
 
-Endpoints:
+| Mode | Selector | Description |
+|---|---|---|
+| **WebUI** (default) | no `--api` flag | Serves a full-featured web interface for model/speaker management, TTS generation, and speaker extraction. |
+| **API** | `--api` flag | Headless OpenAI Speech-compatible API server. |
+
+### Quick Start
+
+#### WebUI mode (default)
+```bash
+# No arguments — WebUI opens with a browser-based model loader
+cosyvoice-server
+
+# With pre-loaded model and optional voices
+cosyvoice-server \
+  --model model.gguf \
+  --voice-prompt alloy=prompt_alloy.gguf \
+  --host 0.0.0.0 \
+  --port 8080
+```
+
+Open http://127.0.0.1:8080 in your browser. When no `--model` is given, the WebUI provides a model loader on first use.
+
+#### API mode
+```bash
+cosyvoice-server \
+  --model model.gguf \
+  --voice-prompt alloy=prompt_alloy.gguf \
+  --served-model-name cosyvoice-3 \
+  --api-key sk-local-demo \
+  --host 0.0.0.0 \
+  --port 8080 \
+  --api
+```
+
+### WebUI Features
+
+The WebUI provides a modern single-page application with the following capabilities:
+
+#### Model Management
+- **Load a model** at runtime: enter a `.gguf` file path, select backend and threads, then click "Load Model".
+- **Unload a model**: releases the model from memory without restarting the server.
+- **Parameter configuration**: KV cache types, buffer policy, max LLM length — configurable before loading.
+- **Dynamic backend selection**: queries available GGML backends at startup (Auto / CPU / CUDA / Vulkan / Metal).
+
+#### Speaker (Voice) Management
+- **Register from `.gguf` prompt speech**: provide a name and path to a pre-extracted `prompt_speech.gguf` file.
+- **Extract from audio file**: upload an audio file (via file selection or drag-and-drop), enter the prompt text, and extract — requires ONNX frontend models.
+- **Record and extract**: record audio directly from the browser microphone, trim the waveform, and extract a voice embedding.
+- **Audio trimmer**: visual waveform with start/end markers for fine-grained selection before extraction.
+- **Save speaker**: export a registered speaker's prompt speech as a `.gguf` file.
+- **Delete speaker**: remove a registered speaker from the server.
+- **persistent state**: speaker names and settings are recovered from `localStorage` across page reloads.
+
+#### TTS Generation
+- **Text input** with configurable voice, mode (zero-shot / instruct / cross-lingual), and output format.
+- **Advanced sampling controls**: temperature, top-k, top-p, repetition window, tau-r, seed (with "lock for session").
+- **Instruct mode**: enter instructions to control speaking style (requires an instruct-capable model).
+- **Audio playback**: generated audio plays directly in the browser with a live waveform visualizer.
+- **Download**: save generated audio as a file.
+- **History panel**: recent generations are cached up to 20 entries; click to replay or re-download.
+- **Responsive output formats**: `wav`, `mp3`, `flac`, `opus`, `aac`, `m4a`, `pcm` (subset depends on FFmpeg runtime).
+- **Theme toggle**: light / dark mode, persisted in `localStorage`.
+
+#### Drag & Drop
+- Audio files can be dragged onto the Extract tab or the speaker registration area.
+
+### Core Options
+
+| Option | Description |
+|--------|-------------|
+| `--help, -h` | Show help message and exit. |
+| `--model, -m <file>` | CosyVoice model file (`.gguf`). |
+| `--backend-path <dir>` | GGML backend directory. If omitted, the server will load the GGML backend from the executable's directory. |
+| `--backend <name>` | GGML backend name (e.g. `cpu`, `cuda0`, `vulkan`, `metal`). Default: `auto` (best available). Mutually exclusive with `--cpu`/`--cuda`. |
+| `--cpu` | Use CPU backend (equivalent to `--backend cpu`). Mutually exclusive with `--cuda`/`--backend`. |
+| `--cuda` | Use CUDA backend (equivalent to `--backend cuda0`). Mutually exclusive with `--cpu`/`--backend`. |
+| `--served-model-name <name>` | Exposed model id used by API/WebUI requests. If omitted, the server will use the model architecture from `cosyvoice_get_architecture()` when available, and fall back to a name derived from the model filename otherwise. |
+| `--host <host>` | Listen host. Default: `127.0.0.1`. |
+| `--port <port>` | Listen port. Default: `8080`. |
+| `--api-key <key>` | Require `Authorization: Bearer <key>` on API and WebUI routes when provided. |
+| `--concurrency <value>` | Concurrent request slots. Default: `1`. (API mode only) |
+
+### Mode Selection
+
+| Option | Description |
+|--------|-------------|
+| `--api` | Enable OpenAI-compatible API mode. Without this flag the server starts in WebUI mode. |
+
+### Voice Mapping
+
+| Option | Description |
+|--------|-------------|
+| `--voice-prompt <voice=prompt_speech.gguf>` | Map one `voice` name to one `prompt_speech` file (repeatable). |
+| `--voice <voice>` | Voice name for single mapping mode. Default: `alloy`. |
+| `--prompt-speech <file>` | Prompt speech file for single mapping mode (combines with `--voice` as shorthand for `--voice-prompt alloy=file`). |
+
+In **API mode**, at least one voice mapping is required. In **WebUI mode**, voice mappings are optional — speakers can be registered at runtime.
+
+### WebUI Frontend Options
+
+These options point to ONNX models for speaker extraction (from audio files or microphone recording):
+
+| Option | Description |
+|--------|-------------|
+| `--frontend-model <dir>` | Frontend ONNX model directory. |
+| `--speech-tokenizer <file>` | Speech tokenizer ONNX model file. |
+| `--campplus <file>` | Campplus ONNX model file. |
+
+If provided at startup, the WebUI pre-populates the frontend configuration fields. The frontend can also be loaded at runtime through the WebUI.
+
+### Runtime Tuning Options
+
+| Option | Description |
+|--------|-------------|
+| `--max-llm-len <value>` | Maximum LLM sequence length. Default: `2048`. |
+| `--threads, -j <value>` | CPU thread count. Default: `0` (hardware concurrency). |
+| `--inference-buffer-policy <shared\|balanced\|dedicated>` | Inference buffer policy. Default: `balanced`. |
+| `--llm-kv-cache-type <f32\|f16\|q8_0\|q5_1\|q5_0\|q4_1\|q4_0\|k=<type>,v=<type>[,fallback=<type>]>` | KV cache type. Single type (e.g. `q8_0`) uses the same format for K and V. Default: `k=q8_0,v=q4_0,fallback=q8_0`. |
+| `--seed <value>` | Default random seed for the built-in sampler (when request does not provide a seed). |
+
+### Sampling Default Overrides (Server-level)
+
+| Option | Description |
+|--------|-------------|
+| `--temperature <value>` | Sampling temperature (`> 0`). |
+| `--top-k <value>` | Sampling top-k (`>= 0`). |
+| `--top-p <value>` | Sampling top-p in `[0, 1]`. |
+| `--win-size <value>` | Repetition window size (`> 0`). |
+| `--tau-r <value>` | Repetition penalty coefficient (`>= 0`). |
+| `--min-token-text-ratio <value>` | Minimum token/text ratio (`>= 0`). |
+| `--max-token-text-ratio <value>` | Maximum token/text ratio (`>= 0`, and not less than `--min-token-text-ratio`). |
+
+### Text Normalization & Splitting
+
+| Option | Description |
+|--------|-------------|
+| `--disable-text-normalization` | Disable ICU text normalization (only when `COSYVOICE_NO_ICU=OFF`). |
+| `--disable-text-splitting` | Disable fragment splitting in TTS context. |
+| `--disable-fast-split` | Disable fast token-based splitting in TTS context. |
+
+### Output Postprocess
+
+| Option | Description |
+|--------|-------------|
+| `--disable-fade-in` | Disable the default 20 ms fade-in on output audio. |
+
+### Log Options
+
+| Option | Description |
+|--------|-------------|
+| `--verbose, -v` | Verbose logs (advanced sampling, memory, full timings). |
+| `--quiet, -q` | Suppress non-error logs. |
+
+---
+
+### WebUI HTTP API Reference
+
+The WebUI exposes the following REST endpoints, consumed by the frontend JavaScript:
+
+#### `GET /`
+
+Serves the WebUI HTML page with server-side injected configuration (available backends, frontend model paths, etc.).
+
+#### `GET /ping`
+
+Simple liveness check. Returns `pong`.
+
+#### `GET /backends`
+
+Returns a JSON array of available GGML backends:
+```json
+[
+  {"name": "auto", "description": "Choose the best available backend automatically"},
+  {"name": "CPU", "description": "...", "has_device_id": false},
+  {"name": "CUDA0", "description": "...", "has_device_id": true}
+]
+```
+
+#### `GET /formats`
+
+Returns a JSON array of supported audio output format names:
+```json
+["wav", "pcm", "mp3", "flac", "opus"]
+```
+The set depends on the linked FFmpeg runtime.
+
+#### `GET /status`
+
+Returns server status as JSON:
+```json
+{
+  "status": "ok",
+  "model_loaded": true,
+  "model": "cosyvoice-3",
+  "sample_rate": 24000,
+  "max_llm_len": 2048,
+  "k_cache_type": "Q8_0",
+  "v_cache_type": "Q4_0",
+  "buffer_policy": "balanced",
+  "model_arch": "cosyvoice3-2512",
+  "frontend_available": false,
+  "speakers": ["alloy", "nova"]
+}
+```
+
+#### `GET /speaker`
+
+Returns a JSON array of registered speaker names:
+```json
+["alloy", "nova"]
+```
+
+#### `POST /speaker` — Register a speaker
+
+Two content types are supported:
+
+**JSON** (register from `.gguf` prompt speech):
+```json
+{"type": "gguf", "name": "alloy", "path": "/data/prompts/alloy.gguf"}
+```
+
+**Multipart** (extract from audio):
+```
+POST /speaker?type=extract
+Content-Type: multipart/form-data
+Fields: name, text, audio (file)
+```
+
+Returns `200` on success, `409` if name exists, `503` if no model loaded.
+
+#### `DELETE /speaker/:name`
+
+Unregisters the named speaker. Returns `200` on success, `404` if not found.
+
+#### `POST /speaker/save`
+
+Exports a speaker's prompt speech to a `.gguf` file on the server filesystem.
+
+JSON body:
+```json
+{"name": "alloy", "path": "/data/exports/alloy_export.gguf"}
+```
+
+#### `POST /tts`
+
+Generates speech. JSON body:
+
+```json
+{
+  "text": "Hello from CosyVoice",
+  "voice": "alloy",
+  "mode": "zero-shot",
+  "response_format": "wav",
+  "speed": 1.0,
+  "seed": 12345,
+  "temperature": 0.8,
+  "top_k": 32,
+  "top_p": 0.9,
+  "win_size": 10,
+  "tau_r": 0.2,
+  "min_token_text_ratio": 1.0,
+  "max_token_text_ratio": 5.0,
+  "instruction": "Speak with a warm and calm style.",
+  "fadein": true
+}
+```
+
+Returns raw audio bytes with the appropriate `Content-Type` header (`audio/wav`, `audio/mpeg`, etc.).
+
+#### `GET /model/defaults`
+
+Returns default model parameters as JSON:
+```json
+{
+  "max_llm_len": 2048,
+  "temperature": 1.0,
+  "top_k": 50,
+  "top_p": 0.9,
+  ...
+}
+```
+
+#### `POST /model/load`
+
+Loads a model into the server at runtime. JSON body:
+```json
+{
+  "model_path": "/data/models/cosyvoice-3.gguf",
+  "backend": "auto",
+  "n_threads": 8,
+  "max_llm_len": 2048,
+  "buffer_policy": "balanced",
+  "k_cache_type": "q8_0",
+  "v_cache_type": "q4_0"
+}
+```
+
+#### `POST /model/unload`
+
+Unloads the current model. JSON body not required.
+
+#### `GET /frontend/model`
+
+Returns the current frontend ONNX model configuration as JSON.
+
+#### `POST /frontend/model/load`
+
+Loads frontend ONNX models at runtime. JSON body:
+```json
+{
+  "speech_tokenizer": "/data/models/speech_tokenizer.onnx",
+  "campplus": "/data/models/campplus.onnx"
+}
+```
+
+#### `POST /frontend/model/unload`
+
+Unloads frontend ONNX models.
+
+---
+
+### API Mode Endpoints (OpenAI-compatible)
+
 - `GET /healthz`
 - `GET /v1/models`
 - `POST /v1/audio/speech`
@@ -91,57 +413,7 @@ Authentication behavior:
 - If `--api-key` is provided: requests must include `Authorization: Bearer <api_key>`.
 - If `--api-key` is omitted: authentication is disabled.
 
-Core startup options:
-- `--model <file.gguf>`: required model file.
-- `--backend-path <dir>`: GGML backend directory. If omitted, the server will load the GGML backend from the executable's directory.
-- `--backend <name>`: GGML backend name (e.g. `cpu`, `cuda0`, `vulkan`, `metal`). Default: `auto` (best available). Mutually exclusive with `--cpu`/`--cuda`.
-- `--cpu`: Use CPU backend (equivalent to `--backend cpu`). Mutually exclusive with `--cuda`/`--backend`.
-- `--cuda`: Use CUDA backend (equivalent to `--backend cuda0`). Mutually exclusive with `--cpu`/`--backend`.
-- `--served-model-name <name>`: exposed model id used by API requests. If omitted, the server will use the model architecture from `cosyvoice_get_architecture()` when available, and fall back to a name derived from the model filename otherwise.
-- `--voice-prompt <voice=prompt_speech.gguf>`: map one `voice` name to one `prompt_speech` file (repeatable).
-- `--host <host>`, `--port <port>`: bind address. Defaults: `127.0.0.1:8080`.
-- `--concurrency <value>`: concurrent request slots. Default: `1`.
-
-Runtime tuning options:
-- `--inference-buffer-policy <shared|balanced|dedicated>`: inference buffer policy. Default: `balanced`.
-- `--max-llm-len <value>`: maximum LLM sequence length. Default: `2048`.
-- `--threads, -j <value>`: CPU thread count. Default: `0` (hardware concurrency).
-- `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>`: default `k=q8_0,v=q4_0,fallback=q8_0`. Use separate K/V types (e.g. `k=q8_0,v=q4_0`) or a single type (e.g. `q8_0`) for both.
-- `--seed <value>`: default per-request seed (used when request does not provide extension field `seed`).
-
-TTS postprocess options:
-- `--disable-fade-in`: disable the default 20 ms fade-in applied to generated output.
-
-Sampling default overrides (server-level):
-- `--temperature <value>` (`> 0`)
-- `--top-k <value>` (`>= 0`)
-- `--top-p <value>` (`[0, 1]`)
-- `--win-size <value>` (`> 0`)
-- `--tau-r <value>` (`>= 0`)
-- `--min-token-text-ratio <value>` (`>= 0`)
-- `--max-token-text-ratio <value>` (`>= 0`, and not less than `min_token_text_ratio`)
-
-Single-voice shortcut:
-```bash
-cosyvoice-server \
-  --model model.gguf \
-  --voice alloy \
-  --prompt-speech prompt_speech.gguf
-```
-
-Multi-voice startup:
-```bash
-cosyvoice-server \
-  --model model.gguf \
-  --served-model-name cosyvoice-3 \
-  --voice-prompt alloy=prompt_alloy.gguf \
-  --voice-prompt nova=prompt_nova.gguf \
-  --api-key sk-local-demo \
-  --host 0.0.0.0 \
-  --port 8080
-```
-
-Speech request behavior (`POST /v1/audio/speech`):
+#### Speech request behavior (`POST /v1/audio/speech`):
 - Required fields: `model`, `input`, `voice`.
 - Optional standard fields: `instructions`, `speed`, `response_format`.
 - Optional extension fields: `seed`, `temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, `min_token_text_ratio`, `max_token_text_ratio`.
@@ -215,17 +487,27 @@ Validation rules for these extensions:
 
 If validation fails, the server returns OpenAI-style `400` with an error object.
 
-Script helper:
-- `tools/server/synthesize_via_api.py` uses OpenAI SDK directly and maps extension CLI flags to `extra_body` automatically.
+### Request/Response Format Handling
 
-`synthesize_via_api.py` usage:
-- This script is meant for public use (quick smoke tests and local integration checks), not just internal testing.
-- Dependency:
+Both modes (WebUI and API) share the same audio encoding logic:
 
-```bash
-pip install openai
-```
+| Format | Content-Type | Backend |
+|--------|-------------|---------|
+| `wav` | `audio/wav` | Audio encoder or internal PCM16 WAV fallback |
+| `pcm` | `audio/L16` | Raw PCM16 little-endian bytes |
+| `mp3` | `audio/mpeg` | FFmpeg encoder (runtime-dependent) |
+| `flac` | `audio/flac` | FFmpeg encoder (runtime-dependent) |
+| `opus` | `audio/opus` | FFmpeg encoder (runtime-dependent) |
+| `aac` | `audio/aac` | FFmpeg encoder (runtime-dependent) |
+| `m4a` | `audio/mp4` | FFmpeg encoder (runtime-dependent) |
 
+### Helper Scripts
+
+#### `tools/server/synthesize_via_api.py`
+
+Uses OpenAI SDK directly and maps extension CLI flags to `extra_body` automatically.
+
+- Dependency: `pip install openai`
 - Standard request example:
 
 ```bash
@@ -253,20 +535,6 @@ python tools/server/synthesize_via_api.py \
 
 When `--requests > 1`, outputs are saved as `out_001.wav`, `out_002.wav`, ...
 
-Concurrent stress test helper:
-- `tools/server/batch_tts_stress_test.py` sends multiple concurrent requests and keeps all generated audio files.
-
-```bash
-python tools/server/batch_tts_stress_test.py \
-  --base-url http://127.0.0.1:8080 \
-  --model cosyvoice-3 \
-  --workers 4 \
-  --repeat 8 \
-  --out-dir build/bin/Release/server_batch
-```
-
-This script prints per-request output file paths so you can listen and compare results.
-
 - With non-standard extension fields:
 
 ```bash
@@ -285,6 +553,21 @@ python tools/server/synthesize_via_api.py \
   --min-token-text-ratio 1.0 \
   --max-token-text-ratio 5.0
 ```
+
+#### `tools/server/batch_tts_stress_test.py`
+
+Concurrent stress test helper that sends multiple concurrent requests and keeps all generated audio files.
+
+```bash
+python tools/server/batch_tts_stress_test.py \
+  --base-url http://127.0.0.1:8080 \
+  --model cosyvoice-3 \
+  --workers 4 \
+  --repeat 8 \
+  --out-dir build/bin/Release/server_batch
+```
+
+This script prints per-request output file paths so you can listen and compare results.
 
 ## CLI Tool (`tools/cli`)
 Executable name: `cosyvoice-cli`

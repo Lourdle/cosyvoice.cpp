@@ -80,9 +80,331 @@ quantize -f model.gguf -o model-q4_k_s.gguf -t Q4_K -M tools/quantize/profiles/c
 ## Server 工具（`tools/server`）
 可执行文件名：`cosyvoice-server`
 
-提供 OpenAI Speech 兼容 API（不包含 WebUI）。
+服务端有**两种运行模式**：
 
-接口：
+| 模式 | 选择方式 | 说明 |
+|------|----------|------|
+| **WebUI**（默认） | 不加 `--api` | 提供完整的 Web 界面，支持模型/音色管理、TTS 生成、音色提取等功能。 |
+| **API** | 加 `--api` | 无界面 OpenAI Speech 兼容 API 服务。 |
+
+### 快速开始
+
+#### WebUI 模式（默认）
+```bash
+# 不带参数直接启动——WebUI 会在网页端提供模型加载功能
+cosyvoice-server
+
+# 预加载模型和音色
+cosyvoice-server \
+  --model model.gguf \
+  --voice-prompt alloy=prompt_alloy.gguf \
+  --host 0.0.0.0 \
+  --port 8080
+```
+
+在浏览器中打开 http://127.0.0.1:8080。如果未指定 `--model`，WebUI 会在首页提供模型加载面板。
+
+#### API 模式
+```bash
+cosyvoice-server \
+  --model model.gguf \
+  --voice-prompt alloy=prompt_alloy.gguf \
+  --served-model-name cosyvoice-3 \
+  --api-key sk-local-demo \
+  --host 0.0.0.0 \
+  --port 8080 \
+  --api
+```
+
+### WebUI 功能特性
+
+WebUI 是一个现代化的单页应用，提供以下功能：
+
+#### 模型管理
+- **运行时加载模型**：输入 `.gguf` 文件路径，选择后端和线程数，点击「Load Model」加载。
+- **卸载模型**：释放模型内存，无需重启服务端。
+- **参数配置**：KV cache 类型、buffer 策略、最大 LLM 长度——可在加载前配置。
+- **动态后端选择**：启动时自动探测可用的 GGML 后端（Auto / CPU / CUDA / Vulkan / Metal）。
+
+#### 音色管理
+- **从 `.gguf` prompt speech 注册**：输入名称和预提取的 `prompt_speech.gguf` 文件路径。
+- **从音频文件提取**：上传音频文件（文件选择或拖拽），输入参考文本，提取音色——需要 ONNX 前端模型。
+- **麦克风录音提取**：在浏览器中直接录音，可视化波形裁剪后提取音色嵌入。
+- **音频裁剪器**：可视化波形，支持起点/终点标记进行精确裁剪。
+- **保存音色**：将已注册音色的 prompt speech 导出为 `.gguf` 文件。
+- **删除音色**：从服务端移除已注册的音色。
+- **持久化状态**：音色名称和参数通过 `localStorage` 在页面刷新间保持。
+
+#### TTS 生成
+- **文本输入**：可选择音色、模式（zero-shot / instruct / cross-lingual）和输出格式。
+- **高级采样控制**：temperature、top-k、top-p、重复惩罚窗口、tau-r、随机种子（支持锁定）。
+- **Instruct 模式**：输入指令控制说话风格（需要模型支持 instruct）。
+- **音频播放**：生成的音频直接在浏览器中播放，配有波形可视化。
+- **下载**：保存生成的音频文件。
+- **历史记录**：最近最多 20 条生成记录，可点击回放或重新下载。
+- **多格式输出**：`wav`、`mp3`、`flac`、`opus`、`aac`、`m4a`、`pcm`（可用格式取决于 FFmpeg 运行时）。
+- **主题切换**：亮色/暗色模式，通过 `localStorage` 持久化。
+
+#### 拖拽支持
+- 音频文件可直接拖入提取标签页或音色注册区域。
+
+### 核心启动参数
+
+| 参数 | 说明 |
+|------|------|
+| `--help, -h` | 显示帮助并退出。 |
+| `--model, -m <file>` | CosyVoice 模型文件（`.gguf`）。 |
+| `--backend-path <dir>` | GGML backend 所在目录。如果不指定，默认加载程序所在目录的 GGML 后端。 |
+| `--backend <name>` | GGML 后端名称（如 `cpu`、`cuda0`、`vulkan`、`metal`）。默认 `auto`（自动选择最佳后端）。与 `--cpu`/`--cuda` 互斥。 |
+| `--cpu` | 使用 CPU 后端（等价于 `--backend cpu`）。与 `--cuda`/`--backend` 互斥。 |
+| `--cuda` | 使用 CUDA 后端（等价于 `--backend cuda0`）。与 `--cpu`/`--backend` 互斥。 |
+| `--served-model-name <name>` | API/WebUI 对外模型名。如果省略，优先使用 `cosyvoice_get_architecture()` 返回的模型架构名；否则从文件名推导。 |
+| `--host <host>` | 监听地址，默认 `127.0.0.1`。 |
+| `--port <port>` | 监听端口，默认 `8080`。 |
+| `--api-key <key>` | 传入时要求请求包含 `Authorization: Bearer <key>`。 |
+
+### 模式选择
+
+| 参数 | 说明 |
+|------|------|
+| `--api` | 启用 OpenAI 兼容 API 模式。不加此标志默认为 WebUI 模式。 |
+
+### 音色映射
+
+| 参数 | 说明 |
+|------|------|
+| `--voice-prompt <voice=prompt_speech.gguf>` | 将一个 `voice` 名映射到一个 `prompt_speech` 文件（可重复传入）。 |
+| `--voice <voice>` | 单音色模式的音色名，默认 `alloy`。 |
+| `--prompt-speech <file>` | 单音色模式的 prompt speech 文件（与 `--voice` 配合使用，等价于 `--voice-prompt alloy=file`）。 |
+
+**API 模式**下至少需要一个音色映射。**WebUI 模式**下音色映射可选——可以在运行时通过界面注册。
+
+### WebUI 前端模型参数
+
+这些参数指向 ONNX 模型文件，用于音色提取（从音频文件或麦克风录音）：
+
+| 参数 | 说明 |
+|------|------|
+| `--frontend-model <dir>` | 前端 ONNX 模型目录。 |
+| `--speech-tokenizer <file>` | Speech tokenizer ONNX 模型文件。 |
+| `--campplus <file>` | Campplus ONNX 模型文件。 |
+
+如果在启动时提供，WebUI 会自动填入前端配置字段。前端也可以在运行时通过 WebUI 界面加载。
+
+### 运行时调优参数
+
+| 参数 | 说明 |
+|------|------|
+| `--max-llm-len <value>` | LLM 最大序列长度，默认 `2048`。 |
+| `--threads, -j <value>` | CPU 线程数，默认 `0`（硬件并发数）。 |
+| `--concurrency, -c <value>` | 并发请求槽数，默认 `1`（仅 API 模式）。 |
+| `--inference-buffer-policy <shared\|balanced\|dedicated>` | 推理缓冲区策略，默认 `balanced`。 |
+| `--llm-kv-cache-type <f32\|f16\|q8_0\|q5_1\|q5_0\|q4_1\|q4_0\|k=<type>,v=<type>[,fallback=<type>]>` | KV cache 类型。单一类型（如 `q8_0`）为 K 和 V 使用相同格式。默认 `k=q8_0,v=q4_0,fallback=q8_0`。 |
+| `--seed <value>` | 默认随机种子（当请求未传 seed 时使用）。 |
+
+### 采样默认值覆盖（服务级）
+
+| 参数 | 说明 |
+|------|------|
+| `--temperature <value>` | 采样温度（`> 0`）。 |
+| `--top-k <value>` | 采样 top-k（`>= 0`）。 |
+| `--top-p <value>` | 采样 top-p（`[0, 1]`）。 |
+| `--win-size <value>` | 重复惩罚窗口大小（`> 0`）。 |
+| `--tau-r <value>` | 重复惩罚系数（`>= 0`）。 |
+| `--min-token-text-ratio <value>` | 最小 token/text 比率（`>= 0`）。 |
+| `--max-token-text-ratio <value>` | 最大 token/text 比率（`>= 0`，且不小于 `--min-token-text-ratio`）。 |
+
+### 文本规范化与分片
+
+| 参数 | 说明 |
+|------|------|
+| `--disable-text-normalization` | 关闭 ICU 文本规范化（仅 `COSYVOICE_NO_ICU=OFF` 时可用）。 |
+| `--disable-text-splitting` | 关闭 TTS 中的文本分片。 |
+| `--disable-fast-split` | 关闭基于 token 的快速分片。 |
+
+### 输出后处理
+
+| 参数 | 说明 |
+|------|------|
+| `--disable-fade-in` | 关闭默认的 20 ms 输出淡入。 |
+
+### 日志参数
+
+| 参数 | 说明 |
+|------|------|
+| `--verbose, -v` | 详细日志（高级采样、内存、完整耗时）。 |
+| `--quiet, -q` | 抑制非错误日志。 |
+
+---
+
+### WebUI HTTP API 参考
+
+WebUI 暴露以下 REST 接口，由前端 JavaScript 调用：
+
+#### `GET /`
+
+返回 WebUI HTML 页面，包含服务端注入的配置（可用后端、前端模型路径等）。
+
+#### `GET /ping`
+
+简单存活检测。返回 `pong`。
+
+#### `GET /backends`
+
+返回可用 GGML 后端的 JSON 数组：
+```json
+[
+  {“name”: “auto”, “description”: “自动选择最佳后端”},
+  {“name”: “CPU”, “description”: “…”, “has_device_id”: false},
+  {“name”: “CUDA0”, “description”: “…”, “has_device_id”: true}
+]
+```
+
+#### `GET /formats`
+
+返回支持的音频输出格式名称 JSON 数组：
+```json
+[“wav”, “pcm”, “mp3”, “flac”, “opus”]
+```
+具体可用格式取决于链接的 FFmpeg 运行时。
+
+#### `GET /status`
+
+返回服务端状态 JSON：
+```json
+{
+  “status”: “ok”,
+  “model_loaded”: true,
+  “model”: “cosyvoice-3”,
+  “sample_rate”: 24000,
+  “max_llm_len”: 2048,
+  “k_cache_type”: “Q8_0”,
+  “v_cache_type”: “Q4_0”,
+  “buffer_policy”: “balanced”,
+  “model_arch”: “cosyvoice3-2512”,
+  “frontend_available”: false,
+  “speakers”: [“alloy”, “nova”]
+}
+```
+
+#### `GET /speaker`
+
+返回已注册音色名称的 JSON 数组：
+```json
+[“alloy”, “nova”]
+```
+
+#### `POST /speaker` — 注册音色
+
+支持两种 Content-Type：
+
+**JSON**（从 `.gguf` prompt speech 注册）：
+```json
+{“type”: “gguf”, “name”: “alloy”, “path”: “/data/prompts/alloy.gguf”}
+```
+
+**Multipart**（从音频提取）：
+```
+POST /speaker?type=extract
+Content-Type: multipart/form-data
+字段: name, text, audio (文件)
+```
+
+成功返回 `200`，名称已存在返回 `409`，未加载模型返回 `503`。
+
+#### `DELETE /speaker/:name`
+
+注销指定音色。成功返回 `200`，音色不存在返回 `404`。
+
+#### `POST /speaker/save`
+
+将音色的 prompt speech 导出为 `.gguf` 文件到服务端磁盘。
+
+JSON 请求体：
+```json
+{“name”: “alloy”, “path”: “/data/exports/alloy_export.gguf”}
+```
+
+#### `POST /tts`
+
+生成语音。JSON 请求体：
+
+```json
+{
+  “text”: “你好，这里是 CosyVoice”,
+  “voice”: “alloy”,
+  “mode”: “zero-shot”,
+  “response_format”: “wav”,
+  “speed”: 1.0,
+  “seed”: 12345,
+  “temperature”: 0.8,
+  “top_k”: 32,
+  “top_p”: 0.9,
+  “win_size”: 10,
+  “tau_r”: 0.2,
+  “min_token_text_ratio”: 1.0,
+  “max_token_text_ratio”: 5.0,
+  “instruction”: “语气温和、平稳。”,
+  “fadein”: true
+}
+```
+
+返回原始音频字节，带对应 `Content-Type` 头（`audio/wav`、`audio/mpeg` 等）。
+
+#### `GET /model/defaults`
+
+返回模型默认参数 JSON：
+```json
+{
+  “max_llm_len”: 2048,
+  “temperature”: 1.0,
+  “top_k”: 50,
+  “top_p”: 0.9,
+  …
+}
+```
+
+#### `POST /model/load`
+
+运行时加载模型。JSON 请求体：
+```json
+{
+  “model_path”: “/data/models/cosyvoice-3.gguf”,
+  “backend”: “auto”,
+  “n_threads”: 8,
+  “max_llm_len”: 2048,
+  “buffer_policy”: “balanced”,
+  “k_cache_type”: “q8_0”,
+  “v_cache_type”: “q4_0”
+}
+```
+
+#### `POST /model/unload`
+
+卸载当前模型（无需 JSON 请求体）。
+
+#### `GET /frontend/model`
+
+返回当前前端 ONNX 模型配置 JSON。
+
+#### `POST /frontend/model/load`
+
+运行时加载前端 ONNX 模型。JSON 请求体：
+```json
+{
+  “speech_tokenizer”: “/data/models/speech_tokenizer.onnx”,
+  “campplus”: “/data/models/campplus.onnx”
+}
+```
+
+#### `POST /frontend/model/unload`
+
+卸载前端 ONNX 模型。
+
+---
+
+### API 模式端点（OpenAI 兼容）
+
 - `GET /healthz`
 - `GET /v1/models`
 - `POST /v1/audio/speech`
@@ -91,119 +413,64 @@ quantize -f model.gguf -o model-q4_k_s.gguf -t Q4_K -M tools/quantize/profiles/c
 - 传入 `--api-key`：请求必须包含 `Authorization: Bearer <api_key>`。
 - 不传 `--api-key`：不做鉴权。
 
-核心启动参数：
-- `--model <file.gguf>`：必填模型文件。
-- `--backend-path <dir>`：GGML backend 所在目录。如果不指定此选项，将默认加载程序所在目录的 GGML 后端。
-- `--backend <name>`：GGML 后端名称（如 `cpu`、`cuda0`、`vulkan`、`metal`）。默认 `auto`（自动选择最佳后端）。与 `--cpu`/`--cuda` 互斥。
-- `--cpu`：使用 CPU 后端（等价于 `--backend cpu`）。与 `--cuda`/`--backend` 互斥。
-- `--cuda`：使用 CUDA 后端（等价于 `--backend cuda0`）。与 `--cpu`/`--backend` 互斥。
-- `--served-model-name <name>`：API 对外模型名（请求中的 `model` 必须匹配）。如果省略，服务器会优先使用 `cosyvoice_get_architecture()` 返回的模型架构名；如果没有可用架构名，则回退为由模型文件名推导的名称。
-- `--voice-prompt <voice=prompt_speech.gguf>`：将一个 `voice` 名映射到一个 `prompt_speech` 文件（可重复传入）。
-- `--host <host>`、`--port <port>`：监听地址，默认 `127.0.0.1:8080`。
-- `--concurrency <value>`：并发请求槽数，默认 `1`。
-
-运行时调优参数：
-- `--inference-buffer-policy <shared|balanced|dedicated>`：推理缓冲区策略，默认 `balanced`。
-- `--max-llm-len <value>`：LLM 最大序列长度，默认 `2048`。
-- `--threads, -j <value>`：CPU 线程数，默认 `0`（硬件并发）。
-- `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>`：默认 `k=q8_0,v=q4_0,fallback=q8_0`。可使用独立的 K/V 类型（如 `k=q8_0,v=q4_0`）或单一类型（如 `q8_0`）统一指定。
-- `--seed <value>`：请求级默认 seed（当请求扩展字段未传 `seed` 时使用）。
-
-TTS 后处理参数：
-- `--disable-fade-in`：关闭默认的 20 ms 输出淡入。
-
-采样默认值覆盖（服务级）：
-- `--temperature <value>`（`> 0`）
-- `--top-k <value>`（`>= 0`）
-- `--top-p <value>`（`[0, 1]`）
-- `--win-size <value>`（`> 0`）
-- `--tau-r <value>`（`>= 0`）
-- `--min-token-text-ratio <value>`（`>= 0`）
-- `--max-token-text-ratio <value>`（`>= 0` 且不小于 `min_token_text_ratio`）
-
-单音色快捷启动：
-```bash
-cosyvoice-server \
-  --model model.gguf \
-  --voice alloy \
-  --prompt-speech prompt_speech.gguf
-```
-
-多音色启动示例：
-```bash
-cosyvoice-server \
-  --model model.gguf \
-  --served-model-name cosyvoice-3 \
-  --voice-prompt alloy=prompt_alloy.gguf \
-  --voice-prompt nova=prompt_nova.gguf \
-  --api-key sk-local-demo \
-  --host 0.0.0.0 \
-  --port 8080
-```
-
-语音请求行为（`POST /v1/audio/speech`）：
+#### 语音请求行为（`POST /v1/audio/speech`）：
 - 必填字段：`model`、`input`、`voice`。
 - 标准可选字段：`instructions`、`speed`、`response_format`。
 - 扩展可选字段：`seed`、`temperature`、`top_k`、`top_p`、`win_size`、`tau_r`、`min_token_text_ratio`、`max_token_text_ratio`。
-- seed 优先级：请求扩展字段 `seed` > 服务端 `--seed` > 每次请求随机 seed。
+- seed 优先级：请求扩展字段 `seed` > 服务端 `--seed` > 随机 seed。
 - 模式自动判定：`instructions` 非空时走 instruct；否则走 zero-shot。
-- 支持 `response_format`：`wav`、`pcm`，以及 FFmpeg 后端提供的 `mp3`、`aac`、`flac`、`m4a`、`opus`（前提是当前链接的 FFmpeg 运行时确实提供对应编码器）。服务启动时会在帮助文本中打印运行时实际支持的子集。
-- `m4a` 是本项目提供的便捷扩展，不属于 OpenAI Speech 标准。
-- `wav` 在正常构建中通过音频编码器生成；当关闭音频辅助 API 时，会回退到内部 PCM16 WAV 实现。
+- 支持 `response_format`：`wav`、`pcm`，以及 FFmpeg 后端提供的 `mp3`、`aac`、`flac`、`m4a`、`opus`。
+- `m4a` 是本项目的便捷扩展，不属于 OpenAI Speech 标准。
+- `wav` 通过音频编码器生成；关闭音频辅助 API 时回退到内部 PCM16 WAV 实现。
 - `pcm` 返回原始 16 位小端单声道 PCM 负载。
-- 如果客户端请求了运行时不可用的格式，服务会返回说明该格式不受支持的错误；客户端应回退到 `wav` 或 `pcm`。
+- 格式不可用时返回错误。
 
 OpenAI Python 客户端示例：
 ```python
 from openai import OpenAI
 
-client = OpenAI(base_url="http://127.0.0.1:8080/v1", api_key="sk-local-demo")
+client = OpenAI(base_url=”http://127.0.0.1:8080/v1”, api_key=”sk-local-demo”)
 
 audio = client.audio.speech.create(
-    model="cosyvoice-3",
-    voice="alloy",
-    input="你好，这里是 cosyvoice-server",
-    instructions="语气温和、平稳。",
-    response_format="mp3",
+    model=”cosyvoice-3”,
+    voice=”alloy”,
+    input=”你好，这里是 cosyvoice-server”,
+    instructions=”语气温和、平稳。”,
+    response_format=”mp3”,
 )
 
-with open("out.mp3", "wb") as f:
+with open(“out.mp3”, “wb”) as f:
     f.write(audio.read())
 ```
 
-非标准扩展字段（OpenAI SDK `extra_body`）
-- 标准 OpenAI Speech 请求通常使用：`model`、`input`、`voice`，以及可选 `instructions/speed/response_format`。
-- `cosyvoice-server` 额外支持“请求级采样扩展字段”：
-  - `seed`、`temperature`、`top_k`、`top_p`、`win_size`、`tau_r`、`min_token_text_ratio`、`max_token_text_ratio`
-- 在 OpenAI Python SDK 中，通过 `extra_body` 传递这些扩展字段：
-
+非标准扩展字段（OpenAI SDK `extra_body`）：
 ```python
 from openai import OpenAI
 
-client = OpenAI(base_url="http://127.0.0.1:8080/v1", api_key="sk-local-demo")
+client = OpenAI(base_url=”http://127.0.0.1:8080/v1”, api_key=”sk-local-demo”)
 
 audio = client.audio.speech.create(
-    model="cosyvoice-3",
-    voice="alloy",
-    input="你好，这里是 cosyvoice-server",
-    response_format="wav",
+    model=”cosyvoice-3”,
+    voice=”alloy”,
+    input=”你好，这里是 cosyvoice-server”,
+    response_format=”wav”,
     extra_body={
-        "seed": 123,
-        "temperature": 0.8,
-        "top_k": 32,
-        "top_p": 0.9,
-        "win_size": 10,
-        "tau_r": 0.2,
-        "min_token_text_ratio": 1.0,
-        "max_token_text_ratio": 5.0,
+        “seed”: 123,
+        “temperature”: 0.8,
+        “top_k”: 32,
+        “top_p”: 0.9,
+        “win_size”: 10,
+        “tau_r”: 0.2,
+        “min_token_text_ratio”: 1.0,
+        “max_token_text_ratio”: 5.0,
     },
 )
 
-with open("out.wav", "wb") as f:
+with open(“out.wav”, “wb”) as f:
     f.write(audio.read())
 ```
 
-这些扩展字段的校验规则：
+校验规则：
 - `seed`：uint32（`[0, 4294967295]`）
 - `temperature`：`> 0`
 - `top_k`：`>= 0`
@@ -211,70 +478,62 @@ with open("out.wav", "wb") as f:
 - `win_size`：`> 0`
 - `tau_r`：`>= 0`
 - `min_token_text_ratio`：`>= 0`
-- `max_token_text_ratio`：`>= 0`，且在同时设置时必须 `>= min_token_text_ratio`
+- `max_token_text_ratio`：`>= 0` 且同时设置时 `>= min_token_text_ratio`
 
-校验失败时，服务端会返回 OpenAI 风格 `400` 错误对象。
+校验失败时返回 OpenAI 风格 `400` 错误对象。
 
-脚本辅助：
-- `tools/server/synthesize_via_api.py` 已改为直接使用 OpenAI SDK，并会把扩展参数自动放入 `extra_body`。
+### 请求/响应格式处理
 
-`synthesize_via_api.py` 使用说明：
-- 该脚本建议对外发布，适合作为快速联调和本地冒烟测试工具，不仅是内部临时脚本。
-- 依赖安装：
+两种模式（WebUI 和 API）共享相同的音频编码逻辑：
 
-```bash
-pip install openai
-```
+| 格式 | Content-Type | 后端 |
+|------|-------------|------|
+| `wav` | `audio/wav` | 音频编码器或内部 PCM16 WAV 回退 |
+| `pcm` | `audio/L16` | 原始 PCM16 小端字节 |
+| `mp3` | `audio/mpeg` | FFmpeg 编码器（运行时决定） |
+| `flac` | `audio/flac` | FFmpeg 编码器（运行时决定） |
+| `opus` | `audio/opus` | FFmpeg 编码器（运行时决定） |
+| `aac` | `audio/aac` | FFmpeg 编码器（运行时决定） |
+| `m4a` | `audio/mp4` | FFmpeg 编码器（运行时决定） |
 
-- 标准请求示例：
+### 辅助脚本
 
+#### `tools/server/synthesize_via_api.py`
+
+直接使用 OpenAI SDK，自动将扩展参数放入 `extra_body`。
+
+依赖安装：`pip install openai`
+
+标准请求示例：
 ```bash
 python tools/server/synthesize_via_api.py \
   --base-url http://127.0.0.1:8080 \
   --model cosyvoice-3 \
   --voice alloy \
-  --text "你好，这里是 API" \
+  --text “你好，这里是 API” \
   --response-format wav \
   --output out.wav
 ```
 
-- 批量生成（单进程顺序请求）：
-
+批量生成（单进程顺序请求）：
 ```bash
 python tools/server/synthesize_via_api.py \
   --base-url http://127.0.0.1:8080 \
   --model cosyvoice-3 \
   --voice alloy \
-  --text "批量请求示例" \
+  --text “批量请求示例” \
   --response-format wav \
   --output samples/out.wav \
   --requests 5
 ```
 
-当 `--requests > 1` 时，会自动生成 `out_001.wav`、`out_002.wav` ...
-
-并发压测脚本：
-- `tools/server/batch_tts_stress_test.py` 会并发发送多次请求，并保留全部输出音频文件。
-
-```bash
-python tools/server/batch_tts_stress_test.py \
-  --base-url http://127.0.0.1:8080 \
-  --model cosyvoice-3 \
-  --workers 4 \
-  --repeat 8 \
-  --out-dir build/bin/Release/server_batch
-```
-
-脚本会输出每个请求对应的音频文件路径，便于你逐个试听和对比。
-
-- 带非标准扩展字段示例：
-
+带扩展字段示例：
 ```bash
 python tools/server/synthesize_via_api.py \
   --base-url http://127.0.0.1:8080 \
   --model cosyvoice-3 \
   --voice alloy \
-  --text "带采样扩展参数的请求" \
+  --text “带采样扩展参数的请求” \
   --response-format wav \
   --seed 123 \
   --temperature 0.8 \
@@ -285,6 +544,21 @@ python tools/server/synthesize_via_api.py \
   --min-token-text-ratio 1.0 \
   --max-token-text-ratio 5.0
 ```
+
+#### `tools/server/batch_tts_stress_test.py`
+
+并发压测脚本，会并发发送多次请求并保留全部输出音频文件。
+
+```bash
+python tools/server/batch_tts_stress_test.py \
+  --base-url http://127.0.0.1:8080 \
+  --model cosyvoice-3 \
+  --workers 4 \
+  --repeat 8 \
+  --out-dir build/bin/Release/server_batch
+```
+
+脚本会输出每个请求对应的音频文件路径。
 
 ## CLI 工具（`tools/cli`）
 可执行文件名：`cosyvoice-cli`

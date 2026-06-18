@@ -8,7 +8,7 @@ Install Termux on your Android device and open it. Install the required tools an
 
 ```bash
 pkg update
-apt install clang cmake make simde
+apt install clang cmake ninja git simde
 ```
 
 For the FFmpeg backend, also run `apt install ffmpeg`. For ICU support, also run `apt install libicu`. For the frontend, install `apt install onnxruntime`, and CMake will automatically find the system version via `find_package`.
@@ -46,7 +46,7 @@ cmake -S /path/to/cosyvoice.cpp -B build-termux-opencl \
   -DCMAKE_INCLUDE_PATH=/path/to/OpenCL-Headers \
   -DGGML_OPENCL=ON \
   -DGGML_OPENCL_USE_ADRENO_KERNELS=OFF
-make -C build-termux-opencl -j8
+ninja -C build-termux-opencl
 ```
 
 > `GGML_OPENCL_USE_ADRENO_KERNELS` must be `OFF` even when targeting Adreno GPUs, because the internal optimized kernels have specific tensor shape requirements that CosyVoice does not satisfy.
