@@ -19,8 +19,10 @@
     #include "cosyvoice-frontend.h"
 #endif
 
+#ifndef COSYVOICE_USE_PCH
 import nlohmann_json;
 import httplib;
+#endif
 
 // ---------------------------------------------------------------------------
 // Helpers

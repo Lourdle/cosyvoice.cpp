@@ -5,7 +5,9 @@
 #include <cstdarg>
 #include <cstdio>
 
+#ifndef COSYVOICE_USE_PCH
 import httplib;
+#endif
 
 // ---------------------------------------------------------------------------
 // Level-gated logging
@@ -126,7 +128,7 @@ bool apply_generation_overrides(
 // Request logging
 // ---------------------------------------------------------------------------
 
-request_log_context make_request_log_context(const httplib::Request& req, const char* endpoint)
+request_log_context make_request_log_context(const Request& req, const char* endpoint)
 {
     request_log_context ctx;
     ctx.id = ++g_request_id;
@@ -238,12 +240,6 @@ bool build_pcm16_bytes(const float* data, uint32_t length, std::string* output, 
     }
 
     constexpr size_t kBytesPerSample = sizeof(int16_t);
-    if (length > std::numeric_limits<size_t>::max() / kBytesPerSample)
-    {
-        *error = "Generated audio buffer is too large.";
-        return false;
-    }
-
     const size_t total_bytes = static_cast<size_t>(length) * kBytesPerSample;
     output->resize(total_bytes);
     for (uint32_t i = 0; i < length; ++i)

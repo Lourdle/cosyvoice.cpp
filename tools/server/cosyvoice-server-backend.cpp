@@ -13,8 +13,10 @@
 #include <unordered_map>
 #include <utility>
 
+#ifndef COSYVOICE_USE_PCH
 import httplib;
 import nlohmann_json;
+#endif
 
 using json = nlohmann::json;
 
