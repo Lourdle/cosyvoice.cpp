@@ -107,9 +107,11 @@
 
 ### 从源码构建
 
-> **C++20 模块说明（Linux/macOS）：** `cosyvoice-server` 目标现已使用 C++20 模块。
-> GNU Make 不支持模块依赖扫描，因此在 Linux 和 macOS 上需通过添加 `-G Ninja` 来使用 Ninja 生成器。
-> Windows 上可继续使用默认的 Visual Studio 生成器（完整支持 C++20 模块）。详见[构建](#构建)章节。
+> **Server 构建要求（非 Windows 平台）：** 在 Linux/macOS 上编译 `cosyvoice-server` 需要
+> 两项额外的工具链能力——**C 编译器**需支持 C23（GCC 15+ 或 Clang 19+）用于嵌入 WebUI 资源，
+> **Ninja** 生成器（1.11+）配合较新的 C++ 编译器（GCC 14+ / Clang 16+ / AppleClang 16+）
+> 用于 C++20 模块扫描（不支持时自动回退 PCH）。Windows 使用默认的 Visual Studio 工具链即可
+> 覆盖两者。详见[构建](#构建)章节。
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -152,27 +154,31 @@ flowchart TD
 - 目前 CPU 路径中的部分数据处理要求 x86 CPU 支持 AVX2
 - 对 CPU 侧数学运算较重的路径（如 `log`、三角函数），当前仅 MSVC 构建可启用 SIMD 加速；其他工具链目前回退为标量实现
 
-> **Server WebUI 构建说明（非 Windows 平台）：** `cosyvoice-server` 通过 C23 的 `#embed` 指令
-> （`resource_embed.c`）将 WebUI 资源（HTML/CSS/JS）嵌入可执行文件。在 Linux/macOS 上，
-> 这要求 **C 编译器**支持 C23 `#embed`——即 GCC 15+ 或 Clang 19+；**C++ 编译器**仅需
-> C++20 即可。Windows 通过原生 RC 工具嵌入资源，无需特殊编译器。
+> **Server 构建须知（非 Windows 平台）：** 在 Linux/macOS 上编译 `cosyvoice-server` 需要在以下
+> 两方面额外留意：
 >
-> 示例：
+> **1. C23 `#embed` 嵌入 WebUI 资源**
+> `resource_embed.c` 通过 C23 `#embed` 指令将 WebUI（HTML/CSS/JS）打包到可执行文件中，
+> 因此需要 **C 编译器**支持 C23——即 GCC 15+ 或 Clang 19+。Windows 通过原生 RC 工具嵌入
+> 资源，无需特殊编译器。
+>
+> 示例——指定支持 C23 的 C 编译器：
 > ```bash
 > # Ubuntu/Debian — 用 clang-20 作为 C 编译器
 > sudo apt install clang-20
 > cmake -B build -DCMAKE_C_COMPILER=clang-20 -DCMAKE_BUILD_TYPE=Release
 > cmake --build build --config Release
 > ```
-
-> **Server C++20 模块说明（非 Windows 平台）：** `cosyvoice-server` 的 C++ 源码现已改用
-> C++20 模块（`.ixx` 接口文件，封装了 nlohmann-json 和 cpp-httplib）。
-> GNU Make（Linux/macOS 上 CMake 的默认生成器）**不支持**模块依赖自动扫描，
-> 因此在这些平台上需要使用 **Ninja** 生成器。
-> Windows 上的 Visual Studio 生成器完整支持 C++20 模块扫描，在使用 VS 工具链时无需
-> 额外指定生成器。
 >
-> Linux/macOS 示例：
+> **2. C++20 模块**
+> 服务端使用了 C++20 模块接口（`.ixx` 文件封装 nlohmann-json 和 cpp-httplib）。
+> **建议**使用 **Ninja** 生成器（1.11+）配合较新的 C++ 编译器（GCC 14+ / Clang 16+ /
+> AppleClang 16+ / MSVC 14.34+）以获得完整的模块扫描支持：
+> - 在 cmake 配置时添加 `-G Ninja`。
+> - Windows：Visual Studio 生成器完整支持模块扫描——无需额外参数。
+> - 不支持的生成器或旧版编译器：CMake 会自动检测并**回退到预编译头（PCH）**。
+>
+> Linux/macOS 推荐配置：
 > ```bash
 > cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 > cmake --build build --config Release

@@ -107,10 +107,12 @@ The releases provided in this repository do not bundle the GGML backend librarie
 
 ### Build from Source
 
-> **C++20 modules note (Linux/macOS):** The `cosyvoice-server` target now uses C++20 modules.
-> GNU Make does not support module dependency scanning, so on Linux and macOS you must configure
-> with the Ninja generator by adding `-G Ninja`. Windows can continue using the default Visual
-> Studio generator (full module support). See the [Build](#build) section for details.
+> **Server build requirements (non-Windows):** On Linux/macOS, `cosyvoice-server` needs two
+> extra capabilities beyond a standard C++20 toolchain — a C23-capable **C compiler** (GCC 15+
+> or Clang 19+) for WebUI resource embedding, and a **Ninja** generator (1.11+) with a modern
+> C++ compiler (GCC 14+ / Clang 16+ / AppleClang 16+) for C++20 module scanning (auto-falls
+> back to PCH if unsupported). Windows covers both with the default Visual Studio toolchain.
+> See the [Build](#build) section for details.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -153,28 +155,32 @@ flowchart TD
 - x86 CPU with AVX2 support is currently required for parts of the CPU data path
 - For CPU math-heavy paths (for example `log` and trigonometric functions), SIMD acceleration is currently enabled only in MSVC builds; other toolchains currently fall back to scalar implementations
 
-> **Server WebUI build note (non-Windows):** The `cosyvoice-server` embeds its WebUI resources
-> (HTML/CSS/JS) via the C23 `#embed` directive (`resource_embed.c`). On Linux/macOS this requires
-> a **C compiler** that supports C23 `#embed` — GCC 15+ or Clang 19+ — while the **C++ compiler**
-> only needs C++20 support. Windows embeds resources via the native RC tool, so no special
-> compiler is needed.
+> **Server build considerations (non-Windows):** On Linux/macOS, `cosyvoice-server` requires
+> extra attention in two areas:
 >
-> Example:
+> **1. C23 `#embed` for WebUI resources**
+> `resource_embed.c` uses the C23 `#embed` directive to bundle the WebUI (HTML/CSS/JS)
+> into the executable, which needs a **C compiler** that supports C23 — GCC 15+ or Clang 19+.
+> Windows embeds resources via its native RC tool, so no special C compiler is needed.
+>
+> Example — specifying a C23-capable C compiler:
 > ```bash
 > # Ubuntu/Debian — use clang-20 as the C compiler
 > sudo apt install clang-20
 > cmake -B build -DCMAKE_C_COMPILER=clang-20 -DCMAKE_BUILD_TYPE=Release
 > cmake --build build --config Release
 > ```
-
-> **Server C++20 modules note (non-Windows):** The `cosyvoice-server` C++ sources now use
-> C++20 modules (`.ixx` interface files for nlohmann-json and cpp-httplib wrappers).
-> GNU Make (CMake's default generator on Linux/macOS) does **not** support automatic module
-> dependency scanning, so you must use the **Ninja** generator on those platforms.
-> The Visual Studio generator on Windows fully supports C++20 module scanning, so no
-> generator override is needed when using a VS toolchain.
 >
-> Linux/macOS example:
+> **2. C++20 modules**
+> The server uses C++20 module interfaces (`.ixx` files for nlohmann-json and cpp-httplib).
+> A **Ninja** generator (1.11+) with a modern C++ compiler (GCC 14+ / Clang 16+ /
+> AppleClang 16+ / MSVC 14.34+) is **recommended** for full module scanning:
+> - Add `-G Ninja` to your cmake configure command.
+> - Windows: the Visual Studio generator fully supports module scanning — no extra flags.
+> - Unsupported generators or older compilers: CMake detects the gap and automatically
+>   **falls back to precompiled headers (PCH)**.
+>
+> Recommended full configure for Linux/macOS:
 > ```bash
 > cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 > cmake --build build --config Release

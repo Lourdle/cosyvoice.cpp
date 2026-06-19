@@ -13,6 +13,10 @@ apt install clang cmake ninja git simde
 
 For the FFmpeg backend, also run `apt install ffmpeg`. For ICU support, also run `apt install libicu`. For the frontend, install `apt install onnxruntime`, and CMake will automatically find the system version via `find_package`.
 
+> Termux's `clang` package provides a modern toolchain with C23 `#embed` and C++20 module
+> support; `ninja` is installed above. The server build automatically falls back to
+> precompiled headers (PCH) if module scanning is unavailable.
+
 ### CPU
 
 Follow the standard configure and build flow from the README. `apt install onnxruntime` (added in the prerequisites above) provides a system-installed ONNX Runtime that CMake will find via `find_package`. For ICU support, add `apt install libicu` as well.
@@ -50,6 +54,10 @@ ninja -C build-termux-opencl
 ```
 
 > `GGML_OPENCL_USE_ADRENO_KERNELS` must be `OFF` even when targeting Adreno GPUs, because the internal optimized kernels have specific tensor shape requirements that CosyVoice does not satisfy.
+>
+> The Termux environment includes `ninja` and a modern `clang`, providing C23 `#embed` support
+> (required by `resource_embed.c`) and C++20 module support. If module scanning is unavailable,
+> CMake automatically falls back to precompiled headers (PCH).
 
 If `ldd` already shows `libOpenCL_system.so => not found`, that means `ggml-opencl` is linked to the target file name correctly.
 
@@ -71,7 +79,15 @@ The screenshot below shows the normal interactive prompt.
 
 **Android NDK**
 
-Download NDK (toolchain must support C++20) from [https://developer.android.com/ndk/downloads](https://developer.android.com/ndk/downloads) and extract it.
+Download NDK from [https://developer.android.com/ndk/downloads](https://developer.android.com/ndk/downloads) and extract it.
+The toolchain must support C++20. When building `cosyvoice-server` (the WebUI server), two
+additional capabilities are needed beyond a standard C++20 toolchain:
+- **C23 `#embed`**: The WebUI resources are embedded via `resource_embed.c` using the C23
+  `#embed` directive, which requires **NDK r28+** (Clang 19+). Without it the server target
+  will fail to compile.
+- **C++20 modules**: Newer NDK versions (r27+) and the **Ninja** generator are **recommended**
+  for module scanning; if unsupported, CMake automatically falls back to precompiled
+  headers (PCH).
 
 **SIMDe**
 
@@ -79,9 +95,12 @@ Download NDK (toolchain must support C++20) from [https://developer.android.com/
 git clone https://github.com/simd-everywhere/simde.git --depth=1
 ```
 
-**CMake (≥ 3.24) and Ninja**
+**CMake (≥ 3.24) and Ninja (recommended)**
 
-Make sure `cmake` and `ninja` are available.
+Make sure `cmake` and `ninja` are available. For `cosyvoice-server` on Android:
+- The NDK's C compiler must support C23 `#embed` — use **NDK r28+** (Clang 19+).
+- **Ninja 1.11+ is recommended** for C++20 module scanning; if unsupported, CMake falls back
+  to precompiled headers (PCH).
 
 ### CPU
 
@@ -108,6 +127,11 @@ cmake -S /path/to/cosyvoice.cpp -B build-android-cpu \
 | `SIMDE_INCLUDE_DIR` | SIMDe directory, must contain `simde/x86/avx2.h` |
 | `COSYVOICE_NO_FRONTEND` | ONNX Runtime has no Android prebuilt, disable |
 | `COSYVOICE_NO_ICU` | ICU has no Android prebuilt, disable |
+
+> **Important:** When building `cosyvoice-server` on Android, the NDK's C compiler
+> must support C23 `#embed` (NDK r28+ / Clang 19+). For C++20 modules, `-G Ninja` is recommended;
+> if Ninja is unavailable or the NDK is too old, CMake automatically falls back to precompiled
+> headers (PCH).
 
 ```bash
 ninja -C build-android-cpu
@@ -160,3 +184,7 @@ ninja -C build-android-opencl
 ```
 
 > `GGML_OPENCL_USE_ADRENO_KERNELS` must be `OFF` even when targeting Adreno GPUs, because the internal optimized kernels have specific tensor shape requirements that CosyVoice does not satisfy.
+>
+> Remember that building `cosyvoice-server` on Android
+> also requires a C23-capable C compiler (NDK r28+ / Clang 19+). See the NDK prerequisite above.
+> For the C++20 module part, `-G Ninja` is recommended; CMake falls back to PCH if unsupported.

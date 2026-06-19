@@ -13,6 +13,10 @@ apt install clang cmake ninja git simde
 
 如需 FFmpeg 后端则加装 `apt install ffmpeg`，如需 ICU 则加装 `apt install libicu`。如需前端，则安装 `apt install onnxruntime`，CMake 会自动通过 `find_package` 找到系统版本。
 
+> Termux 的 `clang` 包提供了较新的工具链，同时支持 C23 `#embed`（`resource_embed.c` 必需）
+> 和 C++20 模块；上方也已安装了 `ninja`。如果模块扫描不可用，CMake 会自动回退到
+> 预编译头（PCH）用于 `cosyvoice-server`。
+
 ### CPU
 
 按照 README 中的一般流程配置和编译即可。前置条件中已通过 `apt install onnxruntime` 安装了 ONNX Runtime，CMake 会自动通过 `find_package` 找到系统版本。如需使用 ICU 则再加装 `apt install libicu`。
@@ -50,6 +54,9 @@ ninja -C build-termux-opencl
 ```
 
 > `GGML_OPENCL_USE_ADRENO_KERNELS` 即使目标 GPU 是 Adreno 也需要设为 `OFF`，因为内部优化的 kernel 对 tensor 形状有特定要求，CosyVoice 不满足这些形状约束。
+>
+> Termux 环境内置 `ninja` 和较新的 `clang`，同时支持 C23 `#embed` 和 C++20 模块。
+> 如果模块扫描不可用，CMake 会自动回退到预编译头（PCH）。
 
 `ldd` 输出里如果已经看到 `libOpenCL_system.so => not found`，说明 `ggml-opencl` 这边已经按目标文件名链接上了。
 
@@ -71,7 +78,12 @@ apt reinstall ocl-icd
 
 **Android NDK**
 
-从 [https://developer.android.google.cn/ndk/downloads](https://developer.android.google.cn/ndk/downloads) 下载 NDK（toolchain 需要支持 C++20），解压到任意目录。
+从 [https://developer.android.google.cn/ndk/downloads](https://developer.android.google.cn/ndk/downloads) 下载 NDK（编译工具链需支持 C++20），解压到任意目录。
+在 Android 上编译 `cosyvoice-server` 时，还需要满足两项额外要求：
+- **C23 `#embed`**：`resource_embed.c` 使用 C23 `#embed` 指令嵌入 WebUI 资源，
+  需要 **NDK r28+**（Clang 19+），否则 server 目标无法编译。
+- **C++20 模块**：**建议**使用较新的 NDK 版本（r27+）和 **Ninja** 生成器以获得模块扫描支持；
+  如果不支持，CMake 会自动回退到预编译头（PCH）。
 
 **SIMDe**
 
@@ -79,9 +91,11 @@ apt reinstall ocl-icd
 git clone https://github.com/simd-everywhere/simde.git --depth=1
 ```
 
-**CMake（≥ 3.24）和 Ninja**
+**CMake（≥ 3.24）和 Ninja（推荐）**
 
-安装后确保 `cmake` 和 `ninja` 可用。
+安装后确保 `cmake` 和 `ninja` 可用。在 Android 上编译 `cosyvoice-server` 时：
+- NDK 的 C 编译器必须支持 C23 `#embed`——使用 **NDK r28+**（Clang 19+）。
+- **建议使用 Ninja 1.11+** 以获得 C++20 模块扫描支持；不支持时 CMake 会自动回退到 PCH。
 
 ### CPU
 
@@ -108,6 +122,10 @@ cmake -S /path/to/cosyvoice.cpp -B build-android-cpu \
 | `SIMDE_INCLUDE_DIR` | SIMDe 目录，需包含 `simde/x86/avx2.h` |
 | `COSYVOICE_NO_FRONTEND` | ONNX Runtime 无 Android 预编译库，故关闭 |
 | `COSYVOICE_NO_ICU` | ICU 无 Android 预编译库，故关闭 |
+
+> **重要提示：** 在 Android 上编译 `cosyvoice-server` 时，NDK 的 C 编译器必须
+> 支持 C23 `#embed`（NDK r28+ / Clang 19+）。对于 C++20 模块，建议使用 `-G Ninja`；
+> 如果 Ninja 不可用或 NDK 版本太旧，CMake 会自动回退到预编译头（PCH）。
 
 ```bash
 ninja -C build-android-cpu
@@ -160,3 +178,7 @@ ninja -C build-android-opencl
 ```
 
 > `GGML_OPENCL_USE_ADRENO_KERNELS` 即使目标 GPU 是 Adreno 也需要设为 `OFF`，因为内部优化的 kernel 对 tensor 形状有特定要求，CosyVoice 不满足这些形状约束。
+>
+> 在 Android 上编译 `cosyvoice-server` 还需要支持 C23 `#embed` 的 C 编译器
+>（NDK r28+ / Clang 19+），详情见上方 NDK 前置条件。C++20 模块部分建议使用 `-G Ninja`；
+> 不支持时 CMake 会自动回退到 PCH。
