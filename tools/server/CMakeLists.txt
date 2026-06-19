@@ -6,7 +6,6 @@ set(SERVER_SOURCES
 set(SERVER_EXTRA_SOURCES
     server_common.h
     cosyvoice-server-backend.cpp
-    cosyvoice-server-webui.cpp
     server_common.cpp
 )
 
@@ -15,26 +14,35 @@ set(SERVER_MODULE_INTERFACES
     httplib.ixx
 )
 
-# Embedded resources: Windows uses RC, others use C23 #embed
-if(WIN32)
-    list(APPEND SERVER_SOURCES
-        resource.h
-        resource_win.c
-        cosyvoice-server.rc
-    )
-else()
-    set(CMAKE_C_STANDARD 23)
-    list(APPEND SERVER_SOURCES
-        resource.h
-        resource_embed.c
-    )
-endif()
-
 set(SERVER_COMMON_INCLUDES
     "${CMAKE_SOURCE_DIR}/vendor"
     "${CMAKE_SOURCE_DIR}/vendor/cpp-httplib"
 )
 set(SERVER_COMMON_LIBS cosyvoice common ggml tools_common)
+
+option(COSYVOICE_SERVER_NO_WEBUI
+    "Disable embedded WebUI in cosyvoice-server (removes C23 #embed dependency)" OFF)
+
+if(NOT COSYVOICE_SERVER_NO_WEBUI)
+    list(APPEND SERVER_EXTRA_SOURCES
+        cosyvoice-server-webui.cpp
+    )
+
+    # Embedded resources: Windows uses RC, others use C23 #embed
+    if(WIN32)
+        list(APPEND SERVER_SOURCES
+            resource.h
+            resource_win.c
+            cosyvoice-server.rc
+        )
+    else()
+        set(CMAKE_C_STANDARD 23)
+        list(APPEND SERVER_SOURCES
+            resource.h
+            resource_embed.c
+        )
+    endif()
+endif()
 
 # C++20 module dependency scanning is only supported with specific generator
 # and compiler combinations. If unsupported, fall back to precompiled headers.
@@ -121,6 +129,9 @@ if(NOT _use_modules)
         if(COSYVOICE_NO_ICU)
             target_compile_definitions(${tgt} PRIVATE COSYVOICE_NO_ICU)
         endif()
+        if(COSYVOICE_SERVER_NO_WEBUI)
+            target_compile_definitions(${tgt} PRIVATE COSYVOICE_SERVER_NO_WEBUI)
+        endif()
     endforeach()
 else()
     # C++20 modules (Ninja, Visual Studio, Xcode, etc.)
@@ -144,6 +155,9 @@ else()
     endif()
     if(COSYVOICE_NO_ICU)
         target_compile_definitions(cosyvoice-server PRIVATE COSYVOICE_NO_ICU)
+    endif()
+    if(COSYVOICE_SERVER_NO_WEBUI)
+        target_compile_definitions(cosyvoice-server PRIVATE COSYVOICE_SERVER_NO_WEBUI)
     endif()
 endif()
 
