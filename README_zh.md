@@ -266,8 +266,10 @@ FFmpeg 使用要点：
 - `COSYVOICE_NO_AUDIO=ON/OFF`（默认：`OFF`）
 - `COSYVOICE_NO_FRONTEND=ON/OFF`（默认：`OFF`）
 - `COSYVOICE_NO_ICU=ON/OFF`（默认：`OFF`）
-- `COSYVOICE_CLI_NO_PLAYBACK=ON/OFF`（默认：未设置，跟随 `COSYVOICE_NO_AUDIO`）
 - `COSYVOICE_AUDIO_BACKEND=MINIAUDIO/FFMPEG`（默认：`MINIAUDIO`）
+- `COSYVOICE_CLI_NO_PLAYBACK=ON/OFF`（默认：未设置，跟随 `COSYVOICE_NO_AUDIO`）
+- `COSYVOICE_SERVER_NO_WEBUI=ON/OFF`（默认：`OFF`）—— 关闭 `cosyvoice-server` 的嵌入式 WebUI。启用后服务器仅以 API 模式运行。非 Windows 平台同时可以移除 C23 `#embed` 依赖。
+- `COSYVOICE_SERVER_DEFAULT_MODE=WEBUI/API`（默认：`WEBUI`）—— 命令行未给出 `--api` 或 `--webui` 时的默认运行模式。设为 `API` 可用于纯后端无界面部署。
 
 依赖路径选项：
 - `GGML_SOURCE_DIR=<path>`

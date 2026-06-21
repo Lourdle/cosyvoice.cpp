@@ -84,8 +84,10 @@ quantize -f model.gguf -o model-q4_k_s.gguf -t Q4_K -M tools/quantize/profiles/c
 
 | 模式 | 选择方式 | 说明 |
 |------|----------|------|
-| **WebUI**（默认） | 不加 `--api` | 提供完整的 Web 界面，支持模型/音色管理、TTS 生成、音色提取等功能。 |
+| **WebUI**（默认） | 不加 `--api`，或显式加 `--webui` | 提供完整的 Web 界面，支持模型/音色管理、TTS 生成、音色提取等功能。 |
 | **API** | 加 `--api` | 无界面 OpenAI Speech 兼容 API 服务。 |
+
+默认模式为 `WEBUI`（除非使用 `COSYVOICE_SERVER_DEFAULT_MODE=API` 编译）。当默认模式为 API 但命令行参数不足以启动 API 时，服务会自动回退到 WebUI 模式而非报错退出。
 
 ### 快速开始
 
@@ -119,6 +121,10 @@ cosyvoice-server \
 ### WebUI 功能特性
 
 WebUI 是一个现代化的单页应用，提供以下功能：
+
+#### 认证与授权
+- **API Key 登录**：当服务端配置了 `--api-key`，访问 WebUI 时会先展示一个美观的登录页面，输入 API Key 后方可进入。
+- **Cookie 会话**：一次认证后，浏览器会保存会话 cookie，页面刷新无需重复登录。
 
 #### 模型管理
 - **运行时加载模型**：输入 `.gguf` 文件路径，选择后端和线程数，点击「Load Model」加载。
@@ -161,13 +167,14 @@ WebUI 是一个现代化的单页应用，提供以下功能：
 | `--served-model-name <name>` | API/WebUI 对外模型名。如果省略，优先使用 `cosyvoice_get_architecture()` 返回的模型架构名；否则从文件名推导。 |
 | `--host <host>` | 监听地址，默认 `127.0.0.1`。 |
 | `--port <port>` | 监听端口，默认 `8080`。 |
-| `--api-key <key>` | 传入时要求请求包含 `Authorization: Bearer <key>`。 |
+| `--api-key <key>` | 要求所有 API 请求（`POST /v1/audio/speech` 等）包含 `Authorization: Bearer <key>`。同时**保护 WebUI**：访问 WebUI 时会展示登录页面，需输入同样的 API Key 后方可进入。 |
 
 ### 模式选择
 
 | 参数 | 说明 |
 |------|------|
-| `--api` | 启用 OpenAI 兼容 API 模式。不加此标志默认为 WebUI 模式。 |
+| `--webui` | 启动 WebUI 模式（默认；`--model` 和音色映射可选）。与 `--api` 互斥。 |
+| `--api` | 启用 OpenAI 兼容 API 模式。`--api` 需要 `--model` 和 `--voice-prompt`。与 `--webui` 互斥。 |
 
 ### 音色映射
 
@@ -197,7 +204,7 @@ WebUI 是一个现代化的单页应用，提供以下功能：
 |------|------|
 | `--max-llm-len <value>` | LLM 最大序列长度，默认 `2048`。 |
 | `--threads, -j <value>` | CPU 线程数，默认 `0`（硬件并发数）。 |
-| `--concurrency, -c <value>` | 并发请求槽数，默认 `1`（仅 API 模式）。 |
+| `--concurrency, -c <value>` | 并发请求槽数，默认 `1`（仅 API 模式；WebUI 模式始终为单槽）。 |
 | `--inference-buffer-policy <shared\|balanced\|dedicated>` | 推理缓冲区策略，默认 `balanced`。 |
 | `--llm-kv-cache-type <f32\|f16\|q8_0\|q5_1\|q5_0\|q4_1\|q4_0\|k=<type>,v=<type>[,fallback=<type>]>` | KV cache 类型。单一类型（如 `q8_0`）为 K 和 V 使用相同格式。默认 `k=q8_0,v=q4_0,fallback=q8_0`。 |
 | `--seed <value>` | 默认随机种子（当请求未传 seed 时使用）。 |
@@ -243,7 +250,17 @@ WebUI 暴露以下 REST 接口，由前端 JavaScript 调用：
 
 #### `GET /`
 
-返回 WebUI HTML 页面，包含服务端注入的配置（可用后端、前端模型路径等）。
+返回 WebUI HTML 页面，包含服务端注入的配置（可用后端、前端模型路径、API Key 状态等）。当配置了 `--api-key` 且没有有效会话 cookie 时，请求会被重定向到登录页面。
+
+#### `POST /api/auth/login`
+
+用户认证接口，成功后会设置会话 cookie。JSON 请求体：
+
+```json
+{"api_key": "sk-local-demo"}
+```
+
+成功返回 `200`（设置 `Set-Cookie: cosyvoice_auth_token`），密钥不匹配返回 `401`。此接口始终可访问，不受认证状态限制。
 
 #### `GET /ping`
 

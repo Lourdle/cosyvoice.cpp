@@ -84,8 +84,10 @@ The server runs in **two modes**:
 
 | Mode | Selector | Description |
 |---|---|---|
-| **WebUI** (default) | no `--api` flag | Serves a full-featured web interface for model/speaker management, TTS generation, and speaker extraction. |
+| **WebUI** (default) | no `--api` flag, or explicit `--webui` | Serves a full-featured web interface for model/speaker management, TTS generation, and speaker extraction. |
 | **API** | `--api` flag | Headless OpenAI Speech-compatible API server. |
+
+The default mode is `WEBUI` (unless the server was compiled with `COSYVOICE_SERVER_DEFAULT_MODE=API`). When the default is `API` and insufficient arguments are given for API mode, the server falls back to WebUI instead of exiting with an error.
 
 ### Quick Start
 
@@ -119,6 +121,10 @@ cosyvoice-server \
 ### WebUI Features
 
 The WebUI provides a modern single-page application with the following capabilities:
+
+#### Authentication
+- **API key login**: When `--api-key` is set, the WebUI shows a browser-friendly sign-in page before granting access.
+- **Cookie-based session**: Once authenticated, a session cookie keeps you logged in across page reloads.
 
 #### Model Management
 - **Load a model** at runtime: enter a `.gguf` file path, select backend and threads, then click "Load Model".
@@ -161,14 +167,15 @@ The WebUI provides a modern single-page application with the following capabilit
 | `--served-model-name <name>` | Exposed model id used by API/WebUI requests. If omitted, the server will use the model architecture from `cosyvoice_get_architecture()` when available, and fall back to a name derived from the model filename otherwise. |
 | `--host <host>` | Listen host. Default: `127.0.0.1`. |
 | `--port <port>` | Listen port. Default: `8080`. |
-| `--api-key <key>` | Require `Authorization: Bearer <key>` on API and WebUI routes when provided. |
-| `--concurrency <value>` | Concurrent request slots. Default: `1`. (API mode only) |
+| `--api-key <key>` | Require `Authorization: Bearer <key>` on all API routes (`POST /v1/audio/speech`, etc.). When set, the WebUI is also protected behind a login page that accepts the same API key. |
+| `--concurrency <value>` | Concurrent request slots. Default: `1` (API mode only; WebUI mode is single-slot). |
 
 ### Mode Selection
 
 | Option | Description |
 |--------|-------------|
-| `--api` | Enable OpenAI-compatible API mode. Without this flag the server starts in WebUI mode. |
+| `--webui` | Launch WebUI mode (default; `--model` and voice mappings optional). Mutual exclusive with `--api`. |
+| `--api` | Enable OpenAI-compatible API mode. `--api` requires `--model` and `--voice-prompt`. Mutually exclusive with `--webui`. |
 
 ### Voice Mapping
 
@@ -243,7 +250,17 @@ The WebUI exposes the following REST endpoints, consumed by the frontend JavaScr
 
 #### `GET /`
 
-Serves the WebUI HTML page with server-side injected configuration (available backends, frontend model paths, etc.).
+Serves the WebUI HTML page with server-side injected configuration (available backends, frontend model paths, API key status, etc.). When `--api-key` is configured and no valid session cookie is present, the request is redirected to the login page instead.
+
+#### `POST /api/auth/login`
+
+Authenticates the user and sets a session cookie. Requires a JSON body:
+
+```json
+{"api_key": "sk-local-demo"}
+```
+
+Returns `200` on success (sets `Set-Cookie: cosyvoice_auth_token`), or `401` on mismatch. This endpoint is always accessible regardless of authentication state.
 
 #### `GET /ping`
 

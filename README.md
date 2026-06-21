@@ -268,8 +268,10 @@ Project-level options:
 - `COSYVOICE_NO_AUDIO=ON/OFF` (default: `OFF`)
 - `COSYVOICE_NO_FRONTEND=ON/OFF` (default: `OFF`)
 - `COSYVOICE_NO_ICU=ON/OFF` (default: `OFF`)
-- `COSYVOICE_CLI_NO_PLAYBACK=ON/OFF` (default: unset, follows `COSYVOICE_NO_AUDIO`)
 - `COSYVOICE_AUDIO_BACKEND=MINIAUDIO/FFMPEG` (default: `MINIAUDIO`)
+- `COSYVOICE_CLI_NO_PLAYBACK=ON/OFF` (default: unset, follows `COSYVOICE_NO_AUDIO`)
+- `COSYVOICE_SERVER_NO_WEBUI=ON/OFF` (default: `OFF`) — Disable the embedded WebUI in `cosyvoice-server`. When enabled, the server starts in API-only mode. Removes the C23 `#embed` dependency for non-Windows builds.
+- `COSYVOICE_SERVER_DEFAULT_MODE=WEBUI/API` (default: `WEBUI`) — Default server mode when neither `--api` nor `--webui` is given on the command line. Set to `API` for headless deployments.
 
 Dependency path options:
 - `GGML_SOURCE_DIR=<path>`
