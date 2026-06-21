@@ -3,3 +3,4 @@
 IDR_WEBUI_HTML RCDATA "webui\\cosyvoice-webui.html"
 IDR_WEBUI_CSS  RCDATA "webui\\cosyvoice-webui.css"
 IDR_WEBUI_JS   RCDATA "webui\\cosyvoice-webui.js"
+IDR_WEBUI_LOGIN_HTML RCDATA "webui\\cosyvoice-login.html"

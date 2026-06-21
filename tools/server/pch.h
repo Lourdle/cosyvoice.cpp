@@ -10,3 +10,4 @@
 #include <nlohmann/json.hpp>
 
 using namespace httplib;
+using HandlerResponse = httplib::Server::HandlerResponse;

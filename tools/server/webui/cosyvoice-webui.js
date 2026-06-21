@@ -202,6 +202,8 @@ function showSuccess(el, msg) {
 function hideSuccess(el) { el.classList.remove('show'); el.innerHTML = ''; }
 
 async function apiFetch(url, opts) {
+    opts = opts || {};
+    opts.credentials = opts.credentials || 'same-origin';
     const res = await fetch(url, opts);
     if (!res.ok) {
         let msg = 'HTTP ' + res.status;

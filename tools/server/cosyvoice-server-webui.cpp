@@ -28,6 +28,40 @@ import httplib;
 // Helpers
 // ---------------------------------------------------------------------------
 
+static std::string get_cookie_value(const Request& req, const std::string& name)
+{
+    const auto cookie_header = req.get_header_value("Cookie");
+    if (cookie_header.empty())
+        return {};
+
+    size_t start = 0;
+    while (start < cookie_header.size())
+    {
+        auto end = cookie_header.find(';', start);
+        auto part = cookie_header.substr(start, end - start);
+
+        // Trim leading/trailing spaces
+        while (!part.empty() && part.front() == ' ')
+            part.erase(0, 1);
+        while (!part.empty() && part.back() == ' ')
+            part.pop_back();
+
+        auto eq = part.find('=');
+        if (eq != std::string::npos)
+        {
+            auto key = part.substr(0, eq);
+            auto val = part.substr(eq + 1);
+            if (key == name)
+                return val;
+        }
+
+        if (end == std::string::npos)
+            break;
+        start = end + 1;
+    }
+    return {};
+}
+
 // ---------------------------------------------------------------------------
 // Dynamic speaker registration (helpers called from route handlers)
 // ---------------------------------------------------------------------------
@@ -173,6 +207,85 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
 
         static const char json[] = R"({"error":"Internal server error"})";
         res.set_content(json, "application/json");
+    });
+
+    // ---- Pre-routing auth handler (checks cookie for every request) ----
+    server.set_pre_routing_handler([&runtime](const Request& req, Response& res) -> HandlerResponse
+    {
+        // No API key configured → no auth needed
+        if (runtime.api_key.empty())
+            return HandlerResponse::Unhandled;
+
+        // Login endpoint is always accessible
+        if (req.method == "POST" && req.path == "/api/auth/login")
+            return HandlerResponse::Unhandled;
+
+        // Health check is always accessible
+        if (req.method == "GET" && req.path == "/ping")
+            return HandlerResponse::Unhandled;
+
+        // Check auth cookie
+        const std::string token = get_cookie_value(req, "cosyvoice_auth_token");
+        if (!token.empty() && token == runtime.api_key)
+            return HandlerResponse::Unhandled;
+
+        // Not authenticated
+        if (req.method == "GET" && req.path == "/")
+        {
+            // Serve the login page from embedded resource
+            size_t size = 0;
+            const void* data = server_resource_load(IDR_WEBUI_LOGIN_HTML, &size);
+            if (data)
+            {
+                res.status = 200;
+                res.set_content(std::string(static_cast<const char*>(data), size), "text/html; charset=utf-8");
+            }
+            else
+            {
+                res.status = 200;
+                res.set_content("CosyVoice — Login page resource not found.", "text/plain");
+            }
+            return HandlerResponse::Handled;
+        }
+
+        // All other routes → 401
+        res.status = 401;
+        nlohmann::json err = {{"error", "Authentication required."}};
+        res.set_content(err.dump(), "application/json");
+        return HandlerResponse::Handled;
+    });
+
+    // ---- POST /api/auth/login — authenticate and set session cookie ----
+    server.Post("/api/auth/login", [&runtime](const Request& req, Response& res)
+    {
+        nlohmann::json body;
+        try { body = nlohmann::json::parse(req.body); }
+        catch (...)
+        {
+            res.status = 400;
+            nlohmann::json err = {{"error", "Invalid JSON body"}};
+            res.set_content(err.dump(), "application/json");
+            return;
+        }
+
+        const std::string key = body.value("api_key", "");
+        if (key.empty() || key != runtime.api_key)
+        {
+            res.status = 401;
+            nlohmann::json err = {{"error", "Invalid API key"}};
+            res.set_content(err.dump(), "application/json");
+            log_message(runtime.log_level, server_log_level::concise, "WEBUI",
+                "Login failed: invalid API key from %s", req.remote_addr.c_str());
+            return;
+        }
+
+        // Set session cookie (no Expires = session cookie, deleted when browser closes)
+        res.set_header("Set-Cookie", "cosyvoice_auth_token=" + runtime.api_key + "; HttpOnly; SameSite=Lax; Path=/");
+        nlohmann::json ok = {{"success", true}};
+        res.status = 200;
+        res.set_content(ok.dump(), "application/json");
+        log_message(runtime.log_level, server_log_level::concise, "WEBUI",
+            "Login successful from %s", req.remote_addr.c_str());
     });
 
     // ---- GET / — serve the WebUI HTML ----

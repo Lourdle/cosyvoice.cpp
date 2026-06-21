@@ -5,6 +5,7 @@
 #define IDR_WEBUI_HTML  100
 #define IDR_WEBUI_CSS   101
 #define IDR_WEBUI_JS    102
+#define IDR_WEBUI_LOGIN_HTML 103
 
 #ifdef __cplusplus
 extern "C" {

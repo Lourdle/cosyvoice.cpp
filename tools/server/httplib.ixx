@@ -6,6 +6,7 @@ export module httplib;
 export using Request = httplib::Request;
 export using Response = httplib::Response;
 export using ThreadPool = httplib::ThreadPool;
+export using HandlerResponse = httplib::Server::HandlerResponse;
 
 // NOTE: Do NOT export `using Server = httplib::Server;` directly!
 // Tested on MSVC: this triggers unresolved externals (e.g. `__tlregdtor`) when using C++20 modules,
@@ -43,6 +44,12 @@ public:
     void Put(const std::string& pattern, Handler handler)
     {
         server.Put(pattern, std::move(handler));
+    }
+
+    template<class Handler>
+    void set_pre_routing_handler(Handler handler)
+    {
+        server.set_pre_routing_handler(std::move(handler));
     }
 
     template<class ExceptionHandler>

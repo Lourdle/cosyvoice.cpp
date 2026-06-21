@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CosyVoice — Sign In</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d0d1a;color:#e0e0f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.login-card{background:linear-gradient(135deg,#16162e 0%,#1a1a35 100%);border:1px solid rgba(139,124,247,0.2);border-radius:16px;padding:48px 40px;width:380px;max-width:90vw;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.5)}
+.logo{margin-bottom:16px}
+h1{font-size:22px;font-weight:600;margin-bottom:6px;color:#fff}
+.subtitle{font-size:13px;color:#8888aa;margin-bottom:32px}
+input{width:100%;padding:12px 16px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;color:#fff;font-size:15px;outline:none;transition:border-color .2s;margin-bottom:16px}
+input:focus{border-color:#8b7cf7}
+input::placeholder{color:#555}
+button{width:100%;padding:12px;background:linear-gradient(135deg,#7c6ff0,#5b4fd8);border:none;border-radius:10px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .2s}
+button:hover{opacity:.9}
+button:disabled{opacity:.5;cursor:not-allowed}
+.error{margin-top:16px;padding:10px;background:rgba(255,70,70,0.12);border:1px solid rgba(255,70,70,0.3);border-radius:8px;color:#ff6b6b;font-size:13px;display:none}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media(prefers-color-scheme:light){body{background:#f0f2f5;color:#333}.login-card{background:linear-gradient(135deg,#fff 0%,#f8f9ff 100%);border-color:rgba(139,124,247,0.15);box-shadow:0 8px 32px rgba(0,0,0,0.08)}h1{color:#222}.subtitle{color:#888}input{background:#f5f5f8;border-color:rgba(0,0,0,0.1);color:#333}input::placeholder{color:#aaa}.error{background:rgba(220,50,50,0.08);border-color:rgba(220,50,50,0.25);color:#cc3333}.spinner{border-color:rgba(0,0,0,0.2);border-top-color:#7c6ff0}}
+</style>
+</head>
+<body>
+<div class="login-card">
+<div class="logo"><svg width="48" height="48" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="url(#g)"/><path d="M8 14v4M12 11v10M16 8v16M20 11v10M24 14v4" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/><defs><linearGradient id="g" x1="0" y1="0" x2="32" y2="32"><stop stop-color="#7c6ff0"/><stop offset="1" stop-color="#5b4fd8"/></linearGradient></defs></svg></div>
+<h1>CosyVoice TTS</h1>
+<p class="subtitle">Authorization Required</p>
+<div><input type="password" id="key" placeholder="Enter API Key" autofocus><button id="btn" onclick="login()">Sign In</button></div>
+<div class="error" id="error"></div>
+</div>
+<script>
+async function login(){var k=document.getElementById('key').value;if(!k)return;var b=document.getElementById('btn');b.disabled=1;b.innerHTML='<span class="spinner"></span>Signing in...';document.getElementById('error').style.display='none';try{var r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_key:k}),credentials:'same-origin'});if(!r.ok)throw new Error('Invalid API key');window.location.href='/'}catch(e){document.getElementById('error').textContent=e.message;document.getElementById('error').style.display='block';b.disabled=0;b.textContent='Sign In'}}
+document.getElementById('key').addEventListener('keydown',function(e){if(e.key==='Enter')login()});
+</script>
+</body>
+</html>
