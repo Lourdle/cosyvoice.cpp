@@ -223,7 +223,7 @@ typedef struct cosyvoice_context_params
         struct
         {
 #if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) || defined(_BYTE_ORDER) && (_BYTE_ORDER == _BIG_ENDIAN) || defined(__BIG_ENDIAN__) && !defined(__LITTLE_ENDIAN__) || defined(__ARMEB__) || defined(__MIPSEB__) || defined(__sparc__)
-            cosyvoice_llm_kv_cache_type_t  llm_kv_cache_separate_buffers : 1; ///< If true, allocate separate buffers for the K and V caches in the LLM module. Ignored when `llm_kv_cache_type` is set to a unified format.
+            uint32_t                       llm_kv_cache_separate_buffers : 1; ///< If true, allocate separate buffers for the K and V caches in the LLM module. Ignored when `llm_kv_cache_type` is set to a unified format.
             cosyvoice_llm_kv_cache_type_t : 16;                               ///< Unused bits.
             cosyvoice_llm_kv_cache_type_t  llm_kv_cache_fallback : 5;         ///< Fallback type when the preferred K or V type is unsupported.
             cosyvoice_llm_kv_cache_type_t  llm_v_cache_type : 5;              ///< The data type of the V cache in the LLM module.
@@ -233,7 +233,7 @@ typedef struct cosyvoice_context_params
             cosyvoice_llm_kv_cache_type_t  llm_v_cache_type : 5;              ///< The data type of the V cache in the LLM module.
             cosyvoice_llm_kv_cache_type_t  llm_kv_cache_fallback : 5;         ///< Fallback type when the preferred K or V type is unsupported.
             cosyvoice_llm_kv_cache_type_t : 16;                               ///< Unused bits.
-            cosyvoice_llm_kv_cache_type_t  llm_kv_cache_separate_buffers : 1; ///< If true, allocate separate buffers for the K and V caches in the LLM module. Ignored when `llm_kv_cache_type` is set to a unified format.
+            uint32_t                       llm_kv_cache_separate_buffers : 1; ///< If true, allocate separate buffers for the K and V caches in the LLM module. Ignored when `llm_kv_cache_type` is set to a unified format.
 #endif
         };
         cosyvoice_llm_kv_cache_type_t      llm_kv_cache_type;                 ///< The data type of the KV cache in the LLM module.
