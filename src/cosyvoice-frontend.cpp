@@ -218,7 +218,7 @@ matrix cosyvoice_frontend_context::extract_speech_feat(float* speech, uint32_t l
     // Reflect padding
     for (size_t i = 0; i != 720; ++i)
     {
-        signal.data[i] = speech[720 - i];
+        signal.data[i] = speech[719 - i];
         signal.data[i + len + 720] = speech[len - 2 - i];
     }
     memcpy(signal.data + 720, speech, len * sizeof(float));
