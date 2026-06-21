@@ -642,7 +642,7 @@ bool cosyvoice_audio_load_from_file(const char* filename, float** data, uint32_t
 }
 
 bool cosyvoice_audio_resample(const float* input, uint32_t input_length, uint32_t input_sample_rate,
-                               float** output, uint32_t* output_length, uint32_t output_sample_rate)
+    float** output, uint32_t* output_length, uint32_t output_sample_rate)
 {
     if (!input || !output || !output_length) return false;
 
@@ -663,17 +663,33 @@ bool cosyvoice_audio_resample(const float* input, uint32_t input_length, uint32_
         return false;
     }
 
-    int64_t delay = swr_get_delay(swr_ctx, input_sample_rate);
-    int64_t out_samples = av_rescale_rnd(input_length + delay, output_sample_rate, input_sample_rate, AV_ROUND_UP);
-    std::unique_ptr<float[]> out_buffer(new float[out_samples]);
+    int64_t max_out_samples = av_rescale_rnd(input_length, output_sample_rate, input_sample_rate, AV_ROUND_UP);
+    auto out_buffer = new float[max_out_samples];
     const uint8_t* in_planes[1] = { reinterpret_cast<const uint8_t*>(input) };
-    uint8_t* out_planes[1] = { reinterpret_cast<uint8_t*>(out_buffer.get()) };
-    int converted = swr_convert(swr_ctx, out_planes, out_samples, in_planes, input_length);
+    uint8_t* out_planes[1] = { reinterpret_cast<uint8_t*>(out_buffer) };
+
+    int converted = swr_convert(swr_ctx, out_planes, max_out_samples, in_planes, input_length);
+    if (converted < 0)
+    {
+        swr_free(&swr_ctx);
+        delete[] out_buffer;
+        return false;
+    }
+
+    int total_converted = converted;
+    for (;;)
+    {
+		out_planes[0] += converted * sizeof(float);
+        converted = swr_convert(swr_ctx, out_planes, max_out_samples - total_converted, nullptr, 0);
+        if (converted > 0)
+            total_converted += converted;
+        else break;
+    }
+
     swr_free(&swr_ctx);
 
-    if (converted < 0) return false;
-    *output = out_buffer.release();
-    *output_length = static_cast<uint32_t>(converted);
+    *output = out_buffer;
+    *output_length = static_cast<uint32_t>(total_converted);
     return true;
 }
 
