@@ -32,8 +32,10 @@ struct server_options
     std::string single_prompt_speech;
     bool has_single_voice_arg = false;
 
-    // Mode selection: default is WebUI, --api switches to API mode
-    bool enable_api = false;
+    // Mode selection
+    enum class run_mode { unspecified, webui, api };
+    run_mode mode = run_mode::unspecified;
+
     std::string frontend_model;
     std::string speech_tokenizer;
     std::string campplus;
@@ -143,9 +145,12 @@ static void print_usage(const char* argv0)
     printf("  POST /v1/audio/speech\n");
 
     printf("\nMode selection:\n");
-    printf("  --api                                       Enable OpenAI-compatible API server (requires --model and --voice-prompt).\n");
+    printf("  --api                                       Enable OpenAI-compatible API server.\n");
 #ifndef COSYVOICE_SERVER_NO_WEBUI
-    printf("                                                Default: WebUI mode.\n");
+    printf("  --webui                                     Launch WebUI (default, --model and voices optional).\n");
+#endif
+    printf("  --api requires --model and --voice-prompt.\n");
+#ifndef COSYVOICE_SERVER_NO_WEBUI
     printf("\nWebUI options:\n");
     printf("  --frontend-model <dir>                      Frontend ONNX model directory (for speaker extraction).\n");
     printf("  --speech-tokenizer <file>                   Speech tokenizer ONNX model file.\n");
@@ -246,8 +251,6 @@ static bool init_model_context(const server_options& options, ggml_backend_t bac
 
 static bool init_model_slots(const server_options& options, server_runtime* runtime)
 {
-
-
     runtime->voice_sessions.reserve(options.concurrency);
     for (uint32_t i = 0; i != options.concurrency; ++i)
         runtime->voice_sessions.emplace_back();
@@ -638,8 +641,10 @@ int tool_entry(int argc, char** argv)
             else if (str_casecmp(arg, "--prompt-speech") == 0)
                 options.single_prompt_speech = get_arg_value();
             else if (str_casecmp(arg, "--api") == 0)
-                options.enable_api = true;
+                options.mode = server_options::run_mode::api;
 #ifndef COSYVOICE_SERVER_NO_WEBUI
+            else if (str_casecmp(arg, "--webui") == 0)
+                options.mode = server_options::run_mode::webui;
             else if (str_casecmp(arg, "--frontend-model") == 0)
                 options.frontend_model = get_arg_value();
             else if (str_casecmp(arg, "--speech-tokenizer") == 0)
@@ -822,20 +827,42 @@ int tool_entry(int argc, char** argv)
             }
         }
 
-        // API mode: explicitly requested via --api
-        if (options.enable_api)
+        // ---- Determine effective mode ----
+#ifdef COSYVOICE_SERVER_NO_WEBUI
+        // WebUI not available — force API mode regardless of --api/--webui flags
+        options.mode = server_options::run_mode::api;
+#else
+        if (options.mode == server_options::run_mode::unspecified)
+        {
+#ifdef COSYVOICE_SERVER_DEFAULT_MODE_API
+            // Default mode = API: enter API if sufficient args, otherwise fall back to WebUI
+            bool cannot_api = options.model.empty() || options.single_prompt_speech.empty() && options.has_single_voice_arg;
+            options.mode = !cannot_api ? server_options::run_mode::api : server_options::run_mode::webui;
+#else
+            options.mode = server_options::run_mode::webui;
+#endif
+        }
+#endif
+
+        // ---- Dispatch based on resolved mode ----
+        if (options.mode == server_options::run_mode::api)
         {
             if (!validate_options(options))
-                return 1;
-
+            {
+                print_usage(argv[0]);
+#ifdef COSYVOICE_SERVER_NO_WEBUI
+                return 0;   // silent help, not an error
+#else
+                return 1;   // explicit --api failure, error exit
+#endif
+            }
             if (!build_runtime(options, &runtime))
                 return 1;
-
             return cosyvoice_server_backend_run(runtime);
         }
 
+        // WebUI mode (only reachable when COSYVOICE_SERVER_NO_WEBUI is NOT set)
 #ifndef COSYVOICE_SERVER_NO_WEBUI
-        // WebUI mode (default)
         {
             runtime.webui_enabled = true;
             runtime.frontend_model  = options.frontend_model;
@@ -864,14 +891,8 @@ int tool_entry(int argc, char** argv)
             return cosyvoice_server_webui_run(runtime);
         }
 #else
-        // WebUI is disabled — API mode is always effective
-        if (!validate_options(options))
-            return 1;
-
-        if (!build_runtime(options, &runtime))
-            return 1;
-
-        return cosyvoice_server_backend_run(runtime);
+        // Not reachable — COSYVOICE_SERVER_NO_WEBUI forces API mode above
+        return 1;
 #endif
     }
 }

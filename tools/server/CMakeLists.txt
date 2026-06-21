@@ -23,6 +23,14 @@ set(SERVER_COMMON_LIBS cosyvoice common ggml tools_common)
 option(COSYVOICE_SERVER_NO_WEBUI
     "Disable embedded WebUI in cosyvoice-server (removes C23 #embed dependency)" OFF)
 
+set(COSYVOICE_SERVER_DEFAULT_MODE "WEBUI" CACHE STRING
+    "Default server mode when neither --api nor --webui is given (WEBUI or API)")
+
+if(NOT COSYVOICE_SERVER_DEFAULT_MODE STREQUAL "WEBUI" AND
+   NOT COSYVOICE_SERVER_DEFAULT_MODE STREQUAL "API")
+    message(FATAL_ERROR "COSYVOICE_SERVER_DEFAULT_MODE must be WEBUI or API (got: ${COSYVOICE_SERVER_DEFAULT_MODE})")
+endif()
+
 if(NOT COSYVOICE_SERVER_NO_WEBUI)
     list(APPEND SERVER_EXTRA_SOURCES
         cosyvoice-server-webui.cpp
@@ -130,7 +138,10 @@ if(NOT _use_modules)
             target_compile_definitions(${tgt} PRIVATE COSYVOICE_NO_ICU)
         endif()
         if(COSYVOICE_SERVER_NO_WEBUI)
-            target_compile_definitions(${tgt} PRIVATE COSYVOICE_SERVER_NO_WEBUI)
+            set_property(SOURCE cosyvoice-server.cpp APPEND PROPERTY COMPILE_DEFINITIONS "COSYVOICE_SERVER_NO_WEBUI")
+        endif()
+        if(COSYVOICE_SERVER_DEFAULT_MODE STREQUAL "API")
+            set_property(SOURCE cosyvoice-server.cpp APPEND PROPERTY COMPILE_DEFINITIONS "COSYVOICE_SERVER_DEFAULT_MODE_API")
         endif()
     endforeach()
 else()
@@ -157,7 +168,10 @@ else()
         target_compile_definitions(cosyvoice-server PRIVATE COSYVOICE_NO_ICU)
     endif()
     if(COSYVOICE_SERVER_NO_WEBUI)
-        target_compile_definitions(cosyvoice-server PRIVATE COSYVOICE_SERVER_NO_WEBUI)
+        set_property(SOURCE cosyvoice-server.cpp APPEND PROPERTY COMPILE_DEFINITIONS "COSYVOICE_SERVER_NO_WEBUI")
+    endif()
+    if(COSYVOICE_SERVER_DEFAULT_MODE STREQUAL "API")
+        set_property(SOURCE cosyvoice-server.cpp APPEND PROPERTY COMPILE_DEFINITIONS "COSYVOICE_SERVER_DEFAULT_MODE_API")
     endif()
 endif()
 
