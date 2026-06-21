@@ -317,24 +317,24 @@ matrix cosyvoice_frontend_context::extract_speech_feat(float* speech, uint32_t l
     auto mel_cur = mel.data;
     auto mel_end = mel_cur + len;
 #ifdef _MSC_VER
-    for (__m256 min_level_vec = _mm256_set1_ps(FLT_EPSILON); mel_cur + 7 < mel_end; mel_cur += 8)
+    for (__m256 min_level = _mm256_set1_ps(1e-5f); mel_cur + 7 < mel_end; mel_cur += 8)
     {
         __m256 values = _mm256_loadu_ps(mel_cur);
-        values = _mm256_max_ps(values, min_level_vec);
+        values = _mm256_max_ps(values, min_level);
         values = _mm256_log_ps(values);
         _mm256_storeu_ps(mel_cur, values);
     }
-    for (__m128 min_level_vec = _mm_set_ps1(FLT_EPSILON); mel_cur + 7 < mel_end; mel_cur += 4)
+    for (__m128 min_level = _mm_set_ps1(1e-5f); mel_cur + 7 < mel_end; mel_cur += 4)
     {
         __m128 values = _mm_loadu_ps(mel_cur);
-        values = _mm_max_ps(values, min_level_vec);
+        values = _mm_max_ps(values, min_level);
         values = _mm_log_ps(values);
         _mm_storeu_ps(mel_cur, values);
     }
 #endif
     for (mel_end = mel.data + len; mel_cur != mel_end; ++mel_cur)
     {
-        auto value = std::log(std::max(FLT_EPSILON, *mel_cur));
+        auto value = std::log(std::max(1e-5f, *mel_cur));
         *mel_cur = value;
     }
 
@@ -447,12 +447,12 @@ tokens_t cosyvoice_frontend_context::extract_speech_token(float* signal, uint32_
     len = mel.shape[0] * mel.shape[1];
     auto mel_dataptr = mel.data;
     auto mel_dataptr_end = mel_dataptr + len;
-    float max_value = FLT_EPSILON;
+    float max_value = 1e-10f;
 
 #ifdef _MSC_VER
     {
-        __m256 maximum_256 = _mm256_set1_ps(FLT_EPSILON);
-        for (__m256 min_level_vec = _mm256_set1_ps(FLT_EPSILON); mel_dataptr + 7 < mel_dataptr_end; mel_dataptr += 8)
+        __m256 maximum_256 = _mm256_set1_ps(1e-10f);
+        for (__m256 min_level_vec = _mm256_set1_ps(1e-10f); mel_dataptr + 7 < mel_dataptr_end; mel_dataptr += 8)
         {
             __m256 values = _mm256_loadu_ps(mel_dataptr);
             values = _mm256_max_ps(values, min_level_vec);
@@ -463,7 +463,7 @@ tokens_t cosyvoice_frontend_context::extract_speech_token(float* signal, uint32_
         }
 
         __m128 maximum_128 = _mm_max_ps(_mm256_castps256_ps128(maximum_256), _mm256_extractf128_ps(maximum_256, 1));
-        for (__m128 min_level_vec = _mm_set_ps1(FLT_EPSILON); mel_dataptr + 3 < mel_dataptr_end; mel_dataptr += 4)
+        for (__m128 min_level_vec = _mm_set_ps1(1e-10f); mel_dataptr + 3 < mel_dataptr_end; mel_dataptr += 4)
         {
             __m128 values = _mm_loadu_ps(mel_dataptr);
             values = _mm_max_ps(values, min_level_vec);
@@ -480,7 +480,7 @@ tokens_t cosyvoice_frontend_context::extract_speech_token(float* signal, uint32_
 #endif
     for (; mel_dataptr != mel_dataptr_end; ++mel_dataptr)
     {
-        auto value = std::log10(std::max(FLT_EPSILON, *mel_dataptr));
+        auto value = std::log10(std::max(1e-10f, *mel_dataptr));
         *mel_dataptr = value;
         if (value > max_value)
             max_value = value;
@@ -1048,7 +1048,7 @@ cosyvoice_frontend_context::cosyvoice_frontend_context(const void* speech_tokeni
     fft_ctx2 = create_fft_context(400);
     fft_ctx_spk = create_fft_context(512);
 
-    mel_basis = build_mel_basis(24000.f, 1920, 80, 0.0f, 8000.0f);
+    mel_basis = build_mel_basis(24000.f, 1920, 80, 0.0f, 12000.0f);
     mel_basis2 = build_mel_basis(16000.f, 400, 128, 0.0f, 8000.0f);
     mel_basis_spk = matrix(80, 257);
 
