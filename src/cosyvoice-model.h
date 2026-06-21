@@ -142,6 +142,7 @@ struct cosyvoice_model_3_shared
     ggml_type v_type;
 
     std::set<int> stop_tokens;
+    std::set<int> silent_tokens;
 };
 
 struct cosyvoice_3_worker_context

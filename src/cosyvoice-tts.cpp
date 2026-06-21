@@ -133,6 +133,14 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
         const auto min_len = static_cast<uint32_t>(text_len * worker->config.min_token_text_ratio);
         const auto max_len = static_cast<uint32_t>(text_len * worker->config.max_token_text_ratio);
         llm_clear_accepted_tokens();
+
+        // FSQ silent/breath token filtering: allow up to 5 consecutive silent tokens,
+        // then drop any further consecutive ones to avoid generating long silence.
+        // Reset the counter whenever a non-silent token appears.
+        uint32_t cur_silent_token_num = 0;
+        constexpr uint32_t max_silent_token_num = 5;
+        const auto& silent_tokens = cv3_shared->silent_tokens;
+
         for (uint32_t n = 0; n != max_len; ++n)
         {
             if (!llm_decode(speech_type, cur))
@@ -144,6 +152,22 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
                 throw std::runtime_error("Failed to sample token from LLM output. This might be wrong with the model or caused by an issue with the sampling parameters.\n");
             if (n > min_len && llm_is_stop_token(token_id))
                 break;
+
+            if (silent_tokens.count(token_id))
+            {
+                ++cur_silent_token_num;
+                if (cur_silent_token_num > max_silent_token_num)
+                {
+                    // Drop excess silent tokens — the token is already in the
+                    // KV cache (from llm_decode), so update cur to keep the
+                    // model state consistent, but skip llm_accept_token so
+                    // it does not appear in the output.
+                    cur = speech_emb + token_id * speech_row_size;
+                    continue;
+                }
+            }
+            else
+                cur_silent_token_num = 0;
 
             llm_accept_token(token_id);
             cur = speech_emb + token_id * speech_row_size;

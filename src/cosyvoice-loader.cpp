@@ -651,6 +651,21 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     id = static_cast<int64_t>(gguf_get_arr_n(loader, id));
     cv3_shared->stop_tokens.insert(stop_tok_data, stop_tok_data + id);
 
+    // FSQ silent and breath tokens — loaded from GGUF if available,
+    // otherwise fall back to hardcoded defaults matching CosyVoice3.
+    id = gguf_find_key(loader, "silent_token_ids");
+    if (id != -1)
+    {
+        auto silent_tok_data = reinterpret_cast<const int*>(gguf_get_arr_data(loader, id));
+        id = static_cast<int64_t>(gguf_get_arr_n(loader, id));
+        cv3_shared->silent_tokens.insert(silent_tok_data, silent_tok_data + id);
+    }
+    else
+    {
+        static const int kDefaultSilentTokens[] = { 1, 2, 28, 29, 55, 248, 494, 2241, 2242, 2322, 2323 };
+        cv3_shared->silent_tokens.insert(std::begin(kDefaultSilentTokens), std::end(kDefaultSilentTokens));
+    }
+
     id = gguf_find_key(loader, "cosyvoice.instruction_prefix");
     if (id != -1)
     {

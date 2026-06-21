@@ -270,6 +270,8 @@ def convert_cosyvoice_to_gguf(yaml_config_path: str, llm_model_path: str, blank_
     gguf_model.add_int32("sos_token_id", sos)
     gguf_model.add_int32("task_token_id", task_id)
     gguf_model.add_array("stop_token_ids", stop_token_ids)
+    # FSQ silent and breath tokens (CosyVoice3 codebook indices)
+    gguf_model.add_array("silent_token_ids", [1, 2, 28, 29, 55, 248, 494, 2241, 2242, 2322, 2323])
     gguf_model.add_key_value("mix_ratio", config["llm"]["mix_ratio"], gguf.GGUFValueType.ARRAY, gguf.GGUFValueType.FLOAT32)
     gguf_model.add_float32("sampling.top_p", config["llm"]["sampling"]["top_p"])
     gguf_model.add_int32("sampling.top_k", config["llm"]["sampling"]["top_k"])
