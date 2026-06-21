@@ -641,10 +641,24 @@ int tool_entry(int argc, char** argv)
             else if (str_casecmp(arg, "--prompt-speech") == 0)
                 options.single_prompt_speech = get_arg_value();
             else if (str_casecmp(arg, "--api") == 0)
+            {
+                if (options.mode != server_options::run_mode::unspecified)
+                {
+                    fprintf(stderr, "Error: --api and --webui are mutually exclusive.\n");
+                    return 1;
+                }
                 options.mode = server_options::run_mode::api;
+            }
 #ifndef COSYVOICE_SERVER_NO_WEBUI
             else if (str_casecmp(arg, "--webui") == 0)
+            {
+                if (options.mode != server_options::run_mode::unspecified)
+                {
+                    fprintf(stderr, "Error: --api and --webui are mutually exclusive.\n");
+                    return 1;
+                }
                 options.mode = server_options::run_mode::webui;
+            }
             else if (str_casecmp(arg, "--frontend-model") == 0)
                 options.frontend_model = get_arg_value();
             else if (str_casecmp(arg, "--speech-tokenizer") == 0)
