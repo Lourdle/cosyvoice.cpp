@@ -13,9 +13,16 @@
 uint32_t cosyvoice_generate_random_seed()
 {
     std::random_device rd;
+    uint32_t seed;
     if (rd.entropy() == 0)
-        return static_cast<uint32_t>(std::chrono::system_clock::now().time_since_epoch().count());
-    return rd();
+        seed = static_cast<uint32_t>(std::chrono::system_clock::now().time_since_epoch().count());
+    else
+        seed = rd();
+
+    std::mt19937 gen(seed);
+    std::uniform_int_distribution<uint32_t> dist(0, UINT32_MAX);
+    gen.seed(dist(gen) ^ gen() ^ seed);
+    return dist(gen);
 }
 
 #ifdef _WIN32
