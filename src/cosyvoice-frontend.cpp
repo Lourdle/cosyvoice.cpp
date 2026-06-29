@@ -13,14 +13,12 @@
 #else
 #error "src/cosyvoice-frontend.cpp requires x86_64 or ARM64 SIMD support"
 #endif
-#include <float.h>
 
 #include <onnxruntime_cxx_api.h>
 
 #ifdef _WIN32
     #define NOMINMAX
     #include <Windows.h>
-    #include <io.h>
 #else
     #include <sys/mman.h>
     #include <sys/stat.h>
@@ -215,11 +213,15 @@ void cosyvoice_frontend_free(cosyvoice_frontend_context_t ctx)
 matrix cosyvoice_frontend_context::extract_speech_feat(float* speech, uint32_t len)
 {
     matrix signal(1, len + 1440);
-    // Reflect padding
+    // Replicate pad to match PyTorch stft center=False + F.pad reflect behavior
+    // matcha.utils.audio.mel_spectrogram uses F.pad with mode='reflect'
+    // PyTorch reflect: left[i] = y[pad-1-i] for i in 0..pad-1
+    // i.e. y[pad-1], y[pad-2], ..., y[0]  (includes index 0)
+    // This matches PyTorch F.pad mode='reflect' for 1D tensors
     for (size_t i = 0; i != 720; ++i)
     {
-        signal.data[i] = speech[719 - i];
-        signal.data[i + len + 720] = speech[len - 2 - i];
+        signal.data[i] = speech[720 - 1 - i];                        // left padding (reflect, includes speech[0])
+        signal.data[i + len + 720] = speech[len - 1 - i];            // right padding (reflect, includes speech[len-1])
     }
     memcpy(signal.data + 720, speech, len * sizeof(float));
 
@@ -347,16 +349,21 @@ tokens_t cosyvoice_frontend_context::extract_speech_token(float* signal, uint32_
     constexpr int nfft = 400;
     constexpr int win_size = nfft;
 
-    // Center reflect pad
+    // Center replicate pad (match PyTorch stft center=True default)
+    // PyTorch stft with center=True uses replicate (repeat) padding, not reflect
+    // pad = n_fft // 2 = 200 on each side
+    // Total padded length = T + 400
     matrix padded_signal(1, len + nfft);
     for (uint32_t i = 0; i != nfft / 2; ++i)
     {
-        padded_signal.data[i] = signal[nfft / 2 - i];
-        padded_signal.data[i + len + nfft / 2] = signal[len - 2 - i];
+        padded_signal.data[i] = signal[0];                          // replicate left edge
+        padded_signal.data[i + len + nfft / 2] = signal[len - 1];   // replicate right edge
     }
     memcpy(padded_signal.data + nfft / 2, signal, len * sizeof(float));
 
-    // Unfold
+    // Unfold: match PyTorch stft center=True behavior, then [..., :-1] trim
+    // PyTorch: stft center=True -> 592 frames, [..., :-1] -> 591 frames
+    // C++: replicate pad -> T+400, unfold -> T/160 = 591 frames (matching [..., :-1])
     padded_signal.shape[0] = (len - win_size + nfft) / hop_length;
     padded_signal.shape[1] = win_size;
     padded_signal.stride = hop_length;
@@ -459,7 +466,6 @@ tokens_t cosyvoice_frontend_context::extract_speech_token(float* signal, uint32_
             values = _mm256_log10_ps(values);
             _mm256_storeu_ps(mel_dataptr, values);
             maximum_256 = _mm256_max_ps(maximum_256, values);
-            mel_dataptr += 8;
         }
 
         __m128 maximum_128 = _mm_max_ps(_mm256_castps256_ps128(maximum_256), _mm256_extractf128_ps(maximum_256, 1));
@@ -583,7 +589,7 @@ matrix cosyvoice_frontend_context::extract_spk_embedding(float* speech, uint32_t
         __m128 sum128 = _mm_add_ps(vlow, vhigh);
 
         for (; j + 3 < win_size; j += 4)
-        {
+    {
             __m128 v = _mm_loadu_ps(speech_frame + j);
             sum128 = _mm_add_ps(sum128, v);
         }
@@ -711,7 +717,7 @@ matrix cosyvoice_frontend_context::extract_spk_embedding(float* speech, uint32_t
             float sum = _mm_cvtss_f32(sums);
             for (; k != spectrum.shape[1]; ++k)
                 sum += spectrum_dataptr[k] * mel_basis_spk_dataptr[k];
-            feat(j, i) = std::log(std::max(FLT_EPSILON, sum));
+            feat(j, i) = std::log(std::max(1e-10f, sum));
         }
     }
 
@@ -771,13 +777,13 @@ matrix cosyvoice_frontend_context::extract_spk_embedding(float* speech, uint32_t
             for (int k = 0, l = 8; k != l; ++k)
                 mem[k * feat.stride] = values[k];
             idx256 = _mm256_add_epi32(idx256, _8stridev);
-        }
+    }
 
         __m128 mean128 = _mm_set_ps1(mean);
         idx128 = _mm_setr_epi32(j, j + 1, j + 2, j + 3);
         idx128 = _mm_mullo_epi32(idx128, stride128);
         for (; j + 3 < feat.shape[0]; j += 4)
-        {
+    {
             __m128 v = _mm_i32gather_ps(feat_start, idx128, 4);
             v = _mm_sub_ps(v, mean128);
             alignas(16) float values[4];
