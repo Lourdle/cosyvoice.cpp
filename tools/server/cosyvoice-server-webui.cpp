@@ -88,19 +88,11 @@ static bool register_speaker_from_gguf(
     if (!session)
         return false;
 
-    // Apply current TTS context settings from the first existing session if any
-    if (!runtime.voice_sessions.empty() && !runtime.voice_sessions[0].empty())
-    {
-        auto& first = runtime.voice_sessions[0].front().second;
-        // Copy settings from existing session (text_norm, splitting, fade-in)
-        // We can read the first session's config — but for simplicity, just use defaults.
-        // cosyvoice_tts_context_set_text_normalization_enabled(session.get(), ...);
-        // cosyvoice_tts_context_set_split_text_enabled(session.get(), ...);
-        // cosyvoice_tts_context_set_fast_split_text_enabled(session.get(), ...);
-        // cosyvoice_tts_context_set_fade_in_enabled(session.get(), ...);
-        (void)first;
-    }
-
+    // Apply TTS context settings from server defaults
+    cosyvoice_tts_context_set_text_normalization_enabled(session.get(), runtime.text_normalization_enabled);
+    cosyvoice_tts_context_set_split_text_enabled(session.get(), runtime.split_text_enabled);
+    cosyvoice_tts_context_set_fast_split_text_enabled(session.get(), runtime.fast_split_text_enabled);
+    cosyvoice_tts_context_set_fade_in_enabled(session.get(), runtime.fade_in_enabled);
     voice_runtime voice;
     voice.name         = name;
     voice.prompt_speech = std::move(ps);
@@ -1244,9 +1236,8 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 
     // ---- Error handler (404) ----
-    server.set_error_handler([&runtime](const Request& req, Response& res)
+    server.set_error_handler([](const Request& req, Response& res)
     {
-        (void)runtime;
         if (!res.body.empty())
             return;
 
