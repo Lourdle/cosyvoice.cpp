@@ -89,7 +89,9 @@ static bool register_speaker_from_gguf(
         return false;
 
     // Apply TTS context settings from server defaults
+#ifndef COSYVOICE_NO_ICU
     cosyvoice_tts_context_set_text_normalization_enabled(session.get(), runtime.text_normalization_enabled);
+#endif
     cosyvoice_tts_context_set_split_text_enabled(session.get(), runtime.split_text_enabled);
     cosyvoice_tts_context_set_fast_split_text_enabled(session.get(), runtime.fast_split_text_enabled);
     cosyvoice_tts_context_set_fade_in_enabled(session.get(), runtime.fade_in_enabled);
