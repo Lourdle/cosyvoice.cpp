@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.28)
 project(cosyvoice LANGUAGES C CXX)
 
+# Require 64-bit architecture — this project does not support 32-bit builds.
+if(CMAKE_SIZEOF_VOID_P LESS 8)
+    message(FATAL_ERROR "cosyvoice requires a 64-bit build environment. "
+            "Please configure with a 64-bit compiler/toolchain.")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -66,15 +72,15 @@ endif()
 # Separate frontend and text-norm into OBJECT libraries so their heavy dependencies 
 # (ONNX Runtime, ICU) don't pollute the compile flags of the rest of the project.
 # This prevents a full project rebuild when toggling COSYVOICE_NO_ICU or COSYVOICE_NO_FRONTEND.
-list(REMOVE_ITEM COSYVOICE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/cosyvoice-frontend.cpp")
+    list(REMOVE_ITEM COSYVOICE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/cosyvoice-frontend.cpp")
 list(REMOVE_ITEM COSYVOICE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/cosyvoice-frontend-text-norm.cpp")
 
 set(OBJECT_LIBS "")
 
 # Text Norm (ICU)
 add_library(cosyvoice-frontend-text-norm OBJECT "src/cosyvoice-frontend-text-norm.cpp")
-target_include_directories(cosyvoice-frontend-text-norm PRIVATE "include" "vendor/miniaudio")
-target_link_libraries(cosyvoice-frontend-text-norm PRIVATE ggml pcre2-8 pcre2-16)
+target_include_directories(cosyvoice-frontend-text-norm PRIVATE "include")
+target_link_libraries(cosyvoice-frontend-text-norm PRIVATE ggml)
 if(NOT COSYVOICE_NO_ICU)
     target_link_libraries(cosyvoice-frontend-text-norm PRIVATE ICU::uc ICU::i18n)
 else()
@@ -85,12 +91,12 @@ list(APPEND OBJECT_LIBS cosyvoice-frontend-text-norm)
 # ONNX Frontend
 if(NOT COSYVOICE_NO_FRONTEND)
     add_library(cosyvoice-frontend OBJECT "src/cosyvoice-frontend.cpp")
-    target_include_directories(cosyvoice-frontend PRIVATE "include" "vendor/miniaudio" "common")
-    target_link_libraries(cosyvoice-frontend PRIVATE ggml common pcre2-8 pcre2-16 onnxruntime)
+    target_include_directories(cosyvoice-frontend PRIVATE "include" "common")
+    target_link_libraries(cosyvoice-frontend PRIVATE ggml common onnxruntime)
     if(COSYVOICE_NO_AUDIO)
         target_compile_definitions(cosyvoice-frontend PRIVATE COSYVOICE_NO_AUDIO)
     endif()
-    list(APPEND OBJECT_LIBS cosyvoice-frontend)
+        list(APPEND OBJECT_LIBS cosyvoice-frontend)
 endif()
 
 add_library(cosyvoice ${COSYVOICE_SOURCES})
@@ -117,16 +123,6 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
         
         if(TARGET cosyvoice-frontend)
             target_compile_options(cosyvoice-frontend PRIVATE ${SIMD_FLAGS})
-        endif()
-        if(TARGET cosyvoice-frontend-text-norm)
-            target_compile_options(cosyvoice-frontend-text-norm PRIVATE ${SIMD_FLAGS})
-        endif()
-    elseif(MSVC)
-        if(TARGET cosyvoice-frontend)
-            target_compile_options(cosyvoice-frontend PRIVATE "/arch:AVX2")
-        endif()
-        if(TARGET cosyvoice-frontend-text-norm)
-            target_compile_options(cosyvoice-frontend-text-norm PRIVATE "/arch:AVX2")
         endif()
     endif()
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
@@ -168,7 +164,7 @@ endif()
 # Link the main library to core dependencies.
 # Note: Object library dependencies (ICU, ONNX) are implicitly forwarded as link dependencies,
 # but we still need to add ICU::data manually on Windows so it gets picked up by post-build DLL copy.
-set(COSYVOICE_LINK_LIBS ggml pcre2-8 pcre2-16)
+set(COSYVOICE_LINK_LIBS ggml pcre2-8 pcre2-16 common)
 if(COSYVOICE_AUDIO_BACKEND STREQUAL "FFMPEG")
     list(APPEND COSYVOICE_LINK_LIBS ffmpeg)
 endif()
