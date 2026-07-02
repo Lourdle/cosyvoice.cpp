@@ -1,17 +1,16 @@
-﻿#ifdef _MSC_VER
+#ifdef _MSC_VER
     #define _CRT_SECURE_NO_WARNINGS
 #endif
 
 #include "tool_common.h"
+#include "gguf_parser.h"
 
 #include <cstring>
 #include <cinttypes>
 #include <memory>
 #include <string>
 #include <map>
-#include <set>
 #include <array>
-#include <tuple>
 #include <thread>
 #include <atomic>
 
@@ -23,6 +22,47 @@
 #include <pcre2.h>
 
 #include <nlohmann/json.hpp>
+
+// ---------------------------------------------------------------------------
+// Tensor data holder — wraps either a mmap pointer or a quantized buffer
+// ---------------------------------------------------------------------------
+
+struct TensorData {
+    char* data = nullptr;     // points to mmap region or quantized buffer
+    size_t nbytes = 0;
+    bool owns_buffer = false; // true if `data` is a unique_ptr we manage
+
+    ~TensorData() { release(); }
+
+    TensorData() = default;
+
+    TensorData(const TensorData&) = delete;
+
+    TensorData& operator=(const TensorData&) = delete;
+
+    TensorData& operator=(TensorData&& other) noexcept
+    {
+        if (this != &other)
+        {
+            data = other.data;
+            nbytes = other.nbytes;
+            owns_buffer = other.owns_buffer;
+            other.data = nullptr;
+            other.nbytes = 0;
+            other.owns_buffer = false;
+        }
+        return *this;
+    }
+
+    void release()
+    {
+        if (owns_buffer) { free(data); data = nullptr; owns_buffer = false; }
+    }
+};
+
+// ---------------------------------------------------------------------------
+// CLI options
+// ---------------------------------------------------------------------------
 
 enum OptionID {
     OPT_HELP,
@@ -305,12 +345,23 @@ int tool_entry(int argc, char** argv)
     if (!input || !output || default_ftype == static_cast<ggml_ftype>(-2))
         return 1;
 
-    ggml_context* ctx;
-    gguf_context_ptr input_gguf_ctx(gguf_init_from_file(input, gguf_init_params{ .no_alloc = false, .ctx = &ctx }));
-    if (!input_gguf_ctx)
+    gguf_context_ptr output_gguf_ctx(gguf_init_empty());
     {
-        fprintf(stderr, "Error: failed to load the input file \"%s\".\n", input);
-        fprintf(stderr, "Reason: %s\n", strerror(errno));
+        gguf_context_ptr ctx(gguf_init_from_file(input, gguf_init_params{ .no_alloc = false, .ctx = nullptr }));
+        gguf_set_kv(output_gguf_ctx.get(), ctx.get());
+    }
+
+    file_mmap mmap(input);
+    if (!mmap)
+    {
+        fprintf(stderr, "Error: failed to memory-map the input file \"%s\".\n", input);
+        return 1;
+    }
+
+    gguf_parser parser;
+    if (!parser.parse(static_cast<const uint8_t*>(mmap.data()), mmap.size(), nullptr))
+    {
+        fprintf(stderr, "Error: failed to parse the input file \"%s\".\n", input);
         return 1;
     }
 
@@ -364,24 +415,37 @@ int tool_entry(int argc, char** argv)
         return default_ftype;
     };
 
-    std::map<std::string, std::tuple<std::unique_ptr<char[]>, ggml_type, std::array<int64_t, GGML_MAX_DIMS>>> quantized_tensors;
-    std::set<std::string> tensors_to_quantize;
+    // Store tensor info: name, output type, dimensions, and data pointer.
+    // Data pointer initially points into the mmap region for all tensors.
+    // After quantization, the pointer is swapped to point to the quantized buffer.
+    struct TensorEntry {
+        std::string name;
+        ggml_type type;
+        bool need_to_quantize = false;
+        std::array<int64_t, GGML_MAX_DIMS> ne;
+        TensorData data;
+    };
+
+    std::map<std::string, TensorEntry> tensors;
     int64_t n_parameters = 0;
 
-    for (int64_t i = 0; i != gguf_get_n_tensors(input_gguf_ctx.get()); ++i)
+    for (size_t i = 0; i != parser.info.size(); ++i)
     {
-        auto tensor = ggml_get_tensor(ctx, gguf_get_tensor_name(input_gguf_ctx.get(), i));
+        ggml_tensor* tensor = &parser.info[i].t;
         auto tensor_name = tensor->name;
         auto cur_ftype = resolve_ftype(tensor_name);
 
+        TensorEntry entry;
+        entry.name = tensor_name;
+        entry.type = tensor->type;
+        entry.ne = *reinterpret_cast<std::array<int64_t, GGML_MAX_DIMS>*>(&tensor->ne);
+
         if (cur_ftype == GGML_FTYPE_UNKNOWN)
         {
-            // COPY: must preserve the original data, allocate independent copy
-            auto nbytes = ggml_nbytes(tensor);
-            auto data = std::make_unique<char[]>(nbytes);
-            memcpy(data.get(), tensor->data, nbytes);
-            quantized_tensors[tensor_name] = std::make_tuple(std::move(data), tensor->type,
-                *reinterpret_cast<std::array<int64_t, GGML_MAX_DIMS>*>(&tensor->ne));
+            // COPY: keep original data, mmap pointer is fine as long as file_mmap lives
+            entry.data.data = reinterpret_cast<char*>(tensor->data);
+            entry.data.nbytes = ggml_nbytes(tensor);
+            entry.data.owns_buffer = false;
             printf("Tensor \"%s\": keep as %s (mapped to COPY)\n", tensor_name, ggml_type_name(tensor->type));
         }
         else
@@ -391,7 +455,6 @@ int tool_entry(int argc, char** argv)
             {
                 fprintf(stderr, "Error: tensor \"%s\" has type %s, only F32 tensors can be quantized.\n",
                     tensor_name, ggml_type_name(tensor->type));
-                ggml_free(ctx);
                 return 1;
             }
 
@@ -400,39 +463,41 @@ int tool_entry(int argc, char** argv)
 
             if (ggml_is_vector(tensor))
             {
-                // Vectors are small: copy to avoid dangling ptr issues
+                // Vectors: keep as F32
                 auto nbytes = ggml_nbytes(tensor);
-                auto data = std::make_unique<char[]>(nbytes);
-                memcpy(data.get(), tensor->data, nbytes);
-                quantized_tensors[tensor_name] = std::make_tuple(std::move(data), tensor->type,
-                    *reinterpret_cast<std::array<int64_t, GGML_MAX_DIMS>*>(&tensor->ne));
+                entry.data.data = reinterpret_cast<char*>(tensor->data);
+                entry.data.nbytes = nbytes;
+                entry.data.owns_buffer = false;
+                entry.type = tensor->type;
                 printf("Tensor \"%s\": keep as F32 (vector, no quantization)\n", tensor_name);
             }
             else if (ggml_is_matrix(tensor))
             {
-                // Steal pointer from ggml context – worker thread will replace data after quantization
                 auto cur_type = get_fallback_type(target_type, tensor->ne[0]);
                 if (cur_type != target_type)
                     printf("Warning: tensor \"%s\"'s ne0 is %" PRId64 ", not divisible by block size of %s, rolling back to %s.\n",
                         tensor_name, tensor->ne[0], ggml_type_name(target_type), ggml_type_name(cur_type));
-                quantized_tensors[tensor_name] = std::make_tuple(
-                    std::unique_ptr<char[]>(reinterpret_cast<char*>(tensor->data)),
-                    cur_type,
-                    *reinterpret_cast<std::array<int64_t, GGML_MAX_DIMS>*>(&tensor->ne));
-                tensors_to_quantize.insert(tensor_name);
+                // Direct mmap pointer — zero-copy. Will be swapped after quantization.
+                entry.data.data = reinterpret_cast<char*>(tensor->data);
+                entry.data.nbytes = ggml_nbytes(tensor);
+                entry.data.owns_buffer = false;
+                entry.type = cur_type;
+                entry.need_to_quantize = true;
                 n_parameters += nelements;
             }
             else
             {
                 printf("Warning: tensor \"%s\" is not a matrix or vector. It will be quantized to F16.\n", tensor_name);
-                quantized_tensors[tensor_name] = std::make_tuple(
-                    std::unique_ptr<char[]>(reinterpret_cast<char*>(tensor->data)),
-                    GGML_TYPE_F16,
-                    *reinterpret_cast<std::array<int64_t, GGML_MAX_DIMS>*>(&tensor->ne));
-                tensors_to_quantize.insert(tensor_name);
+                entry.data.data = reinterpret_cast<char*>(tensor->data);
+                entry.data.nbytes = ggml_nbytes(tensor);
+                entry.data.owns_buffer = false;
+                entry.type = GGML_TYPE_F16;
+                entry.need_to_quantize = true;
                 n_parameters += nelements;
             }
         }
+
+        tensors[tensor_name] = std::move(entry);
     }
 
     // Warn about unused tensor map patterns
@@ -440,7 +505,8 @@ int tool_entry(int argc, char** argv)
         if (!entry.matched)
             printf("Warning: tensor map pattern \"%s\" never matched any tensor.\n", entry.pattern.c_str());
 
-    if (!tensors_to_quantize.empty())
+    // Quantize in parallel
+    if (n_parameters > 0)
     {
         printf("\nTotal number of quantized parameters: %" PRId64 "\n", n_parameters);
         auto n_threads = std::max(1u, std::thread::hardware_concurrency());
@@ -450,23 +516,27 @@ int tool_entry(int argc, char** argv)
 
         auto worker_thread = [&](auto report_progress)
         {
-            auto iter = quantized_tensors.begin();
+            auto iter = tensors.begin();
             size_t last = 0;
             for (;;)
             {
                 size_t cur = idx++;
-                if (cur >= quantized_tensors.size())
+                if (cur >= tensors.size())
                     break;
                 std::advance(iter, cur - last);
                 last = cur;
-                if (tensors_to_quantize.find(iter->first) == tensors_to_quantize.end())
+                if (!iter->second.need_to_quantize)
                     continue;
-                auto& [data, type, ne] = iter->second;
+                auto& td = iter->second.data;
+                auto& type = iter->second.type;
+                auto& ne = iter->second.ne;
                 auto n_rows = ne[1] * ne[2] * ne[3];
                 auto quantized_data = std::make_unique<char[]>(ggml_row_size(type, ne[0]) * n_rows);
-                ggml_quantize_chunk(type, reinterpret_cast<float*>(data.get()), quantized_data.get(), 0, n_rows, ne[0], nullptr);
-                data.release();
-                data.swap(quantized_data);
+                ggml_quantize_chunk(type, reinterpret_cast<float*>(td.data), quantized_data.get(), 0, n_rows, ne[0], nullptr);
+                td.release();
+                td.data = quantized_data.release();
+                td.nbytes = ggml_row_size(type, ne[0]) * n_rows;
+                td.owns_buffer = true;
                 processed_parameters += ne[0] * n_rows;
                 report_progress();
             }
@@ -489,26 +559,27 @@ int tool_entry(int argc, char** argv)
     else
         printf("No tensors to quantize (all tensors are copied as-is).\n");
 
-    ggml_init_params params = { .mem_size = ggml_tensor_overhead() * quantized_tensors.size(), .no_alloc = true };
-    ggml_context_ptr gguf_ggml_ctx(ggml_init(params));
-    gguf_context_ptr output_gguf_ctx(gguf_init_empty());
-    int64_t id = gguf_find_key(input_gguf_ctx.get(), "general.file_type");
-    gguf_set_kv(output_gguf_ctx.get(), input_gguf_ctx.get());
-    ggml_free(ctx);
-
-    if (id != -1 && default_ftype != GGML_FTYPE_UNKNOWN)
+    // Update general.file_type if applicable
+    int64_t id = parser.find_key("general.file_type");
+    if (id >= 0 && default_ftype != GGML_FTYPE_UNKNOWN)
         gguf_set_val_u32(output_gguf_ctx.get(), "general.file_type", default_ftype);
 
     for (const auto& [key, value] : custom_strings)
         gguf_set_val_str(output_gguf_ctx.get(), key.c_str(), value.c_str());
 
-    for (const auto& [name, tensor_info] : quantized_tensors)
+    // Register tensors: data pointer points to either mmap region (COPY/vectors)
+    // or to a quantized buffer (post-quantization).
     {
-        const auto& [data, type, ne] = tensor_info;
-        auto tensor = ggml_new_tensor(gguf_ggml_ctx.get(), type, GGML_MAX_DIMS, ne.data());
-        tensor->data = data.get();
-        ggml_set_name(tensor, name.c_str());
-        gguf_add_tensor(output_gguf_ctx.get(), tensor);
+        ggml_init_params params = { .mem_size = ggml_tensor_overhead() * tensors.size(), .no_alloc = true };
+        ggml_context_ptr gguf_ggml_ctx(ggml_init(params));
+
+        for (const auto& [name, te] : tensors)
+        {
+            auto tensor = ggml_new_tensor(gguf_ggml_ctx.get(), te.type, GGML_MAX_DIMS, te.ne.data());
+            tensor->data = te.data.data;
+            ggml_set_name(tensor, name.c_str());
+            gguf_add_tensor(output_gguf_ctx.get(), tensor);
+        }
     }
 
     if (!gguf_write_to_file(output_gguf_ctx.get(), output, false))
