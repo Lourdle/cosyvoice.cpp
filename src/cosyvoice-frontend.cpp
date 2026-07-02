@@ -16,16 +16,6 @@
 
 #include <onnxruntime_cxx_api.h>
 
-#ifdef _WIN32
-    #define NOMINMAX
-    #include <Windows.h>
-#else
-    #include <sys/mman.h>
-    #include <sys/stat.h>
-    #include <unistd.h>
-    #include <fcntl.h>
-#endif
-
 struct cosyvoice_frontend_context
 {
     cosyvoice_frontend_context(const void* speech_tokenizer, size_t speech_tokenizer_length, const void* campplus, size_t campplus_length, const Ort::Env& env, const Ort::SessionOptions& session_options);
@@ -50,79 +40,13 @@ struct cosyvoice_frontend_context
 
 cosyvoice_frontend_context_t cosyvoice_frontend_load_from_files(const char* speech_tokenizer, const char* campplus)
 {
-#ifdef _WIN32
-    auto OpenFileByUTF8Name = [](PCSTR pFileName)
-    {
-        return CreateFileW(utf8_to_wstr(pFileName).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    };
+    file_mmap speech_tok(speech_tokenizer);
+    if (!speech_tok) return nullptr;
 
-    struct KernelObjCloser { void operator()(HANDLE hObject) const { CloseHandle(hObject); } };
-    struct ViewDataUnmapper { void operator()(PVOID pvData) const { UnmapViewOfFile(pvData); } };
+    file_mmap campp(campplus);
+    if (!campp) return nullptr;
 
-    using KernelObjHdr = std::unique_ptr<VOID, KernelObjCloser>;
-    KernelObjHdr hFileST(OpenFileByUTF8Name(speech_tokenizer));
-    if (hFileST.get() == INVALID_HANDLE_VALUE) return nullptr;
-    LARGE_INTEGER FileSizeST;
-    if (!GetFileSizeEx(hFileST.get(), &FileSizeST)) return nullptr;
-    KernelObjHdr hFileMappingST(CreateFileMappingA(
-        hFileST.get(),
-        nullptr,
-        PAGE_READONLY,
-        0,
-        0,
-        nullptr));
-    if (!hFileMappingST) return nullptr;
-    std::unique_ptr<VOID, ViewDataUnmapper> pvDataST(MapViewOfFile(hFileMappingST.get(), FILE_MAP_READ, 0, 0, 0));
-    if (!pvDataST) return nullptr;
-
-    KernelObjHdr hFileCP(OpenFileByUTF8Name(campplus));
-    if (hFileCP.get() == INVALID_HANDLE_VALUE) return nullptr;
-    LARGE_INTEGER FileSizeCP;
-    if (!GetFileSizeEx(hFileCP.get(), &FileSizeCP)) return nullptr;
-    std::unique_ptr<VOID, KernelObjCloser> hFileMappingCP(CreateFileMappingA(
-        hFileCP.get(),
-        nullptr,
-        PAGE_READONLY,
-        0,
-        0,
-        nullptr));
-    if (!hFileMappingCP) return nullptr;
-    std::unique_ptr<VOID, ViewDataUnmapper> pvDataCP(MapViewOfFile(hFileMappingCP.get(), FILE_MAP_READ, 0, 0, 0));
-    if (!pvDataCP) return nullptr;
-
-    return cosyvoice_frontend_load(pvDataST.get(), FileSizeST.QuadPart, pvDataCP.get(), FileSizeCP.QuadPart, nullptr, nullptr);
-#else
-    struct munmapper {
-        off_t size;
-        void operator()(void* addr) const { if (addr && addr != MAP_FAILED) munmap(addr, size); }
-    };
-    struct file_descriptor {
-        int fd;
-        file_descriptor(const char* path) : fd(open(path, O_RDONLY)) {}
-        ~file_descriptor() { if (fd >= 0) close(fd); }
-        operator int() const { return fd; }
-    };
-
-    file_descriptor st_fd(speech_tokenizer);
-    if (st_fd < 0) return nullptr;
-    file_descriptor cp_fd(campplus);
-    if (cp_fd < 0) return nullptr;
-
-    struct stat cur_stat;
-    if (fstat(st_fd, &cur_stat) != 0) return nullptr;
-    std::unique_ptr<void, munmapper> data_st(
-        mmap(nullptr, cur_stat.st_size, PROT_READ, MAP_SHARED, st_fd, 0),
-        munmapper{ cur_stat.st_size });
-    if (data_st.get() == MAP_FAILED) return nullptr;
-
-    if (fstat(cp_fd, &cur_stat) != 0) return nullptr;
-    std::unique_ptr<void, munmapper> data_cp(
-        mmap(nullptr, cur_stat.st_size, PROT_READ, MAP_SHARED, cp_fd, 0),
-        munmapper{ cur_stat.st_size });
-    if (data_cp.get() == MAP_FAILED) return nullptr;
-
-    return cosyvoice_frontend_load(data_st.get(), data_st.get_deleter().size, data_cp.get(), data_cp.get_deleter().size, nullptr, nullptr);
-#endif
+    return cosyvoice_frontend_load(speech_tok.data(), speech_tok.size(), campp.data(), campp.size(), nullptr, nullptr);
 }
 
 cosyvoice_frontend_context_t cosyvoice_frontend_load(const void* speech_tokenizer_data, size_t speech_tokenizer_size, const void* campplus_data, size_t campplus_size, const OrtEnv* env, const OrtSessionOptions* session_options)
@@ -589,7 +513,7 @@ matrix cosyvoice_frontend_context::extract_spk_embedding(float* speech, uint32_t
         __m128 sum128 = _mm_add_ps(vlow, vhigh);
 
         for (; j + 3 < win_size; j += 4)
-    {
+        {
             __m128 v = _mm_loadu_ps(speech_frame + j);
             sum128 = _mm_add_ps(sum128, v);
         }
@@ -777,13 +701,13 @@ matrix cosyvoice_frontend_context::extract_spk_embedding(float* speech, uint32_t
             for (int k = 0, l = 8; k != l; ++k)
                 mem[k * feat.stride] = values[k];
             idx256 = _mm256_add_epi32(idx256, _8stridev);
-    }
+        }
 
         __m128 mean128 = _mm_set_ps1(mean);
         idx128 = _mm_setr_epi32(j, j + 1, j + 2, j + 3);
         idx128 = _mm_mullo_epi32(idx128, stride128);
         for (; j + 3 < feat.shape[0]; j += 4)
-    {
+        {
             __m128 v = _mm_i32gather_ps(feat_start, idx128, 4);
             v = _mm_sub_ps(v, mean128);
             alignas(16) float values[4];
@@ -1066,7 +990,7 @@ cosyvoice_frontend_context::cosyvoice_frontend_context(const void* speech_tokeni
     constexpr int num_fft_bins = 256;
     constexpr int num_mel_bins = 80;
     constexpr float fft_bin_width = 16000.f / 512;
-   
+
     const auto mel_low = 1127.0f * std::log(1.0f + 20.f / 700.f);
     const auto mel_high = 1127.0f * std::log(1.0f + high / 700.0f);
     const auto mel_delta = (mel_high - mel_low) / (num_mel_bins + 1);
