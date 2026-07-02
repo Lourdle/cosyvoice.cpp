@@ -141,6 +141,22 @@ extern "C" {
 #endif
 
 /**
+ * @brief Load a model context with explicit backend, threading, and context parameters.
+ * @note `backend == NULL` selects the default backend.
+ * @note If `backend != NULL`, backend ownership is transferred to the created context and released by `cosyvoice_free()`.
+ * @note Set `n_threads` to 0 to use hardware concurrency when available.
+ * @note After loading, the data buffer is no longer needed and can be freed by the caller.
+ */
+COSYVOICE_API cosyvoice_context_t cosyvoice_load_ext(
+    const void*                       data,
+    size_t                            size,
+    const cosyvoice_context_params_t* params,
+    ggml_backend_t                    backend,
+    uint32_t                          n_threads,
+    uint32_t                          params_version
+);
+
+/**
  * @brief Get the status code of the last backend operation.
  */
 COSYVOICE_API enum ggml_status cosyvoice_get_last_status(cosyvoice_context_t ctx);
@@ -285,8 +301,19 @@ COSYVOICE_API cosyvoice_tokenizer_context_t   cosyvoice_get_tokenizer(cosyvoice_
 
 /**
  * @brief Load a standalone tokenizer from a model file.
+ * @param filename Tokenizer file path.
+ * @return Tokenizer handle on success; NULL on failure.
  */
 COSYVOICE_API cosyvoice_tokenizer_context_t   cosyvoice_tokenizer_load_from_file(const char* filename);
+
+/**
+ * @brief Load a standalone tokenizer from a memory buffer.
+ * @param data Pointer to model GGUF data.
+ * @param size Size of the data buffer.
+ * @return Tokenizer handle on success; NULL on failure.
+ * @note The data buffer can be freed after loading.
+ */
+COSYVOICE_API cosyvoice_tokenizer_context_t   cosyvoice_tokenizer_load(const void* data, size_t size);
 
 /**
  * @brief Free a tokenizer context loaded independently.

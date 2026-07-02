@@ -1,4 +1,4 @@
-﻿#include "cosyvoice-internal.h"
+#include "cosyvoice-internal.h"
 #include "cosyvoice-tokenizer.h"
 #include "cosyvoice-model.h"
 #include "cosyvoice-loader.h"
@@ -120,14 +120,10 @@ void cosyvoice_log_callback_default(ggml_log_level level, const char* text, void
 #endif
 }
 
-cosyvoice_context_t cosyvoice_load_from_file_ext(
-    const char* filename,
-    const cosyvoice_context_params_t* params,
-    ggml_backend_t backend,
-    uint32_t n_threads,
-    uint32_t version)
+cosyvoice_context_t cosyvoice_load_ext(const void* data, size_t size, const cosyvoice_context_params_t* params, ggml_backend_t backend, uint32_t n_threads, uint32_t version)
 {
-    gguf_loader loader(filename);
+    gguf_parser parser;
+    gguf_loader loader(parser, data, size);
     if (!loader) return nullptr;
 
     cosyvoice_context_params_v2_t params_v2{ .base_params = *params };
@@ -149,6 +145,17 @@ cosyvoice_context_t cosyvoice_load_from_file_ext(
         ggml_backend_set_n_threads(ctx->worker->cpu_backend.get(), n_threads);
 
     return ctx;
+}
+
+cosyvoice_context_t cosyvoice_load_from_file_ext(
+    const char* filename,
+    const cosyvoice_context_params_t* params,
+    ggml_backend_t backend,
+    uint32_t n_threads,
+    uint32_t version)
+{
+    file_mmap mmap(filename);
+    return mmap ? cosyvoice_load_ext(mmap.data(), mmap.size(), params, backend, n_threads, version) : nullptr;
 }
 
 cosyvoice_context_t cosyvoice_load_from_file(const char* filename)
@@ -182,13 +189,31 @@ void cosyvoice_free(cosyvoice_context_t ctx)
 
 cosyvoice_tokenizer_context_t cosyvoice_tokenizer_load_from_file(const char* filename)
 {
-    gguf_metadata_loader loader(gguf_init_from_file(filename, {}));
-    if (!loader)
+    file_mmap mmap(filename);
+    if (!mmap)
         return nullptr;
 
+    gguf_parser parser;
+    if (!parser.parse(
+        static_cast<const uint8_t*>(mmap.data()), mmap.size(), nullptr))
+        return nullptr;
+
+    gguf_metadata_loader loader(&parser);
     auto ctx = new cosyvoice_tokenizer();
     ctx->load(loader);
-    gguf_free(loader);
+    return ctx;
+}
+
+cosyvoice_tokenizer_context_t cosyvoice_tokenizer_load(const void* data, size_t size)
+{
+    gguf_parser parser;
+    if (!parser.parse(
+        static_cast<const uint8_t*>(data), size, nullptr))
+        return nullptr;
+
+    gguf_metadata_loader loader(&parser);
+    auto ctx = new cosyvoice_tokenizer();
+    ctx->load(loader);
     return ctx;
 }
 

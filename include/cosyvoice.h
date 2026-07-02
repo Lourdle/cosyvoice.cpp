@@ -455,8 +455,19 @@ COSYVOICE_API uint32_t cosyvoice_get_sampler_seed(cosyvoice_context_t ctx);
 
 /**
  * @brief Load prompt speech features from a file.
+ * @param filename Prompt-speech file path.
+ * @return Prompt-speech handle on success; NULL on failure.
  */
 COSYVOICE_API cosyvoice_prompt_speech_t cosyvoice_prompt_speech_load_from_file(const char* filename);
+
+/**
+ * @brief Load prompt speech features from a memory buffer.
+ * @param data Pointer to prompt-speech GGUF data.
+ * @param size Size of the data buffer.
+ * @return Prompt-speech handle on success; NULL on failure.
+ * @note The data buffer can be freed after loading.
+ */
+COSYVOICE_API cosyvoice_prompt_speech_t cosyvoice_prompt_speech_load(const void* data, size_t size);
 
 /**
  * @brief Save a prompt-speech object to disk.
@@ -467,7 +478,7 @@ COSYVOICE_API bool cosyvoice_prompt_speech_save_to_file(cosyvoice_prompt_speech_
 /**
  * @brief Create a prompt object from prompt speech for a given model context.
  */
-COSYVOICE_API cosyvoice_prompt_t        cosyvoice_prompt_init_from_prompt_speech(cosyvoice_context_t ctx, cosyvoice_prompt_speech_t prompt_speech);
+COSYVOICE_API cosyvoice_prompt_t cosyvoice_prompt_init_from_prompt_speech(cosyvoice_context_t ctx, cosyvoice_prompt_speech_t prompt_speech);
 
 /**
  * @brief Free a prompt-speech object.

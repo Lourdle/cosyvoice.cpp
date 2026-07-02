@@ -302,10 +302,10 @@ void ResBlock::OnLoad(const gguf_loader& loader, const std::string& prefix)
 {
     int64_t id;
     GGML_ASSERT(loader.find_metadata_key(combine_prefix(prefix, "dilations").c_str(), id));
-    GGML_ASSERT(gguf_get_arr_type(loader.gguf_ctx, id) == GGUF_TYPE_INT32);
+    GGML_ASSERT(loader.parser.arr_type(id) == GGUF_TYPE_INT32);
 
-    const auto n_dilations = gguf_get_arr_n(loader.gguf_ctx, id);
-    const int* dilations = reinterpret_cast<const int*>(gguf_get_arr_data(loader.gguf_ctx, id));
+    const auto n_dilations = loader.parser.arr_n(id);
+    const int* dilations = reinterpret_cast<const int*>(loader.parser.arr_data(id));
     convs.resize(n_dilations);
     for (size_t i = 0; i != n_dilations; ++i)
     {
@@ -343,10 +343,10 @@ void CausalHiFTGenerator::OnLoad(const gguf_loader& loader, const std::string& p
 
     int64_t id;
     GGML_ASSERT(loader.find_metadata_key(combine_prefix(prefix, "upsample_rates").c_str(), id));
-    GGML_ASSERT(gguf_get_arr_type(loader.gguf_ctx, id) == GGUF_TYPE_INT32);
+    GGML_ASSERT(loader.parser.arr_type(id) == GGUF_TYPE_INT32);
 
-    auto layers = gguf_get_arr_n(loader.gguf_ctx, id);
-    auto upsample_rates = reinterpret_cast<const int*>(gguf_get_arr_data(loader.gguf_ctx, id));
+    auto layers = loader.parser.arr_n(id);
+    auto upsample_rates = reinterpret_cast<const int*>(loader.parser.arr_data(id));
 
     ups.resize(layers);
     scale_factor = hop_len;
@@ -646,18 +646,18 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         i = dist(shared->noise_rng);
     hift.set_rand_ini(rand_ini_buffer.get());
 
-    int64_t id = gguf_find_key(loader, "stop_token_ids");
-    auto stop_tok_data = reinterpret_cast<const int*>(gguf_get_arr_data(loader, id));
-    id = static_cast<int64_t>(gguf_get_arr_n(loader, id));
+    int64_t id = loader.parser.find_key("stop_token_ids");
+    auto stop_tok_data = reinterpret_cast<const int*>(loader.parser.arr_data(id));
+    id = static_cast<int64_t>(loader.parser.arr_n(id));
     cv3_shared->stop_tokens.insert(stop_tok_data, stop_tok_data + id);
 
     // FSQ silent and breath tokens — loaded from GGUF if available,
     // otherwise fall back to hardcoded defaults matching CosyVoice3.
-    id = gguf_find_key(loader, "silent_token_ids");
+    id = loader.parser.find_key("silent_token_ids");
     if (id != -1)
     {
-        auto silent_tok_data = reinterpret_cast<const int*>(gguf_get_arr_data(loader, id));
-        id = static_cast<int64_t>(gguf_get_arr_n(loader, id));
+        auto silent_tok_data = reinterpret_cast<const int*>(loader.parser.arr_data(id));
+        id = static_cast<int64_t>(loader.parser.arr_n(id));
         cv3_shared->silent_tokens.insert(silent_tok_data, silent_tok_data + id);
     }
     else
@@ -666,10 +666,10 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         cv3_shared->silent_tokens.insert(std::begin(kDefaultSilentTokens), std::end(kDefaultSilentTokens));
     }
 
-    id = gguf_find_key(loader, "cosyvoice.instruction_prefix");
+    id = loader.parser.find_key("cosyvoice.instruction_prefix");
     if (id != -1)
     {
-        auto str = gguf_get_val_str(loader, id);
+        auto str = loader.parser.val_str(id);
         auto len = strlen(str) + 1;
         shared->instruction_prefix.reset(new char[len]);
         memcpy(shared->instruction_prefix.get(), str, len);

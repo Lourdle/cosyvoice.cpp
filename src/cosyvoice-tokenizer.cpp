@@ -347,17 +347,17 @@ void cosyvoice_vocab::impl::partition_special_tokens(std::forward_list<fragment_
 void cosyvoice_vocab::load(gguf_metadata_loader& loader) {
     GGML_ASSERT(loader.get_string("tokenizer.model.type") == "BPE");
 
-    const auto token_idx = gguf_find_key(loader, "tokenizer.vocab.tokens");
+    const auto token_idx = loader.parser.find_key("tokenizer.vocab.tokens");
 
     const int* toktypes = nullptr;
-    const auto toktype_idx = gguf_find_key(loader, "tokenizer.vocab.token_types");
-    toktypes = (const int*)gguf_get_arr_data(loader, toktype_idx);
+    const auto toktype_idx = loader.parser.find_key("tokenizer.vocab.token_types");
+    toktypes = (const int*)loader.parser.arr_data(toktype_idx);
 
-    auto n_tokens = gguf_get_arr_n(loader, token_idx);
+    auto n_tokens = loader.parser.arr_n(token_idx);
     pimpl_->id_to_token.resize(n_tokens);
 
     for (int i = 0; i != n_tokens; i++) {
-        std::string word = gguf_get_arr_str(loader, token_idx, i);
+        std::string word(loader.parser.arr_str(token_idx, i));
         if (word.empty())
             word = std::format("[EMPTY_{}]", i);
 
@@ -372,10 +372,10 @@ void cosyvoice_vocab::load(gguf_metadata_loader& loader) {
     }
     GGML_ASSERT(pimpl_->id_to_token.size() == pimpl_->token_to_id.size());
 
-    const auto merges_keyidx = gguf_find_key(loader, "tokenizer.model.merges");
-    const auto n_merges = gguf_get_arr_n(loader, merges_keyidx);
+    const auto merges_keyidx = loader.parser.find_key("tokenizer.model.merges");
+    const auto n_merges = loader.parser.arr_n(merges_keyidx);
     for (int i = 0; i < n_merges; i++) {
-        const std::string_view word = gguf_get_arr_str(loader, merges_keyidx, i);
+        const std::string_view word = loader.parser.arr_str(merges_keyidx, i);
 
         std::string_view first;
         std::string_view second;
