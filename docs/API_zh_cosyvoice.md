@@ -1,4 +1,4 @@
-# cosyvoice.h API 参考
+﻿# cosyvoice.h API 参考
 
 本文档覆盖 `include/cosyvoice.h` 中声明的全部公开符号。
 运行时支持通过多个 worker 槽实现并发推理；复制上下文后，不同线程可以绑定不同 worker，同时共享已加载的模型资源。
@@ -1019,6 +1019,33 @@ COSYVOICE_API cosyvoice_prompt_speech_t cosyvoice_prompt_speech_load_from_file(c
 ### 返回值
 
 成功返回句柄，失败返回 `NULL`。
+
+## cosyvoice_prompt_speech_load
+
+### 语法
+
+```c
+COSYVOICE_API cosyvoice_prompt_speech_t cosyvoice_prompt_speech_load(const void* data, size_t size);
+```
+
+### 说明
+
+从内存缓冲区加载提示语音特征。
+
+### 参数
+
+- `data`：内存中的提示语音 GGUF 数据指针。
+- `size`：数据字节大小。
+
+### 返回值
+
+成功返回提示语音句柄，失败返回 `NULL`。
+
+### 备注
+
+- 数据缓冲区必须包含 `feat`、`embedding`、`tokens`、`text` 等张量的提示语音 GGUF 格式。
+- 如果元数据中包含 CRC32 校验和，则会自动验证。
+- 加载完成后，数据缓冲区可由调用方释放。
 
 ## cosyvoice_prompt_speech_save_to_file
 

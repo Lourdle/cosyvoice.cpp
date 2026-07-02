@@ -1,4 +1,4 @@
-# cosyvoice-lowlevel.h API 参考
+﻿# cosyvoice-lowlevel.h API 参考
 
 本文档覆盖 `include/cosyvoice-lowlevel.h` 中声明的全部公开符号。
 
@@ -163,6 +163,45 @@ COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_ext(
 - 该接口在 GGML 动态库与静态库构建下都可用。
 - `backend == NULL` 表示自动选择后端。
 - 如果 `backend != NULL`，其所有权会转移给创建出的上下文，并在 `cosyvoice_free()` 时自动释放。
+
+## cosyvoice_load_ext
+
+### 语法
+
+```c
+COSYVOICE_API cosyvoice_context_t cosyvoice_load_ext(
+    const void*                       data,
+    size_t                            size,
+    const cosyvoice_context_params_t* params,
+    ggml_backend_t                    backend,
+    uint32_t                          n_threads,
+    uint32_t                          params_version
+);
+```
+
+### 说明
+
+从内存缓冲区加载模型上下文，支持显式后端、线程和参数版本控制。
+
+### 参数
+
+- `data`：内存中的模型 GGUF 数据指针。
+- `size`：数据字节大小。
+- `params`：上下文参数。
+- `backend`：可选后端句柄。
+- `n_threads`：CPU 线程数；传 `0` 时自动使用硬件并发数。
+- `params_version`：上下文参数版本。传 `COSYVOICE_CONTEXT_PARAMS_V2_VERSION` 将 `params` 解释为 `cosyvoice_context_params_v2_t`，传 `0` 则为 `cosyvoice_context_params_t`。
+
+### 返回值
+
+成功返回上下文句柄，失败返回 `NULL`。
+
+### 备注
+
+- `backend == NULL` 表示自动选择后端。
+- 如果 `backend != NULL`，其所有权会转移给创建出的上下文，并在 `cosyvoice_free()` 时自动释放。
+- 加载完成后，数据缓冲区可由调用方释放。
+- `n_threads` 传 `0` 时，线程数会根据 worker 数量自动分配。
 
 ## cosyvoice_get_last_status
 
@@ -618,6 +657,31 @@ COSYVOICE_API cosyvoice_tokenizer_context_t cosyvoice_tokenizer_load_from_file(c
 
 成功返回分词器句柄，失败返回 `NULL`。
 
+## cosyvoice_tokenizer_load
+
+### 语法
+
+```c
+COSYVOICE_API cosyvoice_tokenizer_context_t cosyvoice_tokenizer_load(const void* data, size_t size);
+```
+
+### 说明
+
+从内存缓冲区加载分词器。
+
+### 参数
+
+- `data`：内存中的模型 GGUF 数据指针。
+- `size`：数据字节大小。
+
+### 返回值
+
+成功返回分词器句柄，失败返回 `NULL`。
+
+### 备注
+
+- 加载完成后，数据缓冲区可由调用方释放。
+
 ## cosyvoice_tokenizer_free
 
 ### 语法
@@ -640,7 +704,7 @@ COSYVOICE_API void cosyvoice_tokenizer_free(cosyvoice_tokenizer_context_t ctx);
 
 ### 备注
 
-仅用于释放由 `cosyvoice_tokenizer_load_from_file` 创建的独立分词器。
+仅用于释放由 `cosyvoice_tokenizer_load_from_file` 或 `cosyvoice_tokenizer_load` 创建的独立分词器。
 
 ## cosyvoice_tokenization_result_create
 

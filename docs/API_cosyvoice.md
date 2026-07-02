@@ -992,6 +992,33 @@ Loads prompt-speech features from disk.
 
 Prompt-speech handle on success; `NULL` on failure.
 
+## cosyvoice_prompt_speech_load
+
+### Syntax
+
+```c
+COSYVOICE_API cosyvoice_prompt_speech_t cosyvoice_prompt_speech_load(const void* data, size_t size);
+```
+
+### Description
+
+Loads prompt-speech features from a memory buffer.
+
+### Parameters
+
+- `data`: Pointer to the prompt-speech GGUF data in memory.
+- `size`: Size of the prompt-speech data in bytes.
+
+### Returns
+
+Prompt-speech handle on success; `NULL` on failure.
+
+### Remarks
+
+- The data buffer must contain prompt-speech GGUF data with `feat`, `embedding`, `tokens`, and `text` tensors.
+- A CRC32 checksum is verified if present in the metadata.
+- After loading, the data buffer is no longer needed and can be freed by the caller.
+
 ## cosyvoice_prompt_speech_save_to_file
 
 ### Syntax

@@ -164,6 +164,45 @@ Context handle on success; `NULL` on failure.
 - `backend == NULL` means auto-select backend.
 - If `backend != NULL`, ownership is transferred to the created context and released by `cosyvoice_free()`.
 
+## cosyvoice_load_ext
+
+### Syntax
+
+```c
+COSYVOICE_API cosyvoice_context_t cosyvoice_load_ext(
+    const void*                       data,
+    size_t                            size,
+    const cosyvoice_context_params_t* params,
+    ggml_backend_t                    backend,
+    uint32_t                          n_threads,
+    uint32_t                          params_version
+);
+```
+
+### Description
+
+Loads a model context from a memory buffer with explicit backend, threading, and context parameters.
+
+### Parameters
+
+- `data`: Pointer to the model GGUF data in memory.
+- `size`: Size of the model data in bytes.
+- `params`: Context parameters.
+- `backend`: Optional backend handle. If non-null, ownership is transferred to the created context.
+- `n_threads`: CPU thread count; set `0` to use hardware concurrency when available.
+- `params_version`: Context parameters version. Pass `COSYVOICE_CONTEXT_PARAMS_V2_VERSION` to interpret `params` as `cosyvoice_context_params_v2_t`, or `0` for `cosyvoice_context_params_t`.
+
+### Returns
+
+Context handle on success; `NULL` on failure.
+
+### Remarks
+
+- `backend == NULL` selects the default backend.
+- If `backend != NULL`, backend ownership is transferred to the created context and released by `cosyvoice_free()`.
+- After loading, the data buffer is no longer needed and can be freed by the caller.
+- When `n_threads` is `0`, the library uses hardware concurrency divided by the number of workers.
+
 ## cosyvoice_get_last_status
 
 ### Syntax
@@ -618,6 +657,31 @@ Loads standalone tokenizer from file.
 
 Tokenizer handle on success; `NULL` on failure.
 
+## cosyvoice_tokenizer_load
+
+### Syntax
+
+```c
+COSYVOICE_API cosyvoice_tokenizer_context_t cosyvoice_tokenizer_load(const void* data, size_t size);
+```
+
+### Description
+
+Loads standalone tokenizer from a memory buffer.
+
+### Parameters
+
+- `data`: Pointer to model GGUF data in memory.
+- `size`: Size of the data buffer in bytes.
+
+### Returns
+
+Tokenizer handle on success; `NULL` on failure.
+
+### Remarks
+
+- The data buffer can be freed after loading.
+
 ## cosyvoice_tokenizer_free
 
 ### Syntax
@@ -640,7 +704,7 @@ No return value.
 
 ### Remarks
 
-Use this only for tokenizers created by `cosyvoice_tokenizer_load_from_file`.
+Use this only for standalone tokenizers created by `cosyvoice_tokenizer_load_from_file` or `cosyvoice_tokenizer_load`.
 
 ## cosyvoice_tokenization_result_create
 
