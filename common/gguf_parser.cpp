@@ -12,7 +12,7 @@
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-#define LOG_ERROR(fmt, ...) std::fputs(std::format("\033[31m[GGUF] {}: " fmt "\n\033[0m", __func__, __VA_ARGS__).c_str(), stderr)
+#define LOG_ERROR(fmt, ...) std::fputs(std::format("\033[31m[GGUF] {}: " fmt "\n\033[0m", __func__ __VA_OPT__(,) __VA_ARGS__).c_str(), stderr)
 
 static constexpr size_t pad(size_t n, size_t alignment)
 {
