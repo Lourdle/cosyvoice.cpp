@@ -360,7 +360,7 @@ bool gguf_parser::parse(const uint8_t* _buffer, size_t _size, ggml_context** out
             if (info[i].offset != expected_offset)
             {
                 LOG_ERROR("tensor '{}' offset {}, expected {}",
-                    __func__, info[i].t.name, info[i].offset, expected_offset);
+                    info[i].t.name, info[i].offset, expected_offset);
                 return false;
             }
             size_t tensor_bytes = ggml_nbytes(&info[i].t);
