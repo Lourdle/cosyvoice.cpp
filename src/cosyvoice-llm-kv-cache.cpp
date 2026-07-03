@@ -135,6 +135,8 @@ void cosyvoice_llm_kv_cache::offload_cache(ggml_backend_t backend, ggml_backend_
 
     offloaded_cache->len = n_tokens;
     auto gf = ggml_new_graph_custom(offloaded_cache->ctx, layers * 4, false);
+    ggml_tensor k_placeholder_tensor{ .ne{ kv_cache_layers[0].k->ne[0], n_tokens, kv_cache_layers[0].k->ne[2], 1 } };
+    ggml_tensor v_placeholder_tensor{ .ne{ fattn ? kv_cache_layers[0].v->ne[0] : n_tokens, fattn ? n_tokens : kv_cache_layers[0].v->ne[0], k_placeholder_tensor.ne[2], 1 } };
     for (int i = 0; i != layers; ++i)
     {
         auto& offloaded_layer = offloaded_cache->offloaded_kv_layers[i];
@@ -153,14 +155,15 @@ void cosyvoice_llm_kv_cache::offload_cache(ggml_backend_t backend, ggml_backend_
         offloaded_layer.v_view = ggml_cast(offloaded_cache->ctx, v_view, GGML_TYPE_F32);
         offloaded_layer.k_view->op = GGML_OP_DUP;
         offloaded_layer.v_view->op = GGML_OP_DUP;
-        // IMPORTANT: src[1] must be set to nullptr
+        // IMPORTANT: src[1] must be set to the placeholder tensor
         // or it will cause the bug that the non-contiguous tensor causes the bad result.
-        offloaded_layer.k_view->src[1] = offloaded_layer.v_view->src[1] = nullptr;
+        offloaded_layer.k_view->src[1] = &k_placeholder_tensor;
+        offloaded_layer.v_view->src[1] = &v_placeholder_tensor;
 
         ggml_build_forward_expand(gf, offloaded_layer.k_view);
         ggml_build_forward_expand(gf, offloaded_layer.v_view);
     }
-    
+
     ggml_backend_sched_alloc_graph(sched, gf);
     ggml_backend_sched_graph_compute_async(sched, gf);
 
