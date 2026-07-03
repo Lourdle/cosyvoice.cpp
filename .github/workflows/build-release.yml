@@ -25,13 +25,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - os: windows-2025-vs2026
             os_name: windows
             arch: x64
-          - os: ubuntu-latest
+          - os: ubuntu-26.04
             os_name: linux
             arch: x86_64
-          - os: macos-latest
+          - os: macos-26
             os_name: macos
             arch: arm64
 
@@ -46,19 +46,19 @@ jobs:
         run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
 
       - name: Install Dependencies (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-26.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libicu-dev libavcodec-dev libavformat-dev libavutil-dev libswresample-dev
 
       - name: Install Dependencies (macOS)
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-26'
         run: |
           brew update
           brew install pkg-config icu4c simde ffmpeg
 
       - name: Build and Package (Windows)
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-2025-vs2026'
         shell: pwsh
         run: |
           $frontends = @("ON", "OFF")
@@ -141,7 +141,7 @@ jobs:
           }
 
       - name: Build and Package (Unix)
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-2025-vs2026'
         shell: bash
         run: |
           set -e
@@ -157,7 +157,9 @@ jobs:
 
           mkdir -p "${SHARED_DEPS}/onnxruntime"
 
-          if [ "${{ matrix.os }}" == "macos-latest" ]; then
+          if [ "${{ matrix.os }}" == "macos-26" ]; then
+            export CXX="$(brew --prefix llvm@20)/bin/clang++"
+            SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
             export PKG_CONFIG_PATH="$(brew --prefix icu4c)/lib/pkgconfig:$PKG_CONFIG_PATH"
             ICU_ROOT_PATH="$(brew --prefix icu4c)"
           fi
@@ -180,9 +182,15 @@ jobs:
                 CMAKE_ARGS=(
                   "-B" "$BUILD_DIR"
                   "-DCMAKE_BUILD_TYPE=Release"
+                  "-DCMAKE_C_COMPILER=clang"
+                  "-DCMAKE_CXX_COMPILER=${CXX:-clang++}"
+                  "-DGGML_ACCELERATE=OFF"
+                  "-DGGML_BLAS=OFF"
+                  "-G" "Ninja"
                   "-DORT_PREBUILT_DIR=${SHARED_DEPS}/onnxruntime"
                 )
                 
+                if [ -n "$SDKROOT" ]; then CMAKE_ARGS+=("-DCMAKE_OSX_SYSROOT=${SDKROOT}"); fi
                 if [ -n "$ICU_ROOT_PATH" ]; then CMAKE_ARGS+=("-DICU_ROOT=$ICU_ROOT_PATH"); fi
                 
                 if [ "$f" == "OFF" ]; then CMAKE_ARGS+=("-DCOSYVOICE_NO_FRONTEND=ON"); else CMAKE_ARGS+=("-DCOSYVOICE_NO_FRONTEND=OFF"); fi
