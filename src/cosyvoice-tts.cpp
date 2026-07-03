@@ -23,6 +23,7 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
     const auto& llm = cv3_shared->llm;
     auto& batch_buffer = worker->batch_buffer;
     auto& prompt_crc32 = worker->prompt_crc32;
+    auto last_prompt_crc32 = prompt_crc32;
 
     if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
         ggml_backend_sched_synchronize(sched.get());
@@ -181,7 +182,7 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
         return false;
     }
 
-    if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
+    if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED && last_prompt_crc32 != prompt_crc32)
     {
         ggml_backend_sched_reset(sched.get());
         worker->kv_cache.offload_cache(worker->backend.get(), sched.get(), 1 + static_cast<uint32_t>(prompt->prompt_text.size()));

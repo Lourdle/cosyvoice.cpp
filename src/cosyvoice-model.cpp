@@ -252,6 +252,7 @@ void cosyvoice_model::empty_buffer_cache()
     }
 
     worker->kv_cache.clear_offloaded_cache();
+    worker->prompt_crc32 = 0;
 }
 
 void cosyvoice_model_3::empty_buffer_cache()
