@@ -57,6 +57,10 @@ jobs:
           brew update
           brew install pkg-config icu4c simde ffmpeg
 
+      - name: Setup MSVC Environment
+        if: matrix.os == 'windows-2025-vs2026'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Build and Package (Windows)
         if: matrix.os == 'windows-2025-vs2026'
         shell: pwsh
@@ -92,7 +96,10 @@ jobs:
                   "-DCMAKE_BUILD_TYPE=Release",
                   "-DICU_PREBUILT_DIR=$sharedDeps\icu",
                   "-DORT_PREBUILT_DIR=$sharedDeps\onnxruntime",
-                  "-DFFMPEG_PREBUILT_DIR=$sharedDeps\ffmpeg"
+                  "-DFFMPEG_PREBUILT_DIR=$sharedDeps\ffmpeg",
+                  "-G", "Ninja",
+                  "-DCMAKE_C_COMPILER=cl",
+                  "-DCMAKE_CXX_COMPILER=cl"
                 )
                 
                 if ($f -eq "OFF") { $cmakeArgs += "-DCOSYVOICE_NO_FRONTEND=ON" } else { $cmakeArgs += "-DCOSYVOICE_NO_FRONTEND=OFF" }
