@@ -568,3 +568,21 @@ bool cosyvoice_model::llm_set_kv_cache_len(uint32_t len)
     }
     return false;
 }
+
+void cosyvoice_model::llm_offload_kv_cache()
+{
+    auto sched = worker->sched.get();
+    auto& kv_cache = worker->kv_cache;
+    ggml_backend_sched_reset(sched);
+    kv_cache.offload_cache(worker->backend.get(), sched, kv_cache.cur_len);
+    ggml_backend_sched_synchronize(sched);
+}
+
+void cosyvoice_model::llm_load_kv_cache()
+{
+    auto sched = worker->sched.get();
+    auto& kv_cache = worker->kv_cache;
+    ggml_backend_sched_reset(sched);
+    kv_cache.offload_cache(worker->backend.get(), sched, kv_cache.cur_len);
+    ggml_backend_sched_synchronize(sched);
+}

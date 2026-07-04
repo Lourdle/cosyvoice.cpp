@@ -90,6 +90,8 @@ struct cosyvoice_model : virtual cosyvoice_model_context, virtual cosyvoice_obje
 
     uint32_t llm_get_kv_cache_len();
     bool llm_set_kv_cache_len(uint32_t len);
+    void llm_offload_kv_cache();
+    void llm_load_kv_cache();
 
     int llm_sample_token();
     void llm_accept_token(int token);
@@ -180,7 +182,10 @@ struct cosyvoice_model_3 : cosyvoice_model
     void set_hift_rand_ini(const float* data);
 
     bool llm_job(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt);
+    bool llm_job_ext(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt, uint32_t max_new_tokens, bool* final);
     bool token2wav(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, cosyvoice_generated_speech_ptr result);
+    bool token2wav_ext(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, uint32_t* speech_offset, bool streaming, bool finalize, cosyvoice_generated_speech_ptr result);
+    uint32_t get_chunk_tokens();
 
     void empty_buffer_cache();
     void get_memory_usage(cosyvoice_memory_usage_t* usage);

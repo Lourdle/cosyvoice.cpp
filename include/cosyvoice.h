@@ -608,6 +608,62 @@ COSYVOICE_API bool cosyvoice_tts_cross_lingual(
     cosyvoice_generated_speech_ptr result
 );
 
+/**
+ * @brief Callback invoked by the streaming TTS API for each generated audio chunk.
+ * @param audio PCM samples in 32-bit floating point format, 1 channel.
+ * @param n_samples Number of samples in this chunk.
+ * @param user_data Opaque context passed when registering the callback.
+ * @return True to continue streaming, false to abort the synthesis.
+ */
+typedef bool (*cosyvoice_tts_audio_callback_t)(const float* audio, uint32_t n_samples, void* user_data);
+
+/**
+ * @brief Generate speech with streaming output, delivering audio chunks via a callback.
+ * @details The function synthesizes speech incrementally and invokes @p callback for
+ *          each chunk as it becomes available. The callback receives the PCM data
+ *          sequentially; the previous chunk's data is no longer valid after the
+ *          callback returns.
+ * @param ctx The TTS context.
+ * @param text Input text to synthesize.
+ * @param instruction Optional instruction (used in instruct mode). Pass NULL for zero-shot or cross-lingual.
+ * @param speed Speed multiplier (1.0 = normal).
+ * @param callback Callback receiving each audio chunk.
+ * @param user_data Opaque context passed to @p callback.
+ * @return True on success, false on failure.
+ */
+COSYVOICE_API bool cosyvoice_tts_zero_shot_stream(
+    cosyvoice_tts_context_t        ctx,
+    const char*                    text,
+    float                          speed,
+    cosyvoice_tts_audio_callback_t callback,
+    void*                          user_data
+);
+
+/**
+ * @brief Generate speech with streaming output in instruct mode.
+ * @see cosyvoice_tts_zero_shot_stream
+ */
+COSYVOICE_API bool cosyvoice_tts_instruct_stream(
+    cosyvoice_tts_context_t        ctx,
+    const char*                    text,
+    const char*                    instruction,
+    float                          speed,
+    cosyvoice_tts_audio_callback_t callback,
+    void*                          user_data
+);
+
+/**
+ * @brief Generate speech with streaming output in cross-lingual mode.
+ * @see cosyvoice_tts_zero_shot_stream
+ */
+COSYVOICE_API bool cosyvoice_tts_cross_lingual_stream(
+    cosyvoice_tts_context_t        ctx,
+    const char*                    text,
+    float                          speed,
+    cosyvoice_tts_audio_callback_t callback,
+    void*                          user_data
+);
+
 // ----------------------------------------------------------------------------
 // Audio Output Utilities
 // ----------------------------------------------------------------------------

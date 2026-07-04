@@ -217,6 +217,16 @@ COSYVOICE_API uint32_t cosyvoice_llm_get_kv_cache_len(cosyvoice_context_t ctx);
  */
 COSYVOICE_API bool cosyvoice_llm_set_kv_cache_len(cosyvoice_context_t ctx, uint32_t len);
 
+/**
+* @brief Offload the KV cache to CPU memory.
+*/
+COSYVOICE_API void cosyvoice_llm_offload_kv_cache(cosyvoice_context_t ctx);
+
+/**
+* @brief Load the KV cache from CPU memory back to the backend.
+*/
+COSYVOICE_API void cosyvoice_llm_load_kv_cache(cosyvoice_context_t ctx);
+
 // ----------------------------------------------------------------------------
 // Sampling and Token Management
 // ----------------------------------------------------------------------------
@@ -267,6 +277,20 @@ COSYVOICE_API bool cosyvoice_llm_job(
 );
 
 /**
+* @brief Run the LLM with the given input tokens and prompt, with additional options.
+ * @param max_new_tokens Maximum number of new tokens to generate. If 0, no new tokens are generated.
+ * @param final Output parameter indicating whether the generation is complete (true) or more tokens can be generated (false).
+ */
+COSYVOICE_API bool cosyvoice_llm_job_ext(
+    cosyvoice_context_t ctx,
+    const int*          text,
+    uint32_t            text_len,
+    cosyvoice_prompt_t  prompt,
+    uint32_t            max_new_tokens,
+    bool*               final
+);
+
+/**
  * @brief Convert generated speech tokens to waveform data.
  */
 COSYVOICE_API bool cosyvoice_token2wav(
@@ -279,6 +303,21 @@ COSYVOICE_API bool cosyvoice_token2wav(
 );
 
 /**
+* @brief Convert generated speech tokens to waveform data with additional options.
+*/
+COSYVOICE_API bool cosyvoice_token2wav_ext(
+    cosyvoice_context_t            ctx,
+    const int*                     token_ids,
+    uint32_t                       n_tokens,
+    float                          speed,
+    cosyvoice_prompt_t             prompt,
+    uint32_t*                      speech_offset_ptr,
+    bool                           streaming,
+    bool                           finalize,
+    cosyvoice_generated_speech_ptr result
+);
+
+/**
  * @brief Run the full TTS pipeline from input tokens to waveform output.
  */
 COSYVOICE_API bool cosyvoice_tts(
@@ -288,6 +327,17 @@ COSYVOICE_API bool cosyvoice_tts(
     float                          speed,
     cosyvoice_prompt_t             prompt,
     cosyvoice_generated_speech_ptr result
+);
+
+
+COSYVOICE_API bool cosyvoice_tts_stream(
+    cosyvoice_context_t            ctx,
+    const int*                     text,
+    uint32_t                       text_len,
+    float                          speed,
+    cosyvoice_prompt_t             prompt,
+    cosyvoice_tts_audio_callback_t callback,
+    void*                          user_data
 );
 
 // ----------------------------------------------------------------------------

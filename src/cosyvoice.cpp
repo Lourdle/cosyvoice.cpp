@@ -247,6 +247,16 @@ bool cosyvoice_llm_set_kv_cache_len(cosyvoice_context_t ctx, uint32_t len)
     return ctx->llm_set_kv_cache_len(len);
 }
 
+void cosyvoice_llm_offload_kv_cache(cosyvoice_context_t ctx)
+{
+    ctx->llm_offload_kv_cache();
+}
+
+void cosyvoice_llm_load_kv_cache(cosyvoice_context_t ctx)
+{
+    ctx->llm_load_kv_cache();
+}
+
 int cosyvoice_llm_sample_token(cosyvoice_context_t ctx)
 {
     return ctx->llm_sample_token();
@@ -282,12 +292,22 @@ bool cosyvoice_llm_job(cosyvoice_context_t ctx, const int* text, uint32_t text_l
     return ctx->llm_job(text, text_len, prompt);
 }
 
+bool cosyvoice_llm_job_ext(cosyvoice_context_t ctx, const int* text, uint32_t text_len, cosyvoice_prompt_t prompt, uint32_t max_new_tokens, bool* final)
+{
+    return ctx->llm_job_ext(text, text_len, prompt, max_new_tokens, final);
+}
+
 bool cosyvoice_token2wav(cosyvoice_context_t ctx, const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, cosyvoice_generated_speech_ptr generated_speech)
 {
     return ctx->token2wav(token_ids, n_tokens, speed, prompt, generated_speech);
 }
 
-bool cosyvoice_tts(cosyvoice_context_t ctx, const int* text, uint32_t text_len, float speed, cosyvoice_prompt_t prompt, cosyvoice_generated_speech_ptr result)
+bool cosyvoice_token2wav_ext(cosyvoice_context_t ctx, const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, uint32_t* speech_offset_ptr, bool streaming, bool finalize, cosyvoice_generated_speech_ptr result)
+{
+    return ctx->token2wav_ext(token_ids, n_tokens, speed, prompt, speech_offset_ptr, streaming, finalize, result);
+}
+
+static bool check_length(cosyvoice_prompt_t prompt, uint32_t text_len, uint32_t n_max_seq)
 {
     // Defensive guard: bail out before llm_prefill / llm_decode would refuse the request because
     // the prefill layout exceeds n_max_seq. Without this, llm_job throws and emits an error log
@@ -297,27 +317,71 @@ bool cosyvoice_tts(cosyvoice_context_t ctx, const int* text, uint32_t text_len, 
     // length. llm_job internally truncates the cache back to either SOS or SOS+prompt_text
     // before re-prefilling, so a large residual cache from a previous call (e.g. when callers
     // synthesize chunked text via tts_job) is not a real budget consumer.
-    cosyvoice_context_params_t params;
-    ctx->get_context_params(&params);
     const uint32_t prompt_text_len = static_cast<uint32_t>(prompt->prompt_text.size());
     const uint32_t prompt_speech_len = prompt->llm_prompt_speech_tokens.second;
     // Worst-case prefill: SOS(1) + prompt_text + text + (task_token(1) + prompt_speech_tokens) when present.
     uint64_t prefill_len = 1ull + prompt_text_len + text_len;
     if (prompt_speech_len != 0)
         prefill_len += 1ull + prompt_speech_len;
-    if (prefill_len + 1 > params.n_max_seq)
-    {
-        result->data = nullptr;
-        result->length = 0;
+    if (prefill_len + 1 > n_max_seq)
         return false;
+    return true;
+}
+
+bool cosyvoice_tts(cosyvoice_context_t ctx, const int* text, uint32_t text_len, float speed, cosyvoice_prompt_t prompt, cosyvoice_generated_speech_ptr result)
+{
+    {
+        cosyvoice_context_params_t params;
+        ctx->get_context_params(&params);
+        if (!check_length(prompt, text_len, params.n_max_seq))
+        {
+            result->data = nullptr;
+            result->length = 0;
+            return false;
+        }
     }
 
-    if(ctx->llm_job(text, text_len, prompt)
+    if (ctx->llm_job(text, text_len, prompt)
         && ctx->token2wav(ctx->llm_get_accepted_tokens(), ctx->llm_get_n_accepted_tokens(), speed, prompt, result))
         return true;
     result->data = nullptr;
     result->length = 0;
     return false;
+}
+
+bool cosyvoice_tts_stream(cosyvoice_context_t ctx, const int* text, uint32_t text_len, float speed, cosyvoice_prompt_t prompt, cosyvoice_tts_audio_callback_t callback, void* user_data)
+{
+    cosyvoice_context_params_t params;
+    ctx->get_context_params(&params);
+    if (!check_length(prompt, text_len, params.n_max_seq))
+        return false;
+
+    const auto chunk_tokens = ctx->get_chunk_tokens();
+
+    ctx->llm_clear_accepted_tokens();
+    uint32_t speech_offset = 0;
+    bool final = false;
+    do
+    {
+        if (!ctx->llm_job_ext(text, text_len, prompt, chunk_tokens, &final))
+            return false;
+        text = nullptr;
+        const uint32_t n_tokens = ctx->llm_get_n_accepted_tokens();
+        const int* tokens = ctx->llm_get_accepted_tokens();
+
+        if (!final && params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
+            ctx->llm_offload_kv_cache();
+
+        cosyvoice_generated_speech result = {};
+        if (!ctx->token2wav_ext(tokens, n_tokens, speed, prompt, &speech_offset, true, final, &result))
+            return false;
+
+        if (result.data && result.length > 0
+            && !callback(result.data, result.length, user_data))
+            return false;
+    } while (!final);
+
+    return true;
 }
 
 ggml_status cosyvoice_get_last_status(cosyvoice_context_t ctx)
