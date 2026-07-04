@@ -1,4 +1,4 @@
-﻿#ifdef _MSC_VER
+#ifdef _MSC_VER
     #define _CRT_SECURE_NO_WARNINGS
 #endif
 
@@ -18,11 +18,13 @@
 
 #include <cstdarg>
 #include <cctype>
-#include <atomic>
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <atomic>
+#include <chrono>
+
+#include <mutex>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -263,6 +265,7 @@ static void print_interactive_commands()
     printf("  /seed [value]                Show or set next seed.\n");
     printf("  /seed-policy <fixed|random>  Show or set seed policy.\n");
     printf("  /help                        Show command list.\n");
+    printf("  /stream                      Toggle streaming playback.\n");
     printf("  /exit                        Exit interactive mode. Ctrl+C also exits.\n");
 }
 
@@ -848,6 +851,7 @@ static void run_interactive_loop(
     uint32_t sample_rate)
 {
     audio_cache cache;
+    bool streaming = false;
     std::string line;
     if (seed_state && !seed_state->has_next_seed)
     {
@@ -856,9 +860,9 @@ static void run_interactive_loop(
     }
     printf("\nInteractive mode. Type text to synthesize, /exit to quit, or press Ctrl+C to quit"
 #ifndef COSYVOICE_CLI_NO_PLAYBACK
-           " (during playback, Ctrl+C stops playback)"
+        " (during playback, Ctrl+C stops playback)"
 #endif
-           ".\n");
+        ".\n");
     print_interactive_commands();
     interactive_ctrl_c_guard ctrl_c_guard;
 
@@ -1010,6 +1014,11 @@ static void run_interactive_loop(
                 printf("Saved audio %u to %s\n", id, path.c_str());
             }
 #ifndef COSYVOICE_CLI_NO_PLAYBACK
+            else if (cmd == "/stream")
+            {
+                streaming = !streaming;
+                printf("Streaming playback %s.\n", streaming ? "enabled" : "disabled");
+            }
             else if (cmd == "/play")
             {
                 bool id_ok = false;
@@ -1046,18 +1055,83 @@ static void run_interactive_loop(
         uint32_t used_seed = 0;
         update_tts_seed(ctx, seed_state, &used_seed);
 
-        std::string error;
-        auto pcm = generate_tts_audio(tts_ctx, options, trimmed, &error);
-        if (!pcm.data)
-        {
-            if (!error.empty())
-                print_error_log("Error: %s\n", error.c_str());
-            continue;
-        }
         cached_audio entry;
         entry.seed = used_seed;
         entry.text = trimmed;
-        entry.pcm.insert(entry.pcm.end(), pcm.data, pcm.data + pcm.length);
+
+        if (streaming)
+        {
+            struct stream_play_state
+            {
+                cached_audio* entry;
+                uint32_t sample_rate;
+                uint32_t cursor = 0;
+                std::mutex mutex;
+            };
+            stream_play_state play_state{ &entry, sample_rate };
+
+            auto stream_callback = [](const float* audio, uint32_t n_samples, void* user_data)
+            {
+                auto state = static_cast<stream_play_state*>(user_data);
+                std::lock_guard<std::mutex> lock(state->mutex);
+                state->entry->pcm.insert(state->entry->pcm.end(), audio, audio + n_samples);
+                return !is_playback_interrupted();
+            };
+
+            std::atomic_bool inferencing_done = false;
+            std::string error_string;
+            std::thread playback_thread(cli_audio_play_pcm_streaming, sample_rate, &error_string,
+                streaming_callback_t([&](float* data, uint32_t n_samples)
+                {
+                    std::lock_guard<std::mutex> lock(play_state.mutex);
+                    if (play_state.cursor >= play_state.entry->pcm.size())
+                        if (inferencing_done)
+                            return false;
+                        else
+                            memset(data, 0, n_samples * sizeof(float));
+                    else
+                    {
+                        uint32_t available = static_cast<uint32_t>(play_state.entry->pcm.size()) - play_state.cursor;
+                        uint32_t to_copy = std::min(n_samples, available);
+                        memcpy(data, play_state.entry->pcm.data() + play_state.cursor, to_copy * sizeof(float));
+                        if (to_copy < n_samples)
+                            memset(data + to_copy, 0, (n_samples - to_copy) * sizeof(float));
+                        play_state.cursor += n_samples;
+                    }
+                    return true;
+                }));
+
+            bool ok;
+            if (options.mode == "cross-lingual")
+                ok = cosyvoice_tts_cross_lingual_stream(tts_ctx, trimmed.c_str(), options.speed, stream_callback, &play_state);
+            else if (options.mode == "zero-shot")
+                ok = cosyvoice_tts_zero_shot_stream(tts_ctx, trimmed.c_str(), options.speed, stream_callback, &play_state);
+            else
+                ok = cosyvoice_tts_instruct_stream(tts_ctx, trimmed.c_str(), options.instruction.c_str(), options.speed, stream_callback, &play_state);
+
+            inferencing_done = true;
+            playback_thread.join();
+            ctrl_c_guard._register();
+
+            if (!ok)
+            {
+                print_error_log("Error: TTS streaming generation failed.\n");
+                continue;
+            }
+        }
+        else
+        {
+            std::string error;
+            auto pcm = generate_tts_audio(tts_ctx, options, trimmed, &error);
+            if (!pcm.data)
+            {
+                if (!error.empty())
+                    print_error_log("Error: %s\n", error.c_str());
+                continue;
+            }
+            entry.pcm.insert(entry.pcm.end(), pcm.data, pcm.data + pcm.length);
+        }
+
         const auto id = cache.next_id++;
         cache.last_success_id = id;
         const auto duration = pcm_length_seconds(sample_rate, entry.pcm.size());
