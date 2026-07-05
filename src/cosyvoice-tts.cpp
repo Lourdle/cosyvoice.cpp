@@ -150,7 +150,7 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
         // First call: min/max from text input
         const auto min_len = static_cast<uint32_t>(text_len * worker->config.min_token_text_ratio);
         const auto max_len = static_cast<uint32_t>(text_len * worker->config.max_token_text_ratio);
-        const auto limit = std::min(max_new_tokens, max_len);
+        const auto limit = std::min(llm_get_n_accepted_tokens() + max_new_tokens, max_len);
 
         // FSQ silent/breath token filtering: allow up to 5 consecutive silent tokens,
         // then drop any further consecutive ones to avoid generating long silence.
@@ -159,7 +159,7 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
         constexpr uint32_t max_silent_token_num = 5;
         const auto& silent_tokens = cv3_shared->silent_tokens;
 
-        for (uint32_t n = 0; n != limit; ++n)
+        for (uint32_t n = llm_get_n_accepted_tokens(); n != limit; ++n)
         {
             if (!llm_decode(speech_type, cur))
                 throw std::runtime_error("Failed to decode LLM output.\n");
