@@ -66,7 +66,7 @@ cosyvoice_model_shared::cosyvoice_model_shared(const cosyvoice_context_params_v2
 cosyvoice_worker_context::cosyvoice_worker_context(ggml_backend_t backend)
     : backend(backend), cpu_backend(backend),
     ctx0(ggml_init(ggml_init_params{ .mem_size = ggml_graph_overhead() * kCosyVoiceGraphSize, .no_alloc = true })),
-    gf(nullptr), llm_input(nullptr), llm_probs(nullptr), position_ids(nullptr), causal_mask(nullptr), kv_cache(),
+    gf(nullptr), llm_input(nullptr), llm_probs(nullptr), position_ids(nullptr), causal_mask(nullptr), llm_kv_cache(),
     status(GGML_STATUS_SUCCESS), prompt_crc32(0), sampler_seed(0), sampler(nullptr), sampler_ctx(nullptr), builtin_sampler_rng_policy(COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION), nucleus_probs_capacity(0), nucleus_probs_len(0) {}
 
 cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_v2_cpp& params)
@@ -222,7 +222,7 @@ cosyvoice_model::~cosyvoice_model()
             {
             case COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED:
             case COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED:
-                worker->kv_buffer.release();
+                worker->llm_kv_buffer.release();
             }
 
             worker->~cosyvoice_worker_context();
@@ -251,7 +251,7 @@ void cosyvoice_model::empty_buffer_cache()
         shared->rand_noise_len = 0;
     }
 
-    worker->kv_cache.clear_offloaded_cache();
+    worker->llm_kv_cache.clear_offloaded_cache();
     worker->prompt_crc32 = 0;
 }
 
@@ -262,8 +262,8 @@ void cosyvoice_model_3::empty_buffer_cache()
     if (cv3_worker->orig_max_seq_len != shared->params.n_max_seq)
     {
         shared->params.n_max_seq = cv3_worker->orig_max_seq_len;
-        worker->kv_buffer.reset(
-            worker->kv_cache.initialize_buffer(
+        worker->llm_kv_buffer.reset(
+            worker->llm_kv_cache.initialize_buffer(
                 worker->backend.get(),
                 static_cast<int>(cv3_shared->llm.layers[0].self_attn.k_proj.weight->ne[1] / cv3_shared->llm.num_key_value_heads),
                 static_cast<int>(cv3_shared->llm.layers[0].self_attn.v_proj.weight->ne[1] / cv3_shared->llm.num_key_value_heads),
@@ -272,6 +272,7 @@ void cosyvoice_model_3::empty_buffer_cache()
                 shared->params.n_max_seq,
                 cv3_shared->k_type,
                 cv3_shared->v_type,
+                1,
                 shared->params.llm_use_flash_attn));
 
         switch (shared->params.inference_buffer_policy)
@@ -279,7 +280,7 @@ void cosyvoice_model_3::empty_buffer_cache()
         case COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED:
         case COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED:
             cv3_worker->token2wav_buffer.release();
-            cv3_worker->token2wav_buffer.reset(worker->kv_buffer.get());
+            cv3_worker->token2wav_buffer.reset(worker->llm_kv_buffer.get());
             break;
         case COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED:
             cv3_worker->token2wav_buffer.reset();
@@ -295,9 +296,9 @@ void cosyvoice_model_3::get_memory_usage(cosyvoice_memory_usage_t* usage)
     usage->parameters = ggml_backend_buffer_get_size(shared->buffer.get());
     usage->buffers = ggml_backend_sched_get_buffer_size(worker->sched.get(), worker->backend.get());
     usage->cpu_buffers = ggml_backend_sched_get_buffer_size(worker->sched.get(), worker->cpu_backend.get());
-    usage->offloaded_kv_cache = worker->kv_cache.get_offloaded_cache_size();
+    usage->offloaded_kv_cache = worker->llm_kv_cache.get_offloaded_cache_size();
     usage->random_noise = sizeof(float) * shared->rand_noise_len;
-    usage->kv_cache = worker->kv_buffer.get() ? ggml_backend_buffer_get_size(worker->kv_buffer.get()) : 0;
+    usage->kv_cache = worker->llm_kv_buffer.get() ? ggml_backend_buffer_get_size(worker->llm_kv_buffer.get()) : 0;
     usage->token2wav = cv3_worker->token2wav_buffer.get() ? ggml_backend_buffer_get_size(cv3_worker->token2wav_buffer.get()) : 0;
 }
 
@@ -311,9 +312,9 @@ void cosyvoice_model_3::get_total_memory_usage(cosyvoice_memory_usage_t* usage)
 
         usage->buffers = ggml_backend_sched_get_buffer_size(worker->sched.get(), worker->backend.get());
         usage->cpu_buffers = ggml_backend_sched_get_buffer_size(worker->sched.get(), worker->cpu_backend.get());
-        usage->offloaded_kv_cache = worker->kv_cache.get_offloaded_cache_size();
+        usage->offloaded_kv_cache = worker->llm_kv_cache.get_offloaded_cache_size();
         usage->random_noise = sizeof(float) * shared->rand_noise_len;
-        usage->kv_cache = worker->kv_buffer.get() ? ggml_backend_buffer_get_size(worker->kv_buffer.get()) : 0;
+        usage->kv_cache = worker->llm_kv_buffer.get() ? ggml_backend_buffer_get_size(worker->llm_kv_buffer.get()) : 0;
         usage->token2wav = cv3_worker->token2wav_buffer.get() ? ggml_backend_buffer_get_size(cv3_worker->token2wav_buffer.get()) : 0;
     }
 }
@@ -323,10 +324,27 @@ void cosyvoice_model_3::reset_shared_buffer(ggml_backend_buffer* new_buffer)
     cv3_worker->token2wav_buffer.reset(new_buffer);
     if (shared->params.inference_buffer_policy != COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED)
     {
-        worker->kv_buffer.release();
-        worker->kv_buffer.reset(new_buffer);
-        shared->params.n_max_seq = worker->kv_cache.reset_buffer(new_buffer);
+        worker->llm_kv_buffer.release();
+        worker->llm_kv_buffer.reset(new_buffer);
+        shared->params.n_max_seq = worker->llm_kv_cache.reset_buffer(new_buffer);
     }
+}
+
+uint32_t cosyvoice_model_3::get_chunk_tokens()
+{
+    return 25 + cv3_shared->flow.pre_lookahead_layer.pre_lookahead_len;
+}
+
+uint32_t cosyvoice_model_3::get_flow_overlap_tokens()
+{
+	// TODO: calculate the actual overlap tokens
+    return 0;
+}
+
+uint32_t cosyvoice_model_3::get_hift_overlap_tokens()
+{
+	// TODO: calculate the actual overlap tokens
+    return 0;
 }
 
 cosyvoice_3_worker_context::cosyvoice_3_worker_context() :
@@ -555,12 +573,12 @@ uint32_t cosyvoice_model::get_n_workers()
 
 uint32_t cosyvoice_model::llm_get_kv_cache_len()
 {
-    return worker->kv_cache.cur_len;
+    return worker->llm_kv_cache.cur_len;
 }
 
 bool cosyvoice_model::llm_set_kv_cache_len(uint32_t len)
 {
-    auto& cur_len = worker->kv_cache.cur_len;
+    auto& cur_len = worker->llm_kv_cache.cur_len;
     if (len <= cur_len)
     {
         cur_len = len;
@@ -572,17 +590,15 @@ bool cosyvoice_model::llm_set_kv_cache_len(uint32_t len)
 void cosyvoice_model::llm_offload_kv_cache()
 {
     auto sched = worker->sched.get();
-    auto& kv_cache = worker->kv_cache;
+    auto& kv_cache = worker->llm_kv_cache;
     ggml_backend_sched_reset(sched);
     kv_cache.offload_cache(worker->backend.get(), sched, kv_cache.cur_len);
-    ggml_backend_sched_synchronize(sched);
 }
 
 void cosyvoice_model::llm_load_kv_cache()
 {
     auto sched = worker->sched.get();
-    auto& kv_cache = worker->kv_cache;
+    auto& kv_cache = worker->llm_kv_cache;
     ggml_backend_sched_reset(sched);
     kv_cache.offload_cache(worker->backend.get(), sched, kv_cache.cur_len);
-    ggml_backend_sched_synchronize(sched);
 }

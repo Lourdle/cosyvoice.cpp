@@ -3,7 +3,7 @@
 #include "cosyvoice-modules.h"
 #include "cosyvoice-lowlevel.h"
 #include "cosyvoice-interface.h"
-#include "cosyvoice-llm-kv-cache.h"
+#include "cosyvoice-kv-cache.h"
 
 #include <ggml-cpp.h>
 
@@ -60,7 +60,8 @@ struct cosyvoice_worker_context
     std::unique_ptr<int[]> full_position_ids;
     std::unique_ptr<ggml_fp16_t[]> causal_mask_buffer;
 
-    cosyvoice_llm_kv_cache kv_cache;
+    cosyvoice_kv_cache llm_kv_cache;
+    cosyvoice_kv_cache dit_kv_cache;
 
     ggml_status status;
     uint32_t prompt_crc32;
@@ -70,12 +71,14 @@ struct cosyvoice_worker_context
     void* sampler_ctx;
     cosyvoice_builtin_sampler_rng_policy_t builtin_sampler_rng_policy;
 
+    std::vector<float> flow_cache;
     std::unique_ptr<char[]> batch_buffer;
     std::unique_ptr<float[]> nucleus_probs;
     uint32_t nucleus_probs_capacity;
     int nucleus_probs_len;
     std::unique_ptr<float[]> probs;
-    ggml_backend_buffer_ptr kv_buffer;
+    ggml_backend_buffer_ptr llm_kv_buffer;
+    ggml_backend_buffer_ptr dit_kv_buffer;
 };
 
 struct cosyvoice_model : virtual cosyvoice_model_context, virtual cosyvoice_object_ref_counter
@@ -184,8 +187,10 @@ struct cosyvoice_model_3 : cosyvoice_model
     bool llm_job(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt);
     bool llm_job_ext(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt, uint32_t max_new_tokens, bool* final);
     bool token2wav(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, cosyvoice_generated_speech_ptr result);
-    bool token2wav_ext(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, uint32_t* speech_offset, bool streaming, bool finalize, cosyvoice_generated_speech_ptr result);
+    bool token2wav_ext(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, uint32_t* offset, bool streaming, bool finalize, cosyvoice_generated_speech_ptr result);
     uint32_t get_chunk_tokens();
+    uint32_t get_flow_overlap_tokens();
+    uint32_t get_hift_overlap_tokens();
 
     void empty_buffer_cache();
     void get_memory_usage(cosyvoice_memory_usage_t* usage);

@@ -1,22 +1,22 @@
 #include "cosyvoice-model.h"
-#include "cosyvoice-llm-kv-cache.h"
+#include "cosyvoice-kv-cache.h"
 
 #include <ggml-backend.h>
 
 #include <utility>
 #include <span>
 
-void cosyvoice_llm_kv_cache::build_kv_cache(
+void cosyvoice_kv_cache::build_kv_cache(
     ggml_backend_t backend,
-    ggml_backend_buffer_ptr& shared_buffer,
+    ggml_backend_buffer_ptr& buffer,
     int layers,
     int k_head_dim,
     int v_head_dim,
-    int num_attention_heads,
     int num_key_value_heads,
     uint32_t max_seq,
     ggml_type k_type,
     ggml_type v_type,
+    int batch_size,
     bool fattn)
 {
     cur_len = 0;
@@ -34,27 +34,27 @@ void cosyvoice_llm_kv_cache::build_kv_cache(
     };
     ctx = ggml_init(params);
 
-    shared_buffer.reset(initialize_buffer(backend, k_head_dim, v_head_dim, num_attention_heads, num_key_value_heads, max_seq, k_type, v_type, fattn));
+    buffer.reset(initialize_buffer(backend, k_head_dim, v_head_dim, num_attention_heads, num_key_value_heads, max_seq, k_type, v_type, batch_size, fattn));
 }
 
-ggml_backend_buffer* cosyvoice_llm_kv_cache::initialize_buffer(ggml_backend_t backend, int k_head_dim, int v_head_dim, int num_attention_heads, int num_key_value_heads, uint32_t max_seq, ggml_type k_type, ggml_type v_type, bool fattn)
+ggml_backend_buffer* cosyvoice_kv_cache::initialize_buffer(ggml_backend_t backend, int k_head_dim, int v_head_dim, int num_attention_heads, int num_key_value_heads, uint32_t max_seq, ggml_type k_type, ggml_type v_type, int batch_size, bool fattn)
 {
-    int64_t k_ne[3] = { k_head_dim, max_seq, num_key_value_heads };
-    int64_t v_ne[3] = { v_head_dim, max_seq, num_key_value_heads };
+    int64_t k_ne[4] = { k_head_dim, max_seq, num_key_value_heads, batch_size };
+    int64_t v_ne[4] = { v_head_dim, max_seq, num_key_value_heads, batch_size };
     if (!fattn) std::swap(v_ne[0], v_ne[1]);
     ggml_reset(ctx);
 
     for (auto& [k, v, k_view, v_view] : std::span(kv_cache_layers, layers))
     {
-        k = ggml_new_tensor(ctx, k_type, 3, k_ne);
-        v = ggml_new_tensor(ctx, v_type, 3, v_ne);
+        k = ggml_new_tensor(ctx, k_type, 4, k_ne);
+        v = ggml_new_tensor(ctx, v_type, 4, v_ne);
         k_view = nullptr;
         v_view = nullptr;
     }
     return ggml_backend_alloc_ctx_tensors(ctx, backend);
 }
 
-uint32_t cosyvoice_llm_kv_cache::reset_buffer(ggml_backend_buffer* buffer)
+uint32_t cosyvoice_kv_cache::reset_buffer(ggml_backend_buffer* buffer)
 {
     cur_len = 0;
     auto alignment = ggml_backend_buffer_get_alignment(buffer);
@@ -106,7 +106,7 @@ struct offloaded_kv_cache
 };
 #pragma pack(pop)
 
-void cosyvoice_llm_kv_cache::offload_cache(ggml_backend_t backend, ggml_backend_sched* sched, uint32_t n_tokens)
+void cosyvoice_kv_cache::offload_cache(ggml_backend_t backend, ggml_backend_sched* sched, uint32_t n_tokens)
 {
     char* buffer_base;
     size_t nbytes = kv_cache_layers[0].k->ne[0] * sizeof(float) * n_tokens * kv_cache_layers[0].v->ne[2];
@@ -176,9 +176,10 @@ void cosyvoice_llm_kv_cache::offload_cache(ggml_backend_t backend, ggml_backend_
         ggml_backend_tensor_get_async(backend, offloaded_layer.v_view, offloaded_layer.v, 0, nbytes);
         buffer_base += nbytes * 2;
     }
+    ggml_backend_sched_synchronize(sched);
 }
 
-void cosyvoice_llm_kv_cache::load_cache(ggml_backend_t backend, ggml_backend_sched* sched)
+void cosyvoice_kv_cache::load_cache(ggml_backend_t backend, ggml_backend_sched* sched)
 {
     cur_len = offloaded_cache->len;
     ggml_reset(offloaded_cache->ctx);
@@ -212,17 +213,17 @@ void cosyvoice_llm_kv_cache::load_cache(ggml_backend_t backend, ggml_backend_sch
         ggml_backend_tensor_set_async(backend, offloaded_layer.v_view, offloaded_layer.v, 0, offloaded_layer.v_view->nb[3]);
     }
 
-    ggml_backend_sched_graph_compute_async(sched, gf);
+    ggml_backend_sched_graph_compute(sched, gf);
 }
 
-size_t cosyvoice_llm_kv_cache::get_offloaded_cache_size() const
+size_t cosyvoice_kv_cache::get_offloaded_cache_size() const
 {
     if (offloaded_cache)
         return offloaded_cache->offloaded_kv_layers[0].k_view->nb[3] * 2 * layers;
     else return 0;
 }
 
-void cosyvoice_llm_kv_cache::clear_offloaded_cache()
+void cosyvoice_kv_cache::clear_offloaded_cache()
 {
     if (offloaded_cache)
     {
@@ -233,14 +234,14 @@ void cosyvoice_llm_kv_cache::clear_offloaded_cache()
     }
 }
 
-cosyvoice_llm_kv_cache::~cosyvoice_llm_kv_cache()
+cosyvoice_kv_cache::~cosyvoice_kv_cache()
 {
     ggml_free(ctx);
     delete[] kv_cache_layers;
     clear_offloaded_cache();
 }
 
-void cosyvoice_llm_kv_cache::update_cache(ggml_context* ctx0, ggml_cgraph* gf, ggml_tensor*& k, ggml_tensor*& v, ggml_tensor* position_ids, int layer_idx)
+void cosyvoice_kv_cache::update_cache(ggml_context* ctx0, ggml_cgraph* gf, ggml_tensor*& k, ggml_tensor*& v, ggml_tensor* position_ids, int layer_idx)
 {
     GGML_ASSERT(ggml_are_same_shape(k, v));
 
@@ -249,22 +250,22 @@ void cosyvoice_llm_kv_cache::update_cache(ggml_context* ctx0, ggml_cgraph* gf, g
     if (fattn)
     {
         layer.k_view = ggml_set_rows(ctx0, layer.k, k, position_ids);
-        layer.k_view = ggml_view_3d(ctx0, layer.k_view, k->ne[0], cur_len + position_ids->ne[0], k->ne[2], layer.k_view->nb[1], layer.k_view->nb[2], 0);
+        layer.k_view = ggml_view_4d(ctx0, layer.k_view, k->ne[0], cur_len + position_ids->ne[0], k->ne[2], k->ne[3], layer.k_view->nb[1], layer.k_view->nb[2], layer.k_view->nb[3], 0);
 
         layer.v_view = ggml_set_rows(ctx0, layer.v, v, position_ids);
-        layer.v_view = ggml_view_3d(ctx0, layer.v_view, v->ne[0], cur_len + position_ids->ne[0], v->ne[2], layer.v_view->nb[1], layer.v_view->nb[2], 0);
+        layer.v_view = ggml_view_4d(ctx0, layer.v_view, v->ne[0], cur_len + position_ids->ne[0], v->ne[2], v->ne[3], layer.v_view->nb[1], layer.v_view->nb[2], layer.v_view->nb[3], 0);
     }
     else
     {
-        auto k_view = ggml_view_3d(ctx0, layer.k, k->ne[0], k->ne[1], k->ne[2], layer.k->nb[1], layer.k->nb[2], layer.k->nb[1] * cur_len);
+        auto k_view = ggml_view_4d(ctx0, layer.k, k->ne[0], k->ne[1], k->ne[2], k->ne[3], layer.k->nb[1], layer.k->nb[2], layer.k->nb[3], layer.k->nb[1] * cur_len);
         k_view = ggml_cpy(ctx0, k, k_view);
-        layer.k_view = ggml_view_3d(ctx0, layer.k, k->ne[0], cur_len + k->ne[1], k->ne[2], layer.k->nb[1], layer.k->nb[2], 0);
+        layer.k_view = ggml_view_4d(ctx0, layer.k, k->ne[0], cur_len + k->ne[1], k->ne[2], k->ne[3], layer.k->nb[1], layer.k->nb[2], layer.k->nb[3], 0);
         layer.k_view->src[0] = k_view;
 
         v = ggml_permute(ctx0, v, 1, 0, 2, 3);
-        auto v_view = ggml_view_3d(ctx0, layer.v, v->ne[0], v->ne[1], v->ne[2], layer.v->nb[1], layer.v->nb[2], layer.v->nb[0] * cur_len);
+        auto v_view = ggml_view_4d(ctx0, layer.v, v->ne[0], v->ne[1], v->ne[2], v->ne[3], layer.v->nb[1], layer.v->nb[2], layer.v->nb[3], layer.v->nb[0] * cur_len);
         v_view = ggml_cpy(ctx0, v, v_view);
-        layer.v_view = ggml_view_3d(ctx0, layer.v, cur_len + v->ne[0], v->ne[1], v->ne[2], layer.v->nb[1], layer.v->nb[2], 0);
+        layer.v_view = ggml_view_4d(ctx0, layer.v, cur_len + v->ne[0], v->ne[1], v->ne[2], v->ne[3], layer.v->nb[1], layer.v->nb[2], layer.v->nb[3], 0);
         layer.v_view->src[0] = v_view;
     }
 
@@ -275,7 +276,7 @@ void cosyvoice_llm_kv_cache::update_cache(ggml_context* ctx0, ggml_cgraph* gf, g
     ggml_build_forward_expand(gf, v);
 }
 
-ggml_tensor* cosyvoice_llm_kv_cache::attention_forward(ggml_context* ctx0, ggml_cgraph* gf, ggml_tensor* query_states, ggml_tensor* key_states, ggml_tensor* value_states, ggml_tensor* attention_mask, int layer_idx) const
+ggml_tensor* cosyvoice_kv_cache::attention_forward(ggml_context* ctx0, ggml_tensor* query_states, ggml_tensor* key_states, ggml_tensor* value_states, ggml_tensor* attention_mask) const
 {
     if (fattn)
         return ggml_flash_attn_ext(ctx0, query_states, key_states, value_states, attention_mask, 1.f / std::sqrt(static_cast<float>(key_states->ne[0])), 0.f, 0.f);
@@ -289,7 +290,7 @@ ggml_tensor* cosyvoice_llm_kv_cache::attention_forward(ggml_context* ctx0, ggml_
     }
 }
 
-void cosyvoice_llm_kv_cache::shift_kv_node_pos(uint32_t shift_pos)
+void cosyvoice_kv_cache::shift_kv_node_pos(uint32_t shift_pos)
 {
     GGML_ASSERT(fattn);
     cur_len += shift_pos;
@@ -301,7 +302,41 @@ void cosyvoice_llm_kv_cache::shift_kv_node_pos(uint32_t shift_pos)
     }
 }
 
-bool cosyvoice_llm_kv_cache::can_reuse(bool prefill) const
+bool cosyvoice_kv_cache::can_reuse(bool prefill) const
 {
     return fattn;
+}
+
+void cosyvoice_kv_cache::slide_kv_layers(int layer_idx, int stride)
+{
+    GGML_ASSERT(layer_idx + stride <= layers);
+    if (fattn)
+    {
+        const auto end = layer_idx + stride;
+        for (int cur = layer_idx; cur != end; ++cur)
+        {
+            auto& layer = kv_cache_layers[cur];
+            auto& next_layer = kv_cache_layers[cur + stride];
+
+            auto k = next_layer.k;
+            auto k_view = layer.k_view;
+            next_layer.k_view = k_view;
+            k_view->data = k->data;
+            k_view->view_src = k;
+            k_view = k_view->src[0];
+            k_view->data = k->data;
+            k_view->src[2] = k_view->view_src = k;
+
+            auto v = next_layer.v;
+            auto v_view = layer.v_view;
+            next_layer.v_view = v_view;
+            v_view->data = v->data;
+            v_view->view_src = v;
+            v_view = v_view->src[0];
+            v_view->data = v->data;
+            v_view->src[2] = v_view->view_src = v;
+        }
+    }
+    else
+        GGML_ABORT("slide_kv_layers is not supported for non-flash attention");
 }

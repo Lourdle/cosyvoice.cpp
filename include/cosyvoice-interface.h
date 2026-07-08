@@ -90,13 +90,15 @@ struct cosyvoice_model_context
         uint32_t                       n_tokens,
         float                          speed,
         cosyvoice_prompt_t             prompt,
-        uint32_t*                      speech_offset_ptr,
+        uint32_t*                      offset,
         bool                           streaming,
         bool                           finalize,
         cosyvoice_generated_speech_ptr result
     ) = 0; ///< Convert speech tokens into waveform samples with additional options.
 
     virtual uint32_t get_chunk_tokens() = 0; ///< Get the number of tokens processed in each chunk during streaming inference.
+    virtual uint32_t get_flow_overlap_tokens() = 0; ///< Get the number of overlapping tokens used for streaming inference.
+    virtual uint32_t get_hift_overlap_tokens() = 0; ///< Get the number of extra tokens to overlap for HiFT lookahead in streaming inference.
 
     // Status
     virtual ggml_status get_last_status() = 0; ///< Get the status of the most recent backend operation.

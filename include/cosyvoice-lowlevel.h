@@ -311,7 +311,7 @@ COSYVOICE_API bool cosyvoice_token2wav_ext(
     uint32_t                       n_tokens,
     float                          speed,
     cosyvoice_prompt_t             prompt,
-    uint32_t*                      speech_offset_ptr,
+    uint32_t*                      offset,
     bool                           streaming,
     bool                           finalize,
     cosyvoice_generated_speech_ptr result
@@ -329,7 +329,11 @@ COSYVOICE_API bool cosyvoice_tts(
     cosyvoice_generated_speech_ptr result
 );
 
-
+/**
+ * @brief Run the full TTS pipeline from input tokens to waveform output with streaming support.
+ * @param callback Callback function to receive generated audio chunks.
+ * @param user_data User-defined data passed to the callback.
+ */
 COSYVOICE_API bool cosyvoice_tts_stream(
     cosyvoice_context_t            ctx,
     const int*                     text,
@@ -339,6 +343,21 @@ COSYVOICE_API bool cosyvoice_tts_stream(
     cosyvoice_tts_audio_callback_t callback,
     void*                          user_data
 );
+
+/**
+* @brief Get the number of tokens processed in each chunk during streaming inference.
+*/
+COSYVOICE_API uint32_t cosyvoice_get_chunk_tokens(cosyvoice_context_t ctx);
+
+/**
+ * @brief Get the number of tokens that overlap between consecutive chunks during streaming inference.
+ */
+COSYVOICE_API uint32_t cosyvoice_get_flow_overlap_tokens(cosyvoice_context_t ctx);
+
+/**
+* @brief Get the number of extra tokens to overlap for HiFT lookahead in streaming inference.
+*/
+COSYVOICE_API uint32_t cosyvoice_get_hift_overlap_tokens(cosyvoice_context_t ctx);
 
 // ----------------------------------------------------------------------------
 // Tokenizer Operations

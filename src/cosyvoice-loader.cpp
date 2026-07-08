@@ -1,6 +1,6 @@
 #include "cosyvoice-model.h"
 #include "cosyvoice-loader.h"
-#include "cosyvoice-llm-kv-cache.h"
+#include "cosyvoice-kv-cache.h"
 
 #include <algorithm>
 #include <cstring>
@@ -859,29 +859,6 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         } while (false);
     }
 
-    for (auto& worker : std::span(workers, shared->params.n_workers))
-    {
-        worker.nucleus_probs_capacity = static_cast<uint32_t>(sampling.top_k * 2);
-        worker.nucleus_probs.reset(new float[worker.nucleus_probs_capacity]);
-        worker.nucleus_probs_len = 0;
-        worker.probs.reset(new float[llm.llm_decoder.weight->ne[1]]);
-        worker.batch_buffer.reset(new char[shared->params.n_batch * std::max(llm.embed_tokens_weight->nb[1], llm.speech_embedding_weight->nb[1])]);
-
-        worker.kv_cache.build_kv_cache(
-            backend,
-            worker.kv_buffer,
-            static_cast<int>(llm.layers.size()),
-            static_cast<int>(llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads),
-            static_cast<int>(llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads),
-            llm.num_attention_heads,
-            llm.num_key_value_heads,
-            shared->params.n_max_seq,
-            cv3_shared->k_type,
-            cv3_shared->v_type,
-            shared->params.llm_use_flash_attn
-        );
-    }
-
     if (shared->params.flow_use_flash_attn)
     {
         int heads = flow.decoder.estimator.transformer_blocks[0].attn.heads;
@@ -890,6 +867,44 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         auto v = ggml_new_tensor_4d(worker->ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_v.weight->ne[1] / heads, 1, heads, 2);
         auto o = ggml_flash_attn_ext(worker->ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
         shared->params.flow_use_flash_attn = ggml_backend_supports_op(backend, o);
+    }
+
+    for (auto& worker : std::span(workers, shared->params.n_workers))
+    {
+        worker.nucleus_probs_capacity = static_cast<uint32_t>(sampling.top_k * 2);
+        worker.nucleus_probs.reset(new float[worker.nucleus_probs_capacity]);
+        worker.nucleus_probs_len = 0;
+        worker.probs.reset(new float[llm.llm_decoder.weight->ne[1]]);
+        worker.batch_buffer.reset(new char[shared->params.n_batch * std::max(llm.embed_tokens_weight->nb[1], llm.speech_embedding_weight->nb[1])]);
+
+        worker.llm_kv_cache.build_kv_cache(
+            backend,
+            worker.llm_kv_buffer,
+            static_cast<int>(llm.layers.size()),
+            static_cast<int>(llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads),
+            static_cast<int>(llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads),
+            llm.num_key_value_heads,
+            shared->params.n_max_seq,
+            cv3_shared->k_type,
+            cv3_shared->v_type,
+            1,
+            shared->params.llm_use_flash_attn
+        );
+        
+        const auto dit_blocks = flow.decoder.estimator.transformer_blocks;
+        worker.dit_kv_cache.build_kv_cache(
+            backend,
+            worker.dit_kv_buffer,
+            static_cast<int>(dit_blocks.size()* (flow.decoder.t_span.size() - 1)),
+            static_cast<int>(dit_blocks[0].attn.to_k.weight->ne[1] / dit_blocks[0].attn.heads),
+            static_cast<int>(dit_blocks[0].attn.to_v.weight->ne[1] / dit_blocks[0].attn.heads),
+            dit_blocks[0].attn.heads,
+            shared->params.n_max_seq,
+            GGML_TYPE_Q8_0,
+            GGML_TYPE_Q4_0,
+            2,
+            shared->params.flow_use_flash_attn
+        );
     }
 
     {
@@ -910,7 +925,7 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         {
         case COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED:
         case COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED:
-            cv3_worker->token2wav_buffer.reset(worker->kv_buffer.get());
+            cv3_worker->token2wav_buffer.reset(worker->llm_kv_buffer.get());
         case COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED:
             break;
         default:
