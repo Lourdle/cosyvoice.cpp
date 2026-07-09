@@ -25,7 +25,7 @@ void cosyvoice_kv_cache::build_kv_cache(
     this->k_type = k_type;
     this->v_type = v_type;
     offloaded_cache = nullptr;
-    this->num_attention_heads = num_attention_heads;
+    this->num_heads = num_key_value_heads;
     kv_cache_layers = new kv_cache_layer[layers];
 
     ggml_init_params params = {
@@ -34,10 +34,10 @@ void cosyvoice_kv_cache::build_kv_cache(
     };
     ctx = ggml_init(params);
 
-    buffer.reset(initialize_buffer(backend, k_head_dim, v_head_dim, num_attention_heads, num_key_value_heads, max_seq, k_type, v_type, batch_size, fattn));
+    buffer.reset(initialize_buffer(backend, k_head_dim, v_head_dim, num_key_value_heads, max_seq, k_type, v_type, batch_size, fattn));
 }
 
-ggml_backend_buffer* cosyvoice_kv_cache::initialize_buffer(ggml_backend_t backend, int k_head_dim, int v_head_dim, int num_attention_heads, int num_key_value_heads, uint32_t max_seq, ggml_type k_type, ggml_type v_type, int batch_size, bool fattn)
+ggml_backend_buffer* cosyvoice_kv_cache::initialize_buffer(ggml_backend_t backend, int k_head_dim, int v_head_dim, int num_key_value_heads, uint32_t max_seq, ggml_type k_type, ggml_type v_type, int batch_size, bool fattn)
 {
     int64_t k_ne[4] = { k_head_dim, max_seq, num_key_value_heads, batch_size };
     int64_t v_ne[4] = { v_head_dim, max_seq, num_key_value_heads, batch_size };
@@ -95,13 +95,13 @@ uint32_t cosyvoice_kv_cache::reset_buffer(ggml_backend_buffer* buffer)
 struct offloaded_kv_cache
 {
     uint32_t len;
+    size_t buffer_size;
     ggml_context* ctx;
     struct offloaded_kv_layer
     {
-        ggml_tensor* k_view;
-        ggml_tensor* v_view;
-        void* k;
-        void* v;
+        ggml_tensor* v_tensor;
+        char* k;
+        char* v;
     } offloaded_kv_layers[];
 };
 #pragma pack(pop)
@@ -109,7 +109,10 @@ struct offloaded_kv_cache
 void cosyvoice_kv_cache::offload_cache(ggml_backend_t backend, ggml_backend_sched* sched, uint32_t n_tokens)
 {
     char* buffer_base;
-    size_t nbytes = kv_cache_layers[0].k->ne[0] * sizeof(float) * n_tokens * kv_cache_layers[0].v->ne[2];
+    const auto batch_size = kv_cache_layers[0].k->ne[3];
+    const size_t k_head_nbytes = kv_cache_layers[0].k->nb[1] * n_tokens;
+    const size_t v_head_nbytes = fattn ? kv_cache_layers[0].v->nb[1] * n_tokens : ggml_row_size(kv_cache_layers[0].v->type, n_tokens) * kv_cache_layers[0].v->ne[1];
+    const size_t kv_nbytes = (k_head_nbytes + v_head_nbytes) * num_heads * batch_size;
     if (!offloaded_cache)
     {
         ggml_init_params params =
@@ -117,109 +120,120 @@ void cosyvoice_kv_cache::offload_cache(ggml_backend_t backend, ggml_backend_sche
             .mem_size = (ggml_tensor_overhead() + ggml_graph_overhead()) * layers * 4,
             .no_alloc = true
         };
-        offloaded_cache = reinterpret_cast<offloaded_kv_cache*>(malloc(sizeof(offloaded_kv_cache::offloaded_kv_layer) * layers + sizeof(uint32_t) + sizeof(ggml_context*)));
+        offloaded_cache = reinterpret_cast<offloaded_kv_cache*>(malloc(sizeof(offloaded_kv_cache::offloaded_kv_layer) * layers + sizeof(uint32_t) + sizeof(ggml_context*) + sizeof(size_t)));
         offloaded_cache->ctx = ggml_init(params);
+        offloaded_cache->buffer_size = 0;
         goto alloc_buffer;
     }
     else
     {
         ggml_reset(offloaded_cache->ctx);
-        if (offloaded_cache->len < n_tokens)
+        if (offloaded_cache->buffer_size < kv_nbytes * layers)
         {
             free(offloaded_cache->offloaded_kv_layers[0].k);
         alloc_buffer:
-            buffer_base = reinterpret_cast<char*>(malloc(nbytes * 2 * layers));
+            offloaded_cache->buffer_size = kv_nbytes * layers;
+            buffer_base = reinterpret_cast<char*>(malloc(offloaded_cache->buffer_size));
         }
         else buffer_base = reinterpret_cast<char*>(offloaded_cache->offloaded_kv_layers[0].k);
     }
 
     offloaded_cache->len = n_tokens;
-    auto gf = ggml_new_graph_custom(offloaded_cache->ctx, layers * 4, false);
-    ggml_tensor k_placeholder_tensor{ .ne{ kv_cache_layers[0].k->ne[0], n_tokens, kv_cache_layers[0].k->ne[2], 1 } };
-    ggml_tensor v_placeholder_tensor{ .ne{ fattn ? kv_cache_layers[0].v->ne[0] : n_tokens, fattn ? n_tokens : kv_cache_layers[0].v->ne[0], k_placeholder_tensor.ne[2], 1 } };
+    const auto total_heads = num_heads * batch_size;
     for (int i = 0; i != layers; ++i)
     {
         auto& offloaded_layer = offloaded_cache->offloaded_kv_layers[i];
         auto& layer = kv_cache_layers[i];
 
-        ggml_tensor* k_view = ggml_view_3d(offloaded_cache->ctx, layer.k, layer.k->ne[0], n_tokens, layer.k->ne[2], layer.k->nb[1], layer.k->nb[2], 0);
-        ggml_tensor* v_view;
-        if (fattn)
-            v_view = ggml_view_3d(offloaded_cache->ctx, layer.v, layer.v->ne[0], n_tokens, layer.v->ne[2], layer.v->nb[1], layer.v->nb[2], 0);
-        else
-            v_view = ggml_view_3d(offloaded_cache->ctx, layer.v, n_tokens, layer.v->ne[1], layer.v->ne[2], layer.v->nb[1], layer.v->nb[2], 0);
-
-        // The ggml_cast uses GGML_OP_CPY to implement the cast, which has a bug that the non-contiguous tensor causes the bad result.
-        // But most of the backends use cpy to implement the dup, so we have to use ggml_cast and then set the op to GGML_OP_DUP to avoid the bug.
-        offloaded_layer.k_view = ggml_cast(offloaded_cache->ctx, k_view, GGML_TYPE_F32);
-        offloaded_layer.v_view = ggml_cast(offloaded_cache->ctx, v_view, GGML_TYPE_F32);
-        offloaded_layer.k_view->op = GGML_OP_DUP;
-        offloaded_layer.v_view->op = GGML_OP_DUP;
-        // IMPORTANT: src[1] must be set to the placeholder tensor
-        // or it will cause the bug that the non-contiguous tensor causes the bad result.
-        offloaded_layer.k_view->src[1] = &k_placeholder_tensor;
-        offloaded_layer.v_view->src[1] = &v_placeholder_tensor;
-
-        ggml_build_forward_expand(gf, offloaded_layer.k_view);
-        ggml_build_forward_expand(gf, offloaded_layer.v_view);
+        offloaded_layer.k = buffer_base + i * kv_nbytes;
+        offloaded_layer.v = offloaded_layer.k + k_head_nbytes * total_heads;
+        for (int h = 0; h != total_heads; ++h)
+        {
+            ggml_backend_tensor_get_async(backend, layer.k, offloaded_layer.k + h * k_head_nbytes, h * layer.k->nb[2], k_head_nbytes);
+            if (fattn)
+                ggml_backend_tensor_get_async(backend, layer.v, offloaded_layer.v + h * v_head_nbytes, h * layer.v->nb[2], v_head_nbytes);
+        }
     }
 
-    ggml_backend_sched_alloc_graph(sched, gf);
-    ggml_backend_sched_graph_compute_async(sched, gf);
-
-    for (int i = 0; i != layers; ++i)
+    if (!fattn)
     {
-        auto& offloaded_layer = offloaded_cache->offloaded_kv_layers[i];
-        offloaded_layer.k = buffer_base;
-        offloaded_layer.v = buffer_base + nbytes;
-        ggml_backend_tensor_get_async(backend, offloaded_layer.k_view, offloaded_layer.k, 0, nbytes);
-        ggml_backend_tensor_get_async(backend, offloaded_layer.v_view, offloaded_layer.v, 0, nbytes);
-        buffer_base += nbytes * 2;
+        ggml_reset(offloaded_cache->ctx);
+        auto gf = ggml_new_graph_custom(offloaded_cache->ctx, layers * 3, false);
+        for (int i = 0; i != layers; ++i)
+        {
+            auto& offloaded_layer = offloaded_cache->offloaded_kv_layers[i];
+            auto& layer = kv_cache_layers[i];
+            auto v = layer.v;
+            v = ggml_view_4d(offloaded_cache->ctx, v, n_tokens, v->ne[1], v->ne[2], v->ne[3], v->nb[1], v->nb[2], v->nb[3], 0);
+            v = ggml_cont(offloaded_cache->ctx, v);
+            ggml_backend_sched_set_tensor_backend(sched, v, backend);
+            ggml_build_forward_expand(gf, v);
+            offloaded_layer.v_tensor = v;
+        }
+
+        ggml_backend_sched_alloc_graph(sched, gf);
+        ggml_backend_sched_graph_compute_async(sched, gf);
+
+        auto v_nbytes = v_head_nbytes * total_heads;
+        for (auto& layer : std::span(offloaded_cache->offloaded_kv_layers, layers))
+            ggml_backend_tensor_get_async(backend, layer.v_tensor, layer.v, 0, v_nbytes);
     }
+
+    cur_len = 0;
     ggml_backend_sched_synchronize(sched);
 }
 
 void cosyvoice_kv_cache::load_cache(ggml_backend_t backend, ggml_backend_sched* sched)
 {
+    const auto batch_size = kv_cache_layers[0].k->ne[3];
+    const auto total_heads = num_heads * batch_size;
+    const size_t k_head_nbytes = kv_cache_layers[0].k->nb[1] * offloaded_cache->len;
+    const size_t v_head_nbytes = fattn ? kv_cache_layers[0].v->nb[1] * offloaded_cache->len : ggml_row_size(kv_cache_layers[0].v->type, offloaded_cache->len) * kv_cache_layers[0].v->ne[1];
     cur_len = offloaded_cache->len;
-    ggml_reset(offloaded_cache->ctx);
-    auto gf = ggml_new_graph_custom(offloaded_cache->ctx, layers * 4, false);
+
+    if (!fattn)
+    {
+        ggml_reset(offloaded_cache->ctx);
+        auto gf = ggml_new_graph_custom(offloaded_cache->ctx, layers * 4, false);
+        for (int i = 0; i != layers; ++i)
+        {
+            auto& offloaded_layer = offloaded_cache->offloaded_kv_layers[i];
+            auto& layer = kv_cache_layers[i];
+            ggml_tensor* v = ggml_new_tensor_4d(offloaded_cache->ctx, v_type, cur_len, layer.v->ne[1], num_heads, batch_size);
+            ggml_backend_sched_set_tensor_backend(sched, v, backend);
+            offloaded_layer.v_tensor = v;
+            ggml_tensor* v_view = ggml_view_4d(offloaded_cache->ctx, layer.v, cur_len, layer.v->ne[1], num_heads, batch_size, layer.v->nb[1], layer.v->nb[2], layer.v->nb[3], 0);
+            ggml_build_forward_expand(gf, ggml_cpy(offloaded_cache->ctx, v, v_view));
+        }
+
+        ggml_backend_sched_alloc_graph(sched, gf);
+        const auto v_nbytes = v_head_nbytes * total_heads;
+        for (auto& layer : std::span(offloaded_cache->offloaded_kv_layers, layers))
+            ggml_backend_tensor_set_async(backend, layer.v_tensor, layer.v, 0, v_nbytes);
+
+        ggml_backend_sched_graph_compute_async(sched, gf);
+    }
+
     for (int i = 0; i != layers; ++i)
     {
         auto& offloaded_layer = offloaded_cache->offloaded_kv_layers[i];
         auto& layer = kv_cache_layers[i];
-        ggml_tensor* k_view = ggml_view_3d(offloaded_cache->ctx, layer.k, layer.k->ne[0], offloaded_cache->len, layer.k->ne[2], layer.k->nb[1], layer.k->nb[2], 0);
-        ggml_tensor* v_view;
-        if (fattn)
-            v_view = ggml_view_3d(offloaded_cache->ctx, layer.v, layer.v->ne[0], offloaded_cache->len, layer.v->ne[2], layer.v->nb[1], layer.v->nb[2], 0);
-        else
-            v_view = ggml_view_3d(offloaded_cache->ctx, layer.v, offloaded_cache->len, layer.v->ne[1], layer.v->ne[2], layer.v->nb[1], layer.v->nb[2], 0);
-
-        offloaded_layer.k_view = ggml_new_tensor(offloaded_cache->ctx, GGML_TYPE_F32, 3, k_view->ne);
-        offloaded_layer.v_view = ggml_new_tensor(offloaded_cache->ctx, GGML_TYPE_F32, 3, v_view->ne);
-        ggml_backend_sched_set_tensor_backend(sched, k_view, backend);
-        ggml_backend_sched_set_tensor_backend(sched, v_view, backend);
-        ggml_backend_sched_set_tensor_backend(sched, offloaded_layer.k_view, backend);
-        ggml_backend_sched_set_tensor_backend(sched, offloaded_layer.v_view, backend);
-        ggml_build_forward_expand(gf, ggml_cpy(offloaded_cache->ctx, offloaded_layer.k_view, k_view));
-        ggml_build_forward_expand(gf, ggml_cpy(offloaded_cache->ctx, offloaded_layer.v_view, v_view));
+        for (int h = 0; h != total_heads; ++h)
+        {
+            ggml_backend_tensor_set_async(backend, layer.k, offloaded_layer.k + h * k_head_nbytes, h * layer.k->nb[2], k_head_nbytes);
+            if (fattn)
+                ggml_backend_tensor_set_async(backend, layer.v, offloaded_layer.v + h * v_head_nbytes, h * layer.v->nb[2], v_head_nbytes);
+        }
     }
 
-    ggml_backend_sched_alloc_graph(sched, gf);
-    for (int i = 0; i != layers; ++i)
-    {
-        auto& offloaded_layer = offloaded_cache->offloaded_kv_layers[i];
-        ggml_backend_tensor_set_async(backend, offloaded_layer.k_view, offloaded_layer.k, 0, offloaded_layer.k_view->nb[3]);
-        ggml_backend_tensor_set_async(backend, offloaded_layer.v_view, offloaded_layer.v, 0, offloaded_layer.v_view->nb[3]);
-    }
-
-    ggml_backend_sched_graph_compute(sched, gf);
+    offloaded_cache->len = 0;
+    ggml_backend_sched_synchronize(sched);
 }
 
 size_t cosyvoice_kv_cache::get_offloaded_cache_size() const
 {
     if (offloaded_cache)
-        return offloaded_cache->offloaded_kv_layers[0].k_view->nb[3] * 2 * layers;
+        return offloaded_cache->buffer_size;
     else return 0;
 }
 
@@ -304,7 +318,11 @@ void cosyvoice_kv_cache::shift_kv_node_pos(uint32_t shift_pos)
 
 bool cosyvoice_kv_cache::can_reuse(bool prefill) const
 {
-    return fattn;
+    if (!fattn) return false;
+    for (auto& layer : std::span(kv_cache_layers, layers))
+        if (!layer.k_view || !layer.v_view)
+            return false;
+    return true;
 }
 
 void cosyvoice_kv_cache::slide_kv_layers(int layer_idx, int stride)

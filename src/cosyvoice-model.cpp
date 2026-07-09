@@ -267,7 +267,6 @@ void cosyvoice_model_3::empty_buffer_cache()
                 worker->backend.get(),
                 static_cast<int>(cv3_shared->llm.layers[0].self_attn.k_proj.weight->ne[1] / cv3_shared->llm.num_key_value_heads),
                 static_cast<int>(cv3_shared->llm.layers[0].self_attn.v_proj.weight->ne[1] / cv3_shared->llm.num_key_value_heads),
-                cv3_shared->llm.num_attention_heads,
                 cv3_shared->llm.num_key_value_heads,
                 shared->params.n_max_seq,
                 cv3_shared->k_type,
@@ -337,13 +336,13 @@ uint32_t cosyvoice_model_3::get_chunk_tokens()
 
 uint32_t cosyvoice_model_3::get_flow_overlap_tokens()
 {
-	// TODO: calculate the actual overlap tokens
+    // TODO: calculate the actual overlap tokens
     return 0;
 }
 
 uint32_t cosyvoice_model_3::get_hift_overlap_tokens()
 {
-	// TODO: calculate the actual overlap tokens
+    // TODO: calculate the actual overlap tokens
     return 0;
 }
 
@@ -600,5 +599,5 @@ void cosyvoice_model::llm_load_kv_cache()
     auto sched = worker->sched.get();
     auto& kv_cache = worker->llm_kv_cache;
     ggml_backend_sched_reset(sched);
-    kv_cache.offload_cache(worker->backend.get(), sched, kv_cache.cur_len);
+    kv_cache.load_cache(worker->backend.get(), sched);
 }

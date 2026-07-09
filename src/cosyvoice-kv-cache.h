@@ -42,7 +42,7 @@ public:
 
     void slide_kv_layers(int layer_idx, int stride);
 
-    ggml_backend_buffer* initialize_buffer(ggml_backend_t backend, int k_head_dim, int v_head_dim, int num_attention_heads, int num_key_value_heads, uint32_t max_seq, ggml_type k_type, ggml_type v_type, int batch_size, bool fattn);
+    ggml_backend_buffer* initialize_buffer(ggml_backend_t backend, int k_head_dim, int v_head_dim, int num_key_value_heads, uint32_t max_seq, ggml_type k_type, ggml_type v_type, int batch_size, bool fattn);
     uint32_t reset_buffer(ggml_backend_buffer* buffer);
 
     void offload_cache(ggml_backend_t backend, ggml_backend_sched* sched, uint32_t n_tokens);
@@ -53,7 +53,7 @@ public:
     uint32_t cur_len;
 private:
     int layers;
-    int num_attention_heads;
+    int num_heads;
     bool fattn;
     ggml_type k_type;
     ggml_type v_type;
