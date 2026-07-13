@@ -14,14 +14,14 @@
 
 struct cosyvoice_model_shared
 {
-    cosyvoice_model_shared(const cosyvoice_context_params_v2_cpp& params);
+    cosyvoice_model_shared(const cosyvoice_context_params_v3_cpp& params);
 
     ggml_context_ptr ctx;
 
     ggml_backend_buffer_ptr buffer;
     ggml_backend_buffer_ptr cpu_buffer;
 
-    cosyvoice_context_params_v2_cpp params;
+    cosyvoice_context_params_v3_cpp params;
     ggml_backend_op_capabilities op_caps;
     bool backend_uma;
 
@@ -83,7 +83,7 @@ struct cosyvoice_worker_context
 
 struct cosyvoice_model : virtual cosyvoice_model_context, virtual cosyvoice_object_ref_counter
 {
-    cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_v2_cpp& params);
+    cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_v3_cpp& params);
     ~cosyvoice_model();
 
     virtual void load(gguf_loader& loader) = 0;
@@ -143,9 +143,6 @@ struct cosyvoice_model_3_shared
     CausalHiFTGenerator hift;
     CosyVoice3LM llm;
 
-    ggml_type k_type;
-    ggml_type v_type;
-
     std::set<int> stop_tokens;
     std::set<int> silent_tokens;
 };
@@ -163,7 +160,7 @@ struct cosyvoice_3_worker_context
 
 struct cosyvoice_model_3 : cosyvoice_model
 {
-    cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_context_params_v2_cpp& params);
+    cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_context_params_v3_cpp& params);
     ~cosyvoice_model_3();
 
     void load(gguf_loader& loader);
@@ -189,8 +186,6 @@ struct cosyvoice_model_3 : cosyvoice_model
     bool token2wav(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, cosyvoice_generated_speech_ptr result);
     bool token2wav_ext(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, uint32_t* offset, bool streaming, bool finalize, cosyvoice_generated_speech_ptr result);
     uint32_t get_chunk_tokens();
-    uint32_t get_flow_overlap_tokens();
-    uint32_t get_hift_overlap_tokens();
 
     void empty_buffer_cache();
     void get_memory_usage(cosyvoice_memory_usage_t* usage);

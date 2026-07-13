@@ -46,7 +46,7 @@ void cosyvoice_init_default_context_params(cosyvoice_context_params_t* params)
     params->flow_use_flash_attn = true;
     params->llm_use_flash_attn = true;
 
-    params->llm_kv_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0;
+    params->llm_kv_cache_type = COSYVOICE_KV_CACHE_TYPE_Q8_0;
     params->llm_allow_kv_cache_fallback = true;
     params->inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
 
@@ -60,7 +60,7 @@ void cosyvoice_init_default_context_params(cosyvoice_context_params_t* params)
     params->sampler_ctx = nullptr;
 }
 
-cosyvoice_model_shared::cosyvoice_model_shared(const cosyvoice_context_params_v2_cpp& params)
+cosyvoice_model_shared::cosyvoice_model_shared(const cosyvoice_context_params_v3_cpp& params)
     : params(params), ctx(nullptr), backend_uma(false), rand_noise_len(0), noise_callback(nullptr), noise_callback_ctx(nullptr) {}
 
 cosyvoice_worker_context::cosyvoice_worker_context(ggml_backend_t backend)
@@ -69,7 +69,7 @@ cosyvoice_worker_context::cosyvoice_worker_context(ggml_backend_t backend)
     gf(nullptr), llm_input(nullptr), llm_probs(nullptr), position_ids(nullptr), causal_mask(nullptr), llm_kv_cache(),
     status(GGML_STATUS_SUCCESS), prompt_crc32(0), sampler_seed(0), sampler(nullptr), sampler_ctx(nullptr), builtin_sampler_rng_policy(COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION), nucleus_probs_capacity(0), nucleus_probs_len(0) {}
 
-cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_v2_cpp& params)
+cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_v3_cpp& params)
     : shared(new cosyvoice_model_shared(params)), workers(reinterpret_cast<cosyvoice_worker_context*>(malloc(sizeof(cosyvoice_worker_context) * params.n_workers)))
 {
     auto dev = ggml_backend_get_device(backend);
@@ -267,12 +267,8 @@ void cosyvoice_model_3::empty_buffer_cache()
                 worker->backend.get(),
                 static_cast<int>(cv3_shared->llm.layers[0].self_attn.k_proj.weight->ne[1] / cv3_shared->llm.num_key_value_heads),
                 static_cast<int>(cv3_shared->llm.layers[0].self_attn.v_proj.weight->ne[1] / cv3_shared->llm.num_key_value_heads),
-                cv3_shared->llm.num_key_value_heads,
                 shared->params.n_max_seq,
-                cv3_shared->k_type,
-                cv3_shared->v_type,
-                1,
-                shared->params.llm_use_flash_attn));
+                1));
 
         switch (shared->params.inference_buffer_policy)
         {
@@ -334,22 +330,10 @@ uint32_t cosyvoice_model_3::get_chunk_tokens()
     return 25 + cv3_shared->flow.pre_lookahead_layer.pre_lookahead_len;
 }
 
-uint32_t cosyvoice_model_3::get_flow_overlap_tokens()
-{
-    // TODO: calculate the actual overlap tokens
-    return 0;
-}
-
-uint32_t cosyvoice_model_3::get_hift_overlap_tokens()
-{
-    // TODO: calculate the actual overlap tokens
-    return 0;
-}
-
 cosyvoice_3_worker_context::cosyvoice_3_worker_context() :
     ctx1(ggml_init(ggml_init_params{ .mem_size = ggml_tensor_overhead() * 4, .no_alloc = true })) {}
 
-cosyvoice_model_3::cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_context_params_v2_cpp& params)
+cosyvoice_model_3::cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_context_params_v3_cpp& params)
     : cosyvoice_model(backend, params), cv3_shared(new cosyvoice_model_3_shared), cv3_workers(new cosyvoice_3_worker_context[params.n_workers]())
 {
     cv3_worker = cv3_workers;

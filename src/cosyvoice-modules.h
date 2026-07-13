@@ -131,7 +131,7 @@ struct Attention : Module
 
     void OnLoad(const gguf_loader& loader, const std::string& prefix);
 
-    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* position_ids, int64_t cut_len, cosyvoice_kv_cache* kv_cache, ggml_cgraph* gf, int layer_idx) const;
+    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* position_ids, int64_t cut_len, cosyvoice_kv_cache* kv_cache, ggml_cgraph* gf, ggml_tensor* attn_mask, int layer_idx) const;
 };
 
 struct FeedForward : Module
@@ -154,7 +154,7 @@ struct DiTBlock : Module
 
     void OnLoad(const gguf_loader& loader, const std::string& prefix);
 
-    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* time_emb, ggml_tensor* position_ids, int64_t cut_len, cosyvoice_kv_cache* kv_cache, ggml_cgraph* gf, int layer_idx) const;
+    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* time_emb, ggml_tensor* position_ids, int64_t cut_len, cosyvoice_kv_cache* kv_cache, ggml_cgraph* gf, ggml_tensor* attn_mask, int layer_idx) const;
 };
 
 struct AdaLayerNorm_Final : Module
@@ -183,12 +183,13 @@ struct DiT : Module
 
     void OnLoad(const gguf_loader& loader, const std::string& prefix);
 
-    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* mu, ggml_tensor* t, ggml_tensor* spks, ggml_tensor* cond, int64_t cut_len, ggml_tensor*& position_ids, ggml_backend_op_capabilities capabilities, cosyvoice_kv_cache* kv_cache, ggml_cgraph* gf, int step) const;
+    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* mu, ggml_tensor* t, ggml_tensor* spks, ggml_tensor* cond, int64_t cut_len, ggml_tensor*& position_ids, ggml_backend_op_capabilities capabilities, cosyvoice_kv_cache* kv_cache, ggml_tensor** ref_attn_mask, ggml_cgraph* gf) const;
 };
 
 struct CausalConditionalCFM : Module
 {
-    std::array<float, 11> t_span;
+    constexpr static int diffusion_steps = 10;
+    std::array<float, diffusion_steps + 1> t_span;
     float inference_cfg_rate;
 
     DiT estimator;
@@ -206,7 +207,7 @@ struct CausalConditionalCFM : Module
 
     DiTContext prepare_context(ggml_context* ctx, ggml_tensor* mu, ggml_tensor* spks, ggml_tensor* cond) const;
     std::array<float, 2> get_t_and_dt(ggml_context* ctx, int step) const;
-    ggml_tensor* build_cgraph_one_step(ggml_context* ctx, const DiTContext& ditctx, int step, ggml_backend_op_capabilities capabilities, int64_t cut_len, ggml_tensor*& t_tensor, ggml_tensor*& position_ids, ggml_cgraph* gf, cosyvoice_kv_cache* kv_cache) const;
+    ggml_tensor* build_cgraph_one_step(ggml_context* ctx, const DiTContext& ditctx, int step, ggml_backend_op_capabilities capabilities, int64_t cut_len, ggml_tensor*& t_tensor, ggml_tensor*& position_ids, ggml_cgraph* gf, cosyvoice_kv_cache* kv_cache, ggml_tensor** attn_mask) const;
 };
 
 struct PreLookaheadLayer : Module

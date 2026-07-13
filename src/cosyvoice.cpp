@@ -60,7 +60,7 @@ struct cosyvoice_internal_context : cosyvoice_context
 
 struct cosyvoice_context_3 : cosyvoice_internal_context, cosyvoice_tokenizer, cosyvoice_model_3
 {
-    cosyvoice_context_3(const cosyvoice_context_params_v2_cpp& params, ggml_backend_t backend) :
+    cosyvoice_context_3(const cosyvoice_context_params_v3_cpp& params, ggml_backend_t backend) :
         cosyvoice_model_3(backend, params) {}
 };
 
@@ -126,13 +126,41 @@ cosyvoice_context_t cosyvoice_load_ext(const void* data, size_t size, const cosy
     gguf_loader loader(parser, data, size);
     if (!loader) return nullptr;
 
-    cosyvoice_context_params_v2_t params_v2{ .base_params = *params };
-    if (version == COSYVOICE_CONTEXT_PARAMS_V2_VERSION)
-        params_v2.n_workers = std::max(1u, reinterpret_cast<const cosyvoice_context_params_v2_t*>(params)->n_workers);
-    else
-        params_v2.n_workers = 1;
+    cosyvoice_context_params_v3_cpp params_v3 = {};
+    params_v3.cosyvoice_context_params_t::operator=(*params);
 
-    auto ctx = new cosyvoice_context_3(reinterpret_cast<const cosyvoice_context_params_v2_cpp&>(params_v2),
+    if (version >= COSYVOICE_CONTEXT_PARAMS_V2_VERSION)
+        params_v3.n_workers = std::max(1u, reinterpret_cast<const cosyvoice_context_params_v2_t*>(params)->n_workers);
+    else
+        params_v3.n_workers = 1;
+
+    if (version >= COSYVOICE_CONTEXT_PARAMS_V3_VERSION)
+    {
+        auto* p_v3 = reinterpret_cast<const cosyvoice_context_params_v3_t*>(params);
+        if (params_v3.dit_kv_fixed_slots == 0 && params_v3.dit_kv_offloadable_slots != 0)
+        {
+            params_v3.dit_kv_fixed_slots = 1;
+            --params_v3.dit_kv_offloadable_slots;
+        }
+
+        params_v3.dit_kv_cache_type = p_v3->dit_kv_cache_type;
+        params_v3.dit_kv_fixed_slots = p_v3->dit_kv_fixed_slots;
+        params_v3.dit_kv_offloadable_slots = p_v3->dit_kv_offloadable_slots;
+        params_v3.dit_allow_kv_cache_fallback = p_v3->dit_allow_kv_cache_fallback;
+        params_v3.dit_kv_cache_length = p_v3->dit_kv_cache_length;
+        if (params_v3.dit_kv_cache_length == 0)
+            params_v3.dit_kv_cache_length = params->n_max_seq * 10;
+    }
+    else
+    {
+        params_v3.dit_kv_fixed_slots = 0;
+        params_v3.dit_kv_offloadable_slots = 0;
+        params_v3.dit_kv_cache_length = params->n_max_seq * 10;
+        params_v3.dit_allow_kv_cache_fallback = true;
+        params_v3.dit_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(COSYVOICE_KV_CACHE_TYPE_Q8_0, COSYVOICE_KV_CACHE_TYPE_Q4_0, COSYVOICE_KV_CACHE_TYPE_Q8_0);
+    }
+
+    auto ctx = new cosyvoice_context_3(params_v3,
         backend ? backend : ggml_backend_init_best()
     );
     ctx->cosyvoice_model_3::load(loader);
@@ -140,7 +168,7 @@ cosyvoice_context_t cosyvoice_load_ext(const void* data, size_t size, const cosy
 
     auto ggml_backend_set_n_threads = reinterpret_cast<ggml_backend_set_n_threads_t>(ggml_backend_reg_get_proc_address(ggml_backend_dev_backend_reg(ggml_backend_get_device(ctx->worker->cpu_backend.get())), "ggml_backend_set_n_threads"));
     if (n_threads == 0)
-        n_threads = std::max<uint32_t>(1, std::thread::hardware_concurrency() / params_v2.n_workers);
+        n_threads = std::max<uint32_t>(1, std::thread::hardware_concurrency() / params_v3.n_workers);
     if (n_threads != 0)
         ggml_backend_set_n_threads(ctx->worker->cpu_backend.get(), n_threads);
 
@@ -171,6 +199,11 @@ cosyvoice_context_t cosyvoice_load_from_file_with_params(const char* filename, c
 }
 
 cosyvoice_context_t cosyvoice_load_from_file_with_params_v2(const char* filename, const cosyvoice_context_params_v2_t* params)
+{
+    return cosyvoice_load_from_file_ext(filename, params, nullptr, 0);
+}
+
+cosyvoice_context_t cosyvoice_load_from_file_with_params_v3(const char* filename, const cosyvoice_context_params_v3_t* params)
 {
     return cosyvoice_load_from_file_ext(filename, params, nullptr, 0);
 }
@@ -390,16 +423,6 @@ bool cosyvoice_tts_stream(cosyvoice_context_t ctx, const int* text, uint32_t tex
 uint32_t cosyvoice_get_chunk_tokens(cosyvoice_context_t ctx)
 {
     return ctx->get_chunk_tokens();
-}
-
-uint32_t cosyvoice_get_flow_overlap_tokens(cosyvoice_context_t ctx)
-{
-    return ctx->get_flow_overlap_tokens();
-}
-
-uint32_t cosyvoice_get_hift_overlap_tokens(cosyvoice_context_t ctx)
-{
-    return ctx->get_hift_overlap_tokens();
 }
 
 ggml_status cosyvoice_get_last_status(cosyvoice_context_t ctx)

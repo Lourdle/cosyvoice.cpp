@@ -70,6 +70,7 @@ typedef float* (*cosyvoice_noise_callback_t)(
 
 #define COSYVOICE_CONTEXT_PARAMS_VERSION     (0ul)
 #define COSYVOICE_CONTEXT_PARAMS_V2_VERSION  (1ul)
+#define COSYVOICE_CONTEXT_PARAMS_V3_VERSION  (2ul)
 
 // ----------------------------------------------------------------------------
 // Logging Utilities
@@ -117,7 +118,7 @@ struct _is_same<T, T> { static constexpr bool value = true; };
  * @note This overload is only available in C++ and requires the full definition of all context parameter types.
  */
 template<typename params_t>
-inline cosyvoice_context_t cosyvoice_load_from_file_ext(
+constexpr cosyvoice_context_t cosyvoice_load_from_file_ext(
     const char*                       filename,
     const params_t*                   params,
     ggml_backend_t                    backend,
@@ -130,10 +131,15 @@ inline cosyvoice_context_t cosyvoice_load_from_file_ext(
         return cosyvoice_load_from_file_ext(filename, params, backend, n_threads, COSYVOICE_CONTEXT_PARAMS_VERSION);
     else if constexpr (_is_same<params_t, cosyvoice_context_params_v2_t>::value)
         return cosyvoice_load_from_file_ext(filename, &params->base_params, backend, n_threads, COSYVOICE_CONTEXT_PARAMS_V2_VERSION);
+    else if constexpr (_is_same<params_t, cosyvoice_context_params_v3_t>::value)
+        return cosyvoice_load_from_file_ext(filename, &params->base_params.base_params, backend, n_threads, COSYVOICE_CONTEXT_PARAMS_V3_VERSION);
     else
     {
-        static_assert(_is_same<params_t, cosyvoice_context_params_v2_cpp>::value, "Unsupported context parameter type");
-        return cosyvoice_load_from_file_ext(filename, params, backend, n_threads, COSYVOICE_CONTEXT_PARAMS_V2_VERSION);
+        static_assert(_is_same<params_t, cosyvoice_context_params_v2_cpp>::value || _is_same<params_t, cosyvoice_context_params_v3_cpp>::value, "Unsupported context parameter type");
+        constexpr auto version = _is_same<params_t, cosyvoice_context_params_v3_cpp>::value
+            ? COSYVOICE_CONTEXT_PARAMS_V3_VERSION
+            : COSYVOICE_CONTEXT_PARAMS_V2_VERSION;
+        return cosyvoice_load_from_file_ext(filename, reinterpret_cast<const cosyvoice_context_params_t*>(params), backend, n_threads, version);
     }
 }
 
@@ -348,16 +354,6 @@ COSYVOICE_API bool cosyvoice_tts_stream(
 * @brief Get the number of tokens processed in each chunk during streaming inference.
 */
 COSYVOICE_API uint32_t cosyvoice_get_chunk_tokens(cosyvoice_context_t ctx);
-
-/**
- * @brief Get the number of tokens that overlap between consecutive chunks during streaming inference.
- */
-COSYVOICE_API uint32_t cosyvoice_get_flow_overlap_tokens(cosyvoice_context_t ctx);
-
-/**
-* @brief Get the number of extra tokens to overlap for HiFT lookahead in streaming inference.
-*/
-COSYVOICE_API uint32_t cosyvoice_get_hift_overlap_tokens(cosyvoice_context_t ctx);
 
 // ----------------------------------------------------------------------------
 // Tokenizer Operations
