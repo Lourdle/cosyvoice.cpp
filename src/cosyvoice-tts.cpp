@@ -330,7 +330,7 @@ struct dit_sched_config
 
     const auto& operator[](int i) const { return graph_config[i]; }
 
-    dit_sched_config(const cosyvoice_context_params_v3_cpp& params, int64_t cut_len, uint32_t offset, bool streaming)
+    dit_sched_config(const cosyvoice_context_params_v3_cpp& params, int64_t cut_len, uint32_t offset, bool streaming, bool kv_slidable)
     {
         if (!streaming)
         {
@@ -365,7 +365,8 @@ struct dit_sched_config
                     || i == 1
                     || offset != 0 && i == n_no_cache_steps - 1
                     || i == n_no_cache_steps
-                    || i == n - 1 && cut_len != 0;
+                    || i == n - 1 && cut_len != 0
+                    || !kv_slidable && i >= n_no_cache_steps;
                 graph_config[i].cache_kv = i >= n_no_cache_steps;
                 graph_config[i].offload = i >= n_no_cache_steps && i < n_no_cache_steps + n_offloadable_steps;
                 graph_config[i].load = graph_config[i].offload && offset != 0;
@@ -374,7 +375,7 @@ struct dit_sched_config
                 if (i == n_no_cache_steps - 1 && offset != 0)
                     graph_config[i].cut_len = offset;
                 graph_config[i].slice = offset != 0 && i == n_no_cache_steps;
-                graph_config[i].slide = graph_config[i].cache_kv && !graph_config[i].offload && i != n - 1;
+                graph_config[i].slide = kv_slidable && graph_config[i].cache_kv && !graph_config[i].offload && i != n - 1;
             }
         }
     }
@@ -432,7 +433,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         }
     } while (false);
 
-    dit_sched_config<flow.decoder.diffusion_steps> config(params, cut_len, offset ? *offset : 0, streaming);
+    dit_sched_config<flow.decoder.diffusion_steps> config(params, cut_len, offset ? *offset : 0, streaming, kv_cache->can_reuse());
     if (offset)
         if (flow.decoder.diffusion_steps == params.dit_kv_fixed_slots + params.dit_kv_offloadable_slots)
             *offset += chunk_len;
@@ -522,6 +523,13 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
                 kv_cache->bind_slot(kv_slot++);
             ggml_reset(ctx0.get());
             ggml_backend_sched_reset(sched.get());
+
+            if (config[step].load)
+            {
+                kv_cache->load_slot(backend.get(), sched.get(), offload_slot);
+                ggml_backend_sched_reset(sched.get());
+            }
+
             gf = new_cgraph(ctx0.get());
             feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, step + 1, op_caps, config[step].cut_len, t_leaf, position_ids, gf, config[step].cache_kv ? kv_cache : nullptr, config[step].mask ? &attn_mask : nullptr);
             ggml_build_forward_expand(gf, feat);
@@ -536,17 +544,21 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
             auto [t, dt] = flow.decoder.get_t_and_dt(ctx0.get(), step);
             reinterpret_cast<float*>(t_leaf->op_params)[op_caps.fill ? 0 : 1] = t;
             reinterpret_cast<float*>(scale_node->op_params)[0] = dt;
-        }
 
-        if (config[step].load)
-            kv_cache->load_slot(backend.get(), sched.get(), offload_slot);
+            if (config[step].load)
+                kv_cache->load_slot(backend.get(), sched.get(), offload_slot);
+        }
 
         worker->status = ggml_backend_sched_graph_compute(sched.get(), gf);
         if (worker->status != GGML_STATUS_SUCCESS)
             return false;
 
         if (config[step].offload)
-            kv_cache->offload_slot(backend.get(), sched.get(), offload_slot + 1);
+        {
+            if (step != flow.decoder.diffusion_steps - 1 && config[step + 1].rebuild)
+                ggml_backend_sched_reset(sched.get());
+            kv_cache->offload_slot(backend.get(), sched.get(), offload_slot++);
+        }
         if (config[step].slide)
             kv_cache->slide_kv_slot();
     }

@@ -130,7 +130,7 @@ bool cosyvoice_model_3::llm_prefill(
     auto& llm_probs = worker->llm_probs;
     if (gf && llm_input && !llm_probs
         && llm_input->type == type && n_tokens == llm_input->ne[1]
-        && kv_cache->can_reuse(true))
+        && kv_cache->can_reuse())
     {
         ggml_backend_tensor_set_async(worker->backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
         kv_cache->shift_kv_node_pos(n_tokens);
@@ -215,7 +215,7 @@ bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
     auto& llm_probs = worker->llm_probs;
     if (gf && llm_input && llm_probs
         && llm_input->type == type && 1 == llm_input->ne[1]
-        && kv_cache->can_reuse(false))
+        && kv_cache->can_reuse())
     {
         ggml_backend_tensor_set_async(shared->op_caps.emb_cast_f32 ? worker->backend.get() : worker->cpu_backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
         kv_cache->shift_kv_node_pos(1);

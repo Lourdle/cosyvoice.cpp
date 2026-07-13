@@ -376,13 +376,9 @@ void cosyvoice_kv_cache::shift_kv_node_pos(uint32_t shift_pos)
     }
 }
 
-bool cosyvoice_kv_cache::can_reuse(bool prefill) const
+bool cosyvoice_kv_cache::can_reuse() const
 {
-    if (!fattn) return false;
-    for (auto& layer : std::span(kv_cache_layers + cur_slot_idx * layers, layers))
-        if (!layer.k_view || !layer.v_view)
-            return false;
-    return true;
+    return fattn;
 }
 
 bool cosyvoice_kv_cache::bind_slot(int slot_idx)
@@ -424,5 +420,5 @@ void cosyvoice_kv_cache::slide_kv_slot()
         }
     }
     else
-        GGML_ABORT("slide_kv_layers is not supported for non-flash attention");
+        GGML_ABORT("slide_kv_slot is not supported for non-flash attention");
 }

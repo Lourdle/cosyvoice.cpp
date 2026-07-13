@@ -31,7 +31,7 @@ public:
     ggml_tensor* attention_forward(ggml_context* ctx0, ggml_tensor* query_states, ggml_tensor* key_states, ggml_tensor* value_states, ggml_tensor* attention_mask) const;
 
     void shift_kv_node_pos(uint32_t shift_pos);
-    bool can_reuse(bool prefill) const;
+    bool can_reuse() const;
 
     bool bind_slot(int slot_idx);
     void slide_kv_slot();

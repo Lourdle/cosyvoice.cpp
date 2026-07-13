@@ -377,11 +377,11 @@ ggml_tensor* Attention::build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_ten
             attn_output = ggml_flash_attn_ext(ctx, query, key, value, attn_mask, 1.f / std::sqrt(static_cast<float>(head_dim)), 0.f, 0.f);
         else
         {
-            value = ggml_permute(ctx, value, 0, 2, 1, 3);
+            value = ggml_permute(ctx, value, 1, 0, 2, 3);
             value = ggml_cont(ctx, value);
             auto attn_scores = ggml_mul_mat(ctx, key, query);
             auto attn_weights = ggml_soft_max_ext_inplace(ctx, attn_scores, attn_mask, 1.f / std::sqrt(static_cast<float>(head_dim)), 0.f);
-            auto attn_output = ggml_mul_mat(ctx, value, attn_weights);
+            attn_output = ggml_mul_mat(ctx, value, attn_weights);
             attn_output = ggml_permute(ctx, attn_output, 0, 2, 1, 3);
             attn_output = ggml_cont(ctx, attn_output);
         }
