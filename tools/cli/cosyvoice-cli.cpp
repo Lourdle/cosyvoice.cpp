@@ -39,6 +39,8 @@
     #include <signal.h>
 #endif
 
+constexpr auto parse_kv_cache_type_arg = parse_llm_kv_cache_type_arg;
+
 struct cli_options
 {
     uint32_t max_llm_len = COSYVOICE_DEFAULT_LLM_MAX_SEQ_LEN;
@@ -77,12 +79,21 @@ struct cli_options
     seed_policy_mode seed_policy = seed_policy_mode::auto_mode;
     uint32_t n_threads = 0;
     bool has_llm_kv_cache_type = false;
-    cosyvoice_llm_kv_cache_type_t llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
-        COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0,
-        COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0,
-        COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0);
+    cosyvoice_kv_cache_type_t llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+        COSYVOICE_KV_CACHE_TYPE_Q8_0,
+        COSYVOICE_KV_CACHE_TYPE_Q4_0,
+        COSYVOICE_KV_CACHE_TYPE_Q8_0);
+    bool has_dit_kv_cache_type = false;
+    cosyvoice_kv_cache_type_t dit_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+        COSYVOICE_KV_CACHE_TYPE_Q8_0,
+        COSYVOICE_KV_CACHE_TYPE_Q4_0,
+        COSYVOICE_KV_CACHE_TYPE_Q8_0);
+    uint32_t dit_kv_fixed_slots = 0;
+    uint32_t dit_kv_offloadable_slots = 0;
+    uint32_t dit_kv_cache_length = 0;
     bool has_inference_buffer_policy = false;
     cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
+    bool stream = false;
     bool verbose = false;
     bool quiet = false;
     bool has_temperature = false;
@@ -305,6 +316,13 @@ static void print_usage(const char* argv0)
     printf("                                              Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
     printf("  --inference-buffer-policy <shared|balanced|dedicated>\n");
     printf("                                              Inference buffer policy (interactive only). Default: balanced.\n");
+    printf("  --dit-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>\n");
+    printf("                                              DiT KV cache type (interactive only).\n");
+    printf("                                              Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
+    printf("  --dit-kv-fixed-slots <value>                Number of fixed (non-offloadable) DiT KV slots (interactive only). Default: 0.\n");
+    printf("  --dit-kv-offloadable-slots <value>          Number of offloadable DiT KV slots (interactive only). Default: 0.\n");
+    printf("  --dit-kv-cache-length <value>               DiT KV cache max seq length (interactive only). Default: max-llm-len * 10.\n");
+    printf("  --stream                                    Enable streaming playback in interactive mode.\n");
     printf("  --seed <value>                              Fixed seed for sampling.\n");
     printf("  --seed-policy <auto|fixed|random>           Seed strategy. Default: auto (fixed if --seed is set).\n");
 
@@ -851,7 +869,7 @@ static void run_interactive_loop(
     uint32_t sample_rate)
 {
     audio_cache cache;
-    bool streaming = false;
+    bool streaming = options.stream;
     std::string line;
     if (seed_state && !seed_state->has_next_seed)
     {
@@ -1353,11 +1371,22 @@ static bool validate_options(cli_options& options)
 
     if (options.has_llm_kv_cache_type
         && !COSYVOICE_IS_SEPARATE_KV_CACHE(options.llm_kv_cache_type)
-        && (options.llm_kv_cache_type < 0 || options.llm_kv_cache_type >= COSYVOICE_LLM_KV_CACHE_TYPE_COUNT))
+        && (options.llm_kv_cache_type < 0 || options.llm_kv_cache_type >= COSYVOICE_KV_CACHE_TYPE_COUNT))
     {
         print_error_log("Error: invalid --llm-kv-cache-type. Allowed values: f32, f16, q8_0, q5_1, q5_0, q4_1, q4_0 or k=<type>,v=<type>.\n");
         ok = false;
     }
+
+    if (options.has_dit_kv_cache_type
+        && !COSYVOICE_IS_SEPARATE_KV_CACHE(options.dit_kv_cache_type)
+        && (options.dit_kv_cache_type < 0 || options.dit_kv_cache_type >= COSYVOICE_KV_CACHE_TYPE_COUNT))
+    {
+        print_error_log("Error: invalid --dit-kv-cache-type. Allowed values: f32, f16, q8_0, q5_1, q5_0, q4_1, q4_0 or k=<type>,v=<type>.\n");
+        ok = false;
+    }
+
+    if (options.dit_kv_cache_length == 0)
+        options.dit_kv_cache_length = options.max_llm_len * 10;
 
     if (options.has_win_size && options.win_size <= 0)
     {
@@ -1483,8 +1512,8 @@ int tool_entry(int argc, char** argv)
         else if (str_casecmp(arg, "--llm-kv-cache-type") == 0)
         {
             auto value = get_arg_value();
-            cosyvoice_llm_kv_cache_type_t type;
-            if (!parse_llm_kv_cache_type_arg(value, &type))
+            cosyvoice_kv_cache_type_t type;
+            if (!parse_kv_cache_type_arg(value, &type))
             {
                 print_error_log("Error: invalid --llm-kv-cache-type value \"%s\".\n", value);
                 return 1;
@@ -1492,6 +1521,53 @@ int tool_entry(int argc, char** argv)
             options.llm_kv_cache_type = type;
             options.has_llm_kv_cache_type = true;
         }
+        else if (str_casecmp(arg, "--dit-kv-cache-type") == 0)
+        {
+            auto value = get_arg_value();
+            cosyvoice_kv_cache_type_t type;
+            if (!parse_kv_cache_type_arg(value, &type))
+            {
+                print_error_log("Error: invalid --dit-kv-cache-type value \"%s\".\n", value);
+                return 1;
+            }
+            options.dit_kv_cache_type = type;
+            options.has_dit_kv_cache_type = true;
+        }
+        else if (str_casecmp(arg, "--dit-kv-fixed-slots") == 0)
+        {
+            auto value = get_arg_value();
+            uint32_t v;
+            if (!parse_uint32_arg(value, &v))
+            {
+                print_error_log("Error: invalid --dit-kv-fixed-slots value \"%s\".\n", value);
+                return 1;
+            }
+            options.dit_kv_fixed_slots = v;
+        }
+        else if (str_casecmp(arg, "--dit-kv-offloadable-slots") == 0)
+        {
+            auto value = get_arg_value();
+            uint32_t v;
+            if (!parse_uint32_arg(value, &v))
+            {
+                print_error_log("Error: invalid --dit-kv-offloadable-slots value \"%s\".\n", value);
+                return 1;
+            }
+            options.dit_kv_offloadable_slots = v;
+        }
+        else if (str_casecmp(arg, "--dit-kv-cache-length") == 0)
+        {
+            auto value = get_arg_value();
+            uint32_t v;
+            if (!parse_uint32_arg(value, &v))
+            {
+                print_error_log("Error: invalid --dit-kv-cache-length value \"%s\".\n", value);
+                return 1;
+            }
+            options.dit_kv_cache_length = v;
+        }
+        else if (str_casecmp(arg, "--stream") == 0)
+            options.stream = true;
         else if (str_casecmp(arg, "--inference-buffer-policy") == 0)
         {
             auto value = get_arg_value();
@@ -1828,17 +1904,26 @@ int tool_entry(int argc, char** argv)
     cosyvoice_init_backend_from_path(options.backend_path.empty() ? nullptr : options.backend_path.c_str());
     timing.backend_init_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
 
-    cosyvoice_context_params_t params;
-    cosyvoice_init_default_context_params(&params);
+    cosyvoice_context_params_v3_t params = {};
+    cosyvoice_init_default_context_params(&params.base_params.base_params);
+    params.base_params.base_params.n_max_seq = options.max_llm_len;
+    params.base_params.base_params.llm_kv_cache_type = options.llm_kv_cache_type;
+    params.base_params.n_workers = 1;
     if (options.interactive)
     {
         if (options.has_inference_buffer_policy)
-            params.inference_buffer_policy = options.inference_buffer_policy;
+            params.base_params.base_params.inference_buffer_policy = options.inference_buffer_policy;
     }
     else
-        params.inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED;
-    params.n_max_seq = options.max_llm_len;
-    params.llm_kv_cache_type = options.llm_kv_cache_type;
+        params.base_params.base_params.inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED;
+    if (options.interactive)
+    {
+        params.dit_kv_cache_type = options.dit_kv_cache_type;
+        params.dit_kv_fixed_slots = options.dit_kv_fixed_slots;
+        params.dit_kv_offloadable_slots = options.dit_kv_offloadable_slots;
+        params.dit_kv_cache_length = options.dit_kv_cache_length;
+        params.dit_allow_kv_cache_fallback = true;
+    }
     tts_seed_state seed_state;
     const bool has_seed_value = !options.seed.empty();
     const cli_options::seed_policy_mode policy = resolve_seed_policy_mode(options);
@@ -1851,14 +1936,14 @@ int tool_entry(int argc, char** argv)
             print_error_log("Error: invalid --seed value \"%s\". It should be a non-negative integer between 0 and %u.\n", options.seed.c_str(), UINT32_MAX);
             return 1;
         }
-        params.seed = seed_value;
+        params.base_params.base_params.seed = seed_value;
         seed_state.next_seed = seed_value;
         seed_state.has_next_seed = true;
     }
     else if (seed_state.fixed)
     {
         const uint32_t seed_value = cosyvoice_generate_random_seed();
-        params.seed = seed_value;
+        params.base_params.base_params.seed = seed_value;
         seed_state.next_seed = seed_value;
         seed_state.has_next_seed = true;
     }
