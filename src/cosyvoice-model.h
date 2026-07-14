@@ -72,6 +72,7 @@ struct cosyvoice_worker_context
     cosyvoice_builtin_sampler_rng_policy_t builtin_sampler_rng_policy;
 
     std::vector<float> flow_cache;
+    std::vector<uint32_t> chunk_boundaries;
     std::unique_ptr<char[]> batch_buffer;
     std::unique_ptr<float[]> nucleus_probs;
     uint32_t nucleus_probs_capacity;

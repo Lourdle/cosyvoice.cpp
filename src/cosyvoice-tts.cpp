@@ -440,7 +440,9 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         else
             *offset = chunk_len;
 
-    int position_offset = kv_cache ? static_cast<int>(kv_cache->cur_len) : 0;
+    if (streaming && !finalize && offset)
+        worker->chunk_boundaries.push_back(*offset);
+
     uint32_t noise_len = static_cast<uint32_t>(ggml_nelements(ditctx.x));
     float* noise_buffer = shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_FLOW, noise_len, nullptr, shared->noise_callback_ctx);
     ggml_backend_tensor_set_async(backend.get(), ditctx.x, noise_buffer, 0, ggml_nbytes(ditctx.x));
@@ -459,18 +461,24 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     auto post_process = [&](int step)
     {
         if (!op_caps.fill) ggml_set_zero(t_leaf);
+
+        const auto base = config[step].cache_kv ? kv_cache->cur_len : 0;
         for (int64_t i = 0; i < position_ids->ne[1]; ++i)
         {
             auto cur_row = reinterpret_cast<int32_t*>(position_ids->data) + i * position_ids->ne[0];
             for (int32_t j = 0; j < position_ids->ne[0]; ++j)
-                cur_row[j] = j + position_offset;
+                cur_row[j] = j + base;
         }
+
         if (config[step].mask)
         {
-            const auto cs = flow.decoder.estimator.static_chunk_size;
+            const auto& bounds = worker->chunk_boundaries;
             for (int64_t i = 0; i < attn_mask->ne[0]; ++i)
             {
-                int64_t block_end = ((i / cs) + 1) * cs;
+                auto it = std::upper_bound(bounds.begin(), bounds.end(), static_cast<uint32_t>(i));
+                int64_t block_end = it != bounds.end()
+                    ? static_cast<int64_t>(*it)
+                    : attn_mask->ne[0];
                 auto row = reinterpret_cast<ggml_fp16_t*>(attn_mask->data) + i * attn_mask->ne[1];
                 for (int64_t j = 0; j < attn_mask->ne[1]; ++j)
                     row[j] = j < block_end ? 0 : 0xFC00;
@@ -632,7 +640,10 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_HIFT, noise_len, noise_buffer, shared->noise_callback_ctx);
 
     if (finalize)
+    {
         worker->flow_cache.clear();
+        worker->chunk_boundaries.clear();
+    }
 
     if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
     {
