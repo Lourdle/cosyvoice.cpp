@@ -206,7 +206,6 @@ void cosyvoice_kv_cache::offload_cache(ggml_backend_t backend, ggml_backend_sche
             ggml_backend_tensor_get_async(backend, layer.v_tensor, layer.v, 0, v_nbytes);
     }
 
-    cur_len = 0;
     ggml_backend_sched_synchronize(sched);
 }
 
@@ -253,7 +252,6 @@ void cosyvoice_kv_cache::load_cache(ggml_backend_t backend, ggml_backend_sched* 
         }
     }
 
-    offloaded_cache->len = 0;
     ggml_backend_sched_synchronize(sched);
 }
 
@@ -285,11 +283,11 @@ void cosyvoice_kv_cache::clear_offloaded_cache()
     }
 }
 
-void cosyvoice_kv_cache::offload_slot(ggml_backend_t backend, ggml_backend_sched* sched, int offloaded_slot_idx)
+void cosyvoice_kv_cache::offload_slot(ggml_backend_t backend, ggml_backend_sched* sched, int offloaded_slot_idx, uint32_t n_tokens)
 {
     auto offset = static_cast<std::ptrdiff_t>(get_offloaded_kv_cache_struct_size(layers) * offloaded_slot_idx);
     offloaded_cache = advance_ptr(offloaded_cache, offset);
-    offload_cache(backend, sched, cur_len);
+    offload_cache(backend, sched, n_tokens);
     offloaded_cache = advance_ptr(offloaded_cache, -offset);
 }
 

@@ -44,7 +44,7 @@ public:
     size_t get_offloaded_cache_size() const;
     void clear_offloaded_cache();
 
-    void offload_slot(ggml_backend_t backend, ggml_backend_sched* sched, int offloaded_slot_idx);
+    void offload_slot(ggml_backend_t backend, ggml_backend_sched* sched, int offloaded_slot_idx, uint32_t n_tokens);
     void load_slot(ggml_backend_t backend, ggml_backend_sched* sched, int offloaded_slot_idx);
 
     uint32_t cur_len;

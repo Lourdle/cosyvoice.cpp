@@ -565,7 +565,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         {
             if (step != flow.decoder.diffusion_steps - 1 && config[step + 1].rebuild)
                 ggml_backend_sched_reset(sched.get());
-            kv_cache->offload_slot(backend.get(), sched.get(), offload_slot++);
+            kv_cache->offload_slot(backend.get(), sched.get(), offload_slot++, kv_cache->cur_len + static_cast<uint32_t>(position_ids->ne[0]));
         }
         if (config[step].slide)
             kv_cache->slide_kv_slot();
