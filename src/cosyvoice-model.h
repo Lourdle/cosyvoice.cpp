@@ -71,6 +71,7 @@ struct cosyvoice_worker_context
     void* sampler_ctx;
     cosyvoice_builtin_sampler_rng_policy_t builtin_sampler_rng_policy;
 
+    uint32_t chunk_size;
     std::vector<float> flow_cache;
     std::vector<uint32_t> chunk_boundaries;
     std::unique_ptr<char[]> batch_buffer;
@@ -129,6 +130,8 @@ struct cosyvoice_model : virtual cosyvoice_model_context, virtual cosyvoice_obje
     bool set_builtin_sampler_rng_policy(cosyvoice_builtin_sampler_rng_policy_t policy);
     bool set_sampler_seed(uint32_t seed);
     uint32_t get_sampler_seed();
+    uint32_t get_chunk_tokens();
+    void set_chunk_tokens(uint32_t n_tokens);
 
     void set_noise_callback(cosyvoice_noise_callback_t callback, void* callback_ctx);
     void get_noise_callback(cosyvoice_noise_callback_t* callback, void** callback_ctx);
@@ -186,7 +189,6 @@ struct cosyvoice_model_3 : cosyvoice_model
     bool llm_job_ext(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt, uint32_t max_new_tokens, bool* final);
     bool token2wav(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, cosyvoice_generated_speech_ptr result);
     bool token2wav_ext(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, uint32_t* offset, bool streaming, bool finalize, cosyvoice_generated_speech_ptr result);
-    uint32_t get_chunk_tokens();
 
     void empty_buffer_cache();
     void get_memory_usage(cosyvoice_memory_usage_t* usage);

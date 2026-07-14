@@ -183,6 +183,16 @@ cosyvoice_builtin_sampler_rng_policy_t cosyvoice_model::get_builtin_sampler_rng_
     return worker->builtin_sampler_rng_policy;
 }
 
+uint32_t cosyvoice_model::get_chunk_tokens()
+{
+    return worker->chunk_size;
+}
+
+void cosyvoice_model::set_chunk_tokens(uint32_t n_tokens)
+{
+    worker->chunk_size = n_tokens;
+}
+
 bool cosyvoice_model::set_sampler_seed(uint32_t seed)
 {
     worker->sampler_seed = seed;
@@ -323,11 +333,6 @@ void cosyvoice_model_3::reset_shared_buffer(ggml_backend_buffer* new_buffer)
         worker->llm_kv_buffer.reset(new_buffer);
         shared->params.n_max_seq = worker->llm_kv_cache.reset_buffer(new_buffer);
     }
-}
-
-uint32_t cosyvoice_model_3::get_chunk_tokens()
-{
-    return 25 + cv3_shared->flow.pre_lookahead_layer.pre_lookahead_len;
 }
 
 cosyvoice_3_worker_context::cosyvoice_3_worker_context() :

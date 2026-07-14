@@ -97,6 +97,7 @@ struct cosyvoice_model_context
     ) = 0; ///< Convert speech tokens into waveform samples with additional options.
 
     virtual uint32_t get_chunk_tokens() = 0; ///< Get the number of tokens processed in each chunk during streaming inference.
+    virtual void set_chunk_tokens(uint32_t n_tokens) = 0; ///< Set the number of tokens processed in each chunk during streaming inference.
 
     // Status
     virtual ggml_status get_last_status() = 0; ///< Get the status of the most recent backend operation.

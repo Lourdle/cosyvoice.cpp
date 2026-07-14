@@ -355,6 +355,11 @@ COSYVOICE_API bool cosyvoice_tts_stream(
 */
 COSYVOICE_API uint32_t cosyvoice_get_chunk_tokens(cosyvoice_context_t ctx);
 
+/**
+* @brief Set the number of tokens processed in each chunk during streaming inference.
+ */
+COSYVOICE_API void cosyvoice_set_chunk_tokens(cosyvoice_context_t ctx, uint32_t n_tokens);
+
 // ----------------------------------------------------------------------------
 // Tokenizer Operations
 // ----------------------------------------------------------------------------

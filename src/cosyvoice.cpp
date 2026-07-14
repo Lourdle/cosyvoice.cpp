@@ -425,6 +425,11 @@ uint32_t cosyvoice_get_chunk_tokens(cosyvoice_context_t ctx)
     return ctx->get_chunk_tokens();
 }
 
+void cosyvoice_set_chunk_tokens(cosyvoice_context_t ctx, uint32_t n_tokens)
+{
+    return ctx->set_chunk_tokens(n_tokens);
+}
+
 ggml_status cosyvoice_get_last_status(cosyvoice_context_t ctx)
 {
     return ctx->get_last_status();
