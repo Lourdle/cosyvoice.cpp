@@ -1,13 +1,21 @@
-﻿#pragma once
+#pragma once
 
 #include "cosyvoice-server.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <string>
 #include <vector>
 
-namespace httplib { class Request; }
+namespace httplib { class Request; class Response; }
+
+#ifdef COSYVOICE_SERVER_USE_PCH
+namespace httplib { class Server; }
+using Server = httplib::Server;
+#else
+class Server;
+#endif
 
 // ---------------------------------------------------------------------------
 // Audio output format
@@ -38,7 +46,7 @@ void log_message(server_log_level current, server_log_level required,
 // Timestamped error message to stderr.
 void print_error_log(const char* format, ...);
 
-// Level-gated info — no timestamp, no trailing newline (for startup banners).
+// Level-gated info - no timestamp, no trailing newline (for startup banners).
 void print_info_log(server_log_level level, const char* format, ...);
 
 // ---------------------------------------------------------------------------
@@ -95,7 +103,7 @@ bool apply_generation_overrides(
     std::string* error_message);
 
 // ---------------------------------------------------------------------------
-// Request logging (request ID, timing, status) — shared between API and WebUI
+// Request logging (request ID, timing, status) - shared between API and WebUI
 // ---------------------------------------------------------------------------
 
 enum class request_log_status
@@ -118,6 +126,7 @@ struct request_log_context
     bool has_instructions = false;
     bool has_seed = false;
     uint32_t seed = 0;
+    bool stream = false;
     std::chrono::steady_clock::time_point start;
 };
 
@@ -146,13 +155,13 @@ const char* request_log_status_to_string(request_log_status status);
 bool build_pcm16_bytes(const float* data, uint32_t length,
                        std::string* output, std::string* error);
 
-// Native WAV builder (no audio encoder) — only compiled when COSYVOICE_NO_AUDIO.
+// Native WAV builder (no audio encoder) - only compiled when COSYVOICE_NO_AUDIO.
 #ifdef COSYVOICE_NO_AUDIO
 bool build_wav_bytes(const float* data, uint32_t length, uint32_t sample_rate,
                      std::string* output, std::string* error);
 #endif
 
-// Audio-encoder-based builder — only compiled when !COSYVOICE_NO_AUDIO.
+// Audio-encoder-based builder - only compiled when !COSYVOICE_NO_AUDIO.
 #ifndef COSYVOICE_NO_AUDIO
 bool build_wav_bytes_with_audio_encoder(cosyvoice_audio_encoder_t encoder,
                                         const float* data, uint32_t length,
@@ -160,7 +169,7 @@ bool build_wav_bytes_with_audio_encoder(cosyvoice_audio_encoder_t encoder,
                                         std::string* output, std::string* error);
 #endif
 
-// Main audio payload builder — dispatches to the correct encoder based on format.
+// Main audio payload builder - dispatches to the correct encoder based on format.
 bool build_audio_payload(response_audio_format format,
                          const cosyvoice_generated_speech& generated,
                          const server_runtime& runtime,
@@ -178,7 +187,48 @@ bool                  is_response_format_supported(const server_runtime& runtime
 std::string           supported_response_formats_to_string(const server_runtime& runtime);
 
 // ---------------------------------------------------------------------------
+// Streaming audio helpers
+// ---------------------------------------------------------------------------
+
+// Forward declarations from httplib
+namespace httplib { class DataSink; }
+
+// Context passed through the cosyvoice streaming TTS callback.
+// encoder is a cosyvoice_audio_encoder_t stored as void* to avoid
+// conditional-compilation complexity in this header.
+struct streaming_callback_context
+{
+    httplib::DataSink*          sink;
+    void*                       encoder;     // cosyvoice_audio_encoder_t or NULL
+    response_audio_format       format;
+    uint32_t                    sample_rate;
+    bool                        wav_header_written;
+    std::string*                error_out;
+    std::atomic<bool>*          aborted;
+};
+
+// Build a standard 44-byte RIFF/WAV header with a placeholder data size
+// (0x7FFFFFFF, meaning "until EOF" — accepted by most WAV players).
+bool build_wav_header(std::string* output, uint32_t sample_rate);
+
+// Encode a single PCM chunk and write it to the DataSink.
+// Called from within a cosyvoice streaming TTS callback.
+// Returns false to abort TTS if the sink write fails (sets *aborted).
+bool stream_audio_chunk(streaming_callback_context* ctx, const float* pcm, uint32_t n_samples);
+
+// ---------------------------------------------------------------------------
 // Generic string join
 // ---------------------------------------------------------------------------
 
 std::string join_strings(const std::vector<std::string>& items, const char* sep);
+
+// OpenAI-compatible error response helper (shared between API and WebUI modes)
+void set_openai_error(httplib::Response& res, int status, const std::string& message,
+                      const std::string& type, const char* param, const char* code);
+
+// Bearer token authentication (shared between API and WebUI modes)
+bool require_auth(const httplib::Request& req, const server_runtime& runtime, httplib::Response& res);
+
+// Register OpenAI-compatible API routes on an existing server instance.
+// Called by both API mode and WebUI mode (when a model is loaded).
+void cosyvoice_server_register_api_routes(Server& server, server_runtime& runtime);

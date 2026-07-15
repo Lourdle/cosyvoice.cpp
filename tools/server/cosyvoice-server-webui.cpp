@@ -1,4 +1,4 @@
-﻿#include "cosyvoice-server.h"
+#include "cosyvoice-server.h"
 #include "server_common.h"
 #include "resource.h"
 #include "tool_common_cosyvoice.h"
@@ -6,6 +6,7 @@
 
 #include <ggml-backend.h>
 
+#include <atomic>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -186,7 +187,7 @@ static bool register_speaker_from_audio(
 #endif // !COSYVOICE_NO_AUDIO
 
 // ---------------------------------------------------------------------------
-// Route handlers — WebUI mode
+// Route handlers - WebUI mode
 // ---------------------------------------------------------------------------
 
 int cosyvoice_server_webui_run(server_runtime& runtime)
@@ -203,10 +204,10 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         res.set_content(json, "application/json");
     });
 
-    // ---- Pre-routing auth handler (checks cookie for every request) ----
+    // ---- Pre-routing auth handler (checks cookie for WebUI, Bearer for API) ----
     server.set_pre_routing_handler([&runtime](const Request& req, Response& res) -> HandlerResponse
     {
-        // No API key configured → no auth needed
+        // No API key configured - no auth needed
         if (runtime.api_key.empty())
             return HandlerResponse::Unhandled;
 
@@ -218,7 +219,15 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         if (req.method == "GET" && req.path == "/ping")
             return HandlerResponse::Unhandled;
 
-        // Check auth cookie
+        // For OpenAI-compatible API paths (/v1/*), use Bearer token auth
+        if (req.path.rfind("/v1/", 0) == 0 || req.path == "/healthz")
+        {
+            if (require_auth(req, runtime, res))
+                return HandlerResponse::Unhandled;
+            return HandlerResponse::Handled;
+        }
+
+        // Check auth cookie (WebUI)
         const std::string token = get_cookie_value(req, "cosyvoice_auth_token");
         if (!token.empty() && token == runtime.api_key)
             return HandlerResponse::Unhandled;
@@ -237,19 +246,19 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             else
             {
                 res.status = 200;
-                res.set_content("CosyVoice — Login page resource not found.", "text/plain");
+                res.set_content("CosyVoice - Login page resource not found.", "text/plain");
             }
             return HandlerResponse::Handled;
         }
 
-        // All other routes → 401
+        // All other routes - 401
         res.status = 401;
         nlohmann::json err = {{"error", "Authentication required."}};
         res.set_content(err.dump(), "application/json");
         return HandlerResponse::Handled;
     });
 
-    // ---- POST /api/auth/login — authenticate and set session cookie ----
+    // ---- POST /api/auth/login - authenticate and set session cookie ----
     server.Post("/api/auth/login", [&runtime](const Request& req, Response& res)
     {
         nlohmann::json body;
@@ -282,7 +291,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             "Login successful from %s", req.remote_addr.c_str());
     });
 
-    // ---- GET / — serve the WebUI HTML ----
+    // ---- GET / - serve the WebUI HTML ----
     server.Get("/", [&runtime](const Request&, Response& res)
     {
         res.status = 200;
@@ -317,7 +326,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         res.set_content(std::move(html), "text/html");
     });
 
-    // ---- GET /cosyvoice-webui.css — serve embedded CSS ----
+    // ---- GET /cosyvoice-webui.css - serve embedded CSS ----
     server.Get("/cosyvoice-webui.css", [](const Request&, Response& res)
     {
         size_t size = 0;
@@ -332,7 +341,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         res.set_content(std::string(static_cast<const char*>(data), size), "text/css");
     });
 
-    // ---- GET /cosyvoice-webui.js — serve embedded JavaScript ----
+    // ---- GET /cosyvoice-webui.js - serve embedded JavaScript ----
     server.Get("/cosyvoice-webui.js", [](const Request&, Response& res)
     {
         size_t size = 0;
@@ -353,7 +362,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         res.set_content("pong", "text/plain");
     });
 
-    // ---- GET /backends — list available GGML backends ----
+    // ---- GET /backends - list available GGML backends ----
     server.Get("/backends", [](const Request&, Response& res)
     {
         nlohmann::json list = nlohmann::json::array();
@@ -382,7 +391,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         res.set_content(list.dump(), "application/json");
     });
 
-    // ---- GET /formats — list supported audio output formats ----
+    // ---- GET /formats - list supported audio output formats ----
     server.Get("/formats", [](const Request&, Response& res)
     {
         nlohmann::json list = nlohmann::json::array();
@@ -405,10 +414,10 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         res.set_content(list.dump(), "application/json");
     });
 
-    // ---- GET /status — server status ----
+    // ---- GET /status - server status ----
     server.Get("/status", [&runtime](const Request&, Response& res)
     {
-        // Use manual JSON building — avoids an issue with nlohmann::json in this handler
+        // Use manual JSON building - avoids an issue with nlohmann::json in this handler
         std::string json = "{\"status\":\"ok\"";
         json += ",\"model_loaded\":";
         json += runtime.model_slots.empty() ? "false" : "true";
@@ -423,8 +432,8 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             cosyvoice_context_params_t actual_params;
             cosyvoice_get_context_params(runtime.model_slots.front().get(), &actual_params);
             json += ",\"max_llm_len\":" + std::to_string(actual_params.n_max_seq);
-            json += ",\"k_cache_type\":\"" + llm_kv_cache_type_to_string(actual_params.llm_k_cache_type) + "\"";
-            json += ",\"v_cache_type\":\"" + llm_kv_cache_type_to_string(actual_params.llm_v_cache_type) + "\"";
+            json += ",\"k_cache_type\":\"" + kv_cache_type_to_string(actual_params.llm_k_cache_type) + "\"";
+            json += ",\"v_cache_type\":\"" + kv_cache_type_to_string(actual_params.llm_v_cache_type) + "\"";
             json += ",\"buffer_policy\":\"" + std::string(inference_buffer_policy_to_string(actual_params.inference_buffer_policy)) + "\"";
             auto arch = cosyvoice_get_architecture(runtime.model_slots.front().get());
             if (arch && *arch)
@@ -448,7 +457,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         res.set_content(std::move(json), "application/json");
     });
 
-    // ---- GET /speaker — list registered speakers ----
+    // ---- GET /speaker - list registered speakers ----
     server.Get("/speaker", [&runtime](const Request&, Response& res)
     {
         nlohmann::json payload = runtime.voice_names;
@@ -456,7 +465,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         res.set_content(payload.dump(), "application/json");
     });
 
-    // ---- POST /speaker — register a new speaker ----
+    // ---- POST /speaker - register a new speaker ----
     server.Post("/speaker", [&runtime](const Request& req, Response& res)
     {
         // Detect multipart vs JSON
@@ -584,7 +593,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             "Speaker registered: %s (type=%s, total=%zu)", name.c_str(), type.c_str(), runtime.voice_names.size());
     });
 
-    // ---- DELETE /speaker/<name> — remove a speaker ----
+    // ---- DELETE /speaker/<name> - remove a speaker ----
     server.Delete(R"(/speaker/(.*))", [&runtime](const Request& req, Response& res)
     {
         std::string name = req.matches[1];
@@ -631,7 +640,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             "Speaker removed: %s (remaining=%zu)", name.c_str(), runtime.voice_names.size());
     });
 
-    // ---- POST /speaker/save — save speaker prompt speech to a server-side path ----
+    // ---- POST /speaker/save - save speaker prompt speech to a server-side path ----
     server.Post("/speaker/save", [&runtime](const Request& req, Response& res)
     {
         nlohmann::json body;
@@ -760,11 +769,22 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         log_ctx.has_seed = body.contains("seed");
         if (log_ctx.has_seed)
             log_ctx.seed = body["seed"].get<uint32_t>();
+        log_ctx.stream = body.value("stream", false);
         log_request_details(runtime.log_level, log_ctx);
 
         // Speed
         float speed = body.value("speed", 1.0f);
         if (speed <= 0.0f) speed = 1.0f;
+
+        // Chunk tokens (applied before streaming/blocking either way)
+        if (body.contains("chunk_tokens"))
+        {
+            uint32_t ct = body["chunk_tokens"].get<uint32_t>();
+            if (ct > 0)
+                cosyvoice_set_chunk_tokens(runtime.model_slots[0].get(), ct);
+        }
+        else if (runtime.has_chunk_tokens)
+            cosyvoice_set_chunk_tokens(runtime.model_slots[0].get(), runtime.chunk_tokens);
 
         // Apply TTS context flags (optional overrides per request)
         if (body.contains("fade_in"))
@@ -800,62 +820,146 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             }
         }
 
-        // Generate speech
-        cosyvoice_generated_speech generated = {};
-        bool ok = false;
+        // ---- Determine streaming vs blocking ----
+        const bool stream = body.value("stream", false);
+        const bool is_streaming = stream || runtime.stream;
 
-        const std::string mode         = body.value("mode", "auto");
-        const std::string instructions = body.value("instructions", body.value("instruction", ""));
-
-        if (mode == "cross_lingual")
-        {
-            ok = cosyvoice_tts_cross_lingual(tts_ctx, text.c_str(), speed, &generated);
-        }
-        else if (mode == "instruct" || (mode == "auto" && !instructions.empty()))
-        {
-            ok = cosyvoice_tts_instruct(tts_ctx, text.c_str(), instructions.c_str(), speed, &generated);
-        }
-        else // "zero_shot" or "auto"
-        {
-            ok = cosyvoice_tts_zero_shot(tts_ctx, text.c_str(), speed, &generated);
-        }
-
-        if (!ok || !generated.data || generated.length == 0)
-        {
-            res.status = 500;
-            nlohmann::json err = {{"error", "TTS generation failed"}};
-            res.set_content(err.dump(), "application/json");
-            log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "generation_failed");
-            return;
-        }
-
-        // Encode output using shared utilities
-        std::string audio_payload;
+        // Determine output format
         const std::string format_str = body.value("format", "wav");
         auto fmt = parse_response_format(format_str);
         if (fmt == response_audio_format::unknown)
             fmt = response_audio_format::wav;
 
-        std::string encoding_error;
-        if (!build_audio_payload(fmt, generated, runtime, &audio_payload, &encoding_error))
+        const std::string mode         = body.value("mode", "auto");
+        const std::string instructions = body.value("instructions", body.value("instruction", ""));
+
+        // ---- Streaming path ----
+        if (is_streaming)
         {
-            res.status = 500;
-            nlohmann::json err = {{"error", "Audio encoding failed: " + encoding_error}};
-            res.set_content(err.dump(), "application/json");
-            log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "audio_encode_failed");
+            // Build WAV header ahead of time
+            std::string wav_header;
+            if (fmt == response_audio_format::wav)
+                build_wav_header(&wav_header, runtime.sample_rate);
+
+            auto content_type = response_format_to_content_type(fmt);
+            bool has_wav = (fmt == response_audio_format::wav);
+            // Copy shared state needed inside the provider.
+            // The provider runs AFTER the route handler returns, so any
+            // reference to local variables is dangling — capture by value only.
+            auto& rt = runtime;
+            auto* vctx = tts_ctx;
+            auto log_ctx_copy = log_ctx;
+            auto text_copy    = text;      // value copy for provider
+            auto instr_copy   = instructions; // value copy for provider
+
+            res.set_chunked_content_provider(content_type,
+                [&rt, vctx, text_copy, instr_copy, speed, mode, fmt, wav_header, has_wav, log_ctx_copy, applied_seed]
+                (size_t /*offset*/, DataSink& sink) -> bool
+                {
+                    // Write WAV header first
+                    if (has_wav && !wav_header.empty())
+                    {
+                        if (!sink.write(wav_header.data(), wav_header.size()))
+                        {
+                            sink.done();
+                            return true;
+                        }
+                    }
+
+                    std::atomic<bool> aborted{false};
+                    std::string stream_error;
+
+                    streaming_callback_context cb_ctx;
+                    cb_ctx.sink    = &sink;
+                    cb_ctx.encoder = nullptr;
+#ifndef COSYVOICE_NO_AUDIO
+                    cb_ctx.encoder = rt.audio_encoder.get();
+#endif
+                    cb_ctx.format              = fmt;
+                    cb_ctx.sample_rate         = rt.sample_rate;
+                    cb_ctx.wav_header_written  = has_wav;
+                    cb_ctx.error_out           = &stream_error;
+                    cb_ctx.aborted             = &aborted;
+
+                    auto stream_cb = [](const float* audio, uint32_t n, void* ud) -> bool
+                    {
+                        return stream_audio_chunk(static_cast<streaming_callback_context*>(ud), audio, n);
+                    };
+
+                    bool ok = false;
+                    if (mode == "cross_lingual")
+                        ok = cosyvoice_tts_cross_lingual_stream(vctx, text_copy.c_str(), speed, stream_cb, &cb_ctx);
+                    else if (mode == "instruct" || (mode == "auto" && !instr_copy.empty()))
+                        ok = cosyvoice_tts_instruct_stream(vctx, text_copy.c_str(), instr_copy.c_str(), speed, stream_cb, &cb_ctx);
+                    else
+                        ok = cosyvoice_tts_zero_shot_stream(vctx, text_copy.c_str(), speed, stream_cb, &cb_ctx);
+
+                    sink.done();
+
+                    if (!ok && !aborted)
+                        log_request_done(rt.log_level, log_ctx_copy,
+                            request_log_status::failed, 200, applied_seed, 0, "stream_tts_failed");
+                    else
+                        log_request_done(rt.log_level, log_ctx_copy,
+                            request_log_status::ok, 200, applied_seed, 0, "stream_tts");
+
+                    return true;
+                },
+                [](bool /*success*/) { /* resource releaser - no-op */ });
+
             return;
         }
 
-        log_message(runtime.log_level, server_log_level::concise, "WEBUI",
-            "TTS generated: voice=%s, text_len=%zu, format=%s, samples=%u",
-            voice.c_str(), text.size(), format_str.c_str(), generated.length);
+        // ---- Non-streaming (blocking) path ----
+        {
+            cosyvoice_generated_speech generated = {};
+            bool ok = false;
 
-        res.status = 200;
-        res.set_content(std::move(audio_payload), response_format_to_content_type(fmt));
-        log_request_done(runtime.log_level, log_ctx, request_log_status::ok, res.status, applied_seed, audio_payload.size(), "tts");
+            if (mode == "cross_lingual")
+            {
+                ok = cosyvoice_tts_cross_lingual(tts_ctx, text.c_str(), speed, &generated);
+            }
+            else if (mode == "instruct" || (mode == "auto" && !instructions.empty()))
+            {
+                ok = cosyvoice_tts_instruct(tts_ctx, text.c_str(), instructions.c_str(), speed, &generated);
+            }
+            else // "zero_shot" or "auto"
+            {
+                ok = cosyvoice_tts_zero_shot(tts_ctx, text.c_str(), speed, &generated);
+            }
+
+            if (!ok || !generated.data || generated.length == 0)
+            {
+                res.status = 500;
+                nlohmann::json err = {{"error", "TTS generation failed"}};
+                res.set_content(err.dump(), "application/json");
+                log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "generation_failed");
+                return;
+            }
+
+            // Encode output using shared utilities
+            std::string audio_payload;
+            std::string encoding_error;
+            if (!build_audio_payload(fmt, generated, runtime, &audio_payload, &encoding_error))
+            {
+                res.status = 500;
+                nlohmann::json err = {{"error", "Audio encoding failed: " + encoding_error}};
+                res.set_content(err.dump(), "application/json");
+                log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "audio_encode_failed");
+                return;
+            }
+
+            log_message(runtime.log_level, server_log_level::concise, "WEBUI",
+                "TTS generated: voice=%s, text_len=%zu, format=%s, samples=%u",
+                voice.c_str(), text.size(), format_str.c_str(), generated.length);
+
+            res.status = 200;
+            res.set_content(std::move(audio_payload), response_format_to_content_type(fmt));
+            log_request_done(runtime.log_level, log_ctx, request_log_status::ok, res.status, applied_seed, audio_payload.size(), "tts");
+        }
     });
 
-    // ---- GET /frontend/model — return frontend model paths ----
+    // ---- GET /frontend/model - return frontend model paths ----
     server.Get("/frontend/model", [&runtime](const Request&, Response& res)
     {
         nlohmann::json payload;
@@ -865,7 +969,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         res.set_content(payload.dump(), "application/json");
     });
 
-    // ---- PUT /frontend/model — update frontend model paths ----
+    // ---- PUT /frontend/model - update frontend model paths ----
     server.Put("/frontend/model", [&runtime](const Request& req, Response& res)
     {
         nlohmann::json body;
@@ -888,7 +992,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         res.set_content(ok.dump(), "application/json");
     });
 
-    // ---- POST /frontend/model/load — load ONNX frontend models into memory ----
+    // ---- POST /frontend/model/load - load ONNX frontend models into memory ----
 #if !defined(COSYVOICE_NO_FRONTEND)
     server.Post("/frontend/model/load", [&runtime](const Request& req, Response& res)
     {
@@ -943,7 +1047,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 #endif
 
-    // ---- POST /frontend/model/unload — unload ONNX frontend models ----
+    // ---- POST /frontend/model/unload - unload ONNX frontend models ----
 #if !defined(COSYVOICE_NO_FRONTEND)
     server.Post("/frontend/model/unload", [&runtime](const Request&, Response& res)
     {
@@ -972,7 +1076,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     });
 #endif
 
-    // ---- POST /model/load — dynamically load a GGUF model ----
+    // ---- POST /model/load - dynamically load a GGUF model ----
     server.Post("/model/load", [&runtime](const Request& req, Response& res)
     {
         request_log_context log_ctx = make_request_log_context(req, "/model/load");
@@ -1050,7 +1154,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         }
 
         // Build context params with defaults
-        cosyvoice_context_params_v2_cpp context_params;
+        cosyvoice_context_params_v3_cpp context_params;
         cosyvoice_init_default_context_params(&context_params);
 
         if (runtime.has_seed)
@@ -1060,9 +1164,30 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         // Apply optional advanced config from request
         if (body.contains("llm_kv_cache_type"))
         {
-            cosyvoice_llm_kv_cache_type_t kv_type;
-            if (parse_llm_kv_cache_type_arg(body["llm_kv_cache_type"].get<std::string>(), &kv_type))
+            cosyvoice_kv_cache_type_t kv_type;
+            if (parse_kv_cache_type_arg(body["llm_kv_cache_type"].get<std::string>(), &kv_type))
                 context_params.llm_kv_cache_type = kv_type;
+        }
+        if (body.contains("dit_kv_cache_type"))
+        {
+            cosyvoice_kv_cache_type_t kv_type;
+            if (parse_kv_cache_type_arg(body["dit_kv_cache_type"].get<std::string>(), &kv_type))
+                context_params.dit_kv_cache_type = kv_type;
+        }
+        if (body.contains("dit_kv_fixed_slots"))
+        {
+            uint32_t v = body["dit_kv_fixed_slots"].get<uint32_t>();
+            context_params.dit_kv_fixed_slots = v;
+        }
+        if (body.contains("dit_kv_offloadable_slots"))
+        {
+            uint32_t v = body["dit_kv_offloadable_slots"].get<uint32_t>();
+            context_params.dit_kv_offloadable_slots = v;
+        }
+        if (body.contains("dit_kv_cache_length"))
+        {
+            uint32_t v = body["dit_kv_cache_length"].get<uint32_t>();
+            context_params.dit_kv_cache_length = v;
         }
         if (body.contains("inference_buffer_policy"))
         {
@@ -1076,7 +1201,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             if (v > 0) context_params.n_max_seq = v;
         }
 
-        // Load the model — check result FIRST, then store
+        // Load the model - check result FIRST, then store
         auto loaded_ctx = cosyvoice_load_from_file_ext(
             model_path.c_str(),
             &context_params,
@@ -1104,7 +1229,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
                 cosyvoice_get_architecture(loaded_ctx) ? cosyvoice_get_architecture(loaded_ctx) : "?",
                 backend_type.c_str(),
                 n_threads ? n_threads : (uint32_t)0,
-                llm_kv_cache_type_to_string(p.llm_kv_cache_type).c_str(),
+                kv_cache_type_to_string(p.llm_kv_cache_type).c_str(),
                 inference_buffer_policy_to_string(p.inference_buffer_policy),
                 p.n_max_seq);
         }
@@ -1126,6 +1251,16 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
 
         // Sample rate
         runtime.sample_rate = cosyvoice_get_sample_rate(runtime.model_slots.front().get());
+
+        // Save effective DiT KV cache params (v3-specific, not available via get_context_params)
+        {
+            // context_params is a cosyvoice_context_params_v3_cpp from the outer scope
+            // (defined above when building the load request)
+            const auto& cp = context_params;
+            runtime.dit_kv_fixed_slots       = cp.dit_kv_fixed_slots;
+            runtime.dit_kv_offloadable_slots = cp.dit_kv_offloadable_slots;
+            runtime.dit_kv_cache_length      = cp.dit_kv_cache_length;
+        }
 
         // Get default generation config
         cosyvoice_get_default_generation_config(runtime.model_slots.front().get(), &runtime.default_generation_config);
@@ -1152,7 +1287,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         log_request_done(runtime.log_level, log_ctx, request_log_status::ok, res.status, 0, res.body.size(), "model_loaded");
     });
 
-    // ---- POST /model/unload — unload the current model ----
+    // ---- POST /model/unload - unload the current model ----
     server.Post("/model/unload", [&runtime](const Request& req, Response& res)
     {
         request_log_context log_ctx = make_request_log_context(req, "/model/unload");
@@ -1167,7 +1302,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             return;
         }
 
-        // Order matters: TTS sessions → voices → model context
+        // Order matters: TTS sessions -> voices -> model context
         runtime.voice_sessions.clear();
         runtime.voices.clear();
         runtime.voice_names.clear();
@@ -1194,7 +1329,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         log_request_done(runtime.log_level, log_ctx, request_log_status::ok, res.status, 0, res.body.size(), "model_unloaded");
     });
 
-    // ---- GET /model/defaults — return defaults for all configurable parameters ----
+    // ---- GET /model/defaults - return defaults for all configurable parameters ----
     // Works even without a loaded model (sensible fallbacks for generation params).
     server.Get("/model/defaults", [&runtime](const Request&, Response& res)
     {
@@ -1208,14 +1343,29 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         d["default_backend"]       = "auto";
         d["default_n_threads"]     = 0;
 
+        // Default DiT KV types (overridden below when model is loaded)
+        d["default_dit_k_cache_type"]  = "q8_0";
+        d["default_dit_v_cache_type"]  = "q4_0";
+        d["default_dit_kv_fixed_slots"]       = 0;
+        d["default_dit_kv_offloadable_slots"] = 0;
+        d["default_dit_kv_cache_length"]      = 0;
+
         // Generation defaults (model-dependent or sensible fallbacks)
         if (!runtime.model_slots.empty())
         {
+            auto ctx = runtime.model_slots.front().get();
+
             d["temperature"]    = runtime.default_generation_config.temperature;
             d["top_k"]          = runtime.default_generation_config.sampling.top_k;
             d["top_p"]          = runtime.default_generation_config.sampling.top_p;
             d["win_size"]       = runtime.default_generation_config.sampling.win_size;
             d["tau_r"]          = runtime.default_generation_config.sampling.tau_r;
+            d["chunk_tokens"]   = cosyvoice_get_chunk_tokens(ctx);
+
+            // Use effective DiT params saved in runtime after model load
+            d["default_dit_kv_fixed_slots"]       = runtime.dit_kv_fixed_slots;
+            d["default_dit_kv_offloadable_slots"] = runtime.dit_kv_offloadable_slots;
+            d["default_dit_kv_cache_length"]      = runtime.dit_kv_cache_length;
         }
         else
         {
@@ -1224,6 +1374,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             d["top_p"]          = 0.8;
             d["win_size"]       = 100;
             d["tau_r"]          = 0.0;
+            d["chunk_tokens"]   = 0;
         }
     #ifndef COSYVOICE_NO_ICU
         d["text_normalization"] = runtime.text_normalization_enabled;
@@ -1236,6 +1387,10 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         res.status = 200;
         res.set_content(d.dump(), "application/json");
     });
+
+    // ---- Register OpenAI-compatible API routes (if model is loaded) ----
+    if (!runtime.model_slots.empty())
+        cosyvoice_server_register_api_routes(server, runtime);
 
     // ---- Error handler (404) ----
     server.set_error_handler([](const Request& req, Response& res)
@@ -1264,7 +1419,13 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         runtime.api_key.empty() ? "no" : "yes");
     if (runtime.sample_rate > 0)
         print_info_log(runtime.log_level, "  sample_rate        : %u\n", runtime.sample_rate);
-    print_info_log(runtime.log_level, "  speakers           : %zu\n", runtime.voice_names.size());
+    {
+        const auto speakers_str = join_strings(runtime.voice_names, ", ");
+        print_info_log(runtime.log_level, "  speakers           : %s\n", speakers_str.empty() ? "-" : speakers_str.c_str());
+    }
+    print_info_log(runtime.log_level, "  stream             : %s\n", runtime.stream ? "enabled" : "disabled");
+    if (runtime.has_chunk_tokens)
+        print_info_log(runtime.log_level, "  chunk_tokens       : %u\n", runtime.chunk_tokens);
 #if !defined(COSYVOICE_NO_FRONTEND)
     print_info_log(runtime.log_level, "  frontend_available : %s\n",
         runtime.frontend_ctx ? "yes" : "no");

@@ -1,4 +1,4 @@
-﻿#include "cosyvoice-server.h"
+#include "cosyvoice-server.h"
 #include "server_common.h"
 
 #ifndef COSYVOICE_NO_AUDIO
@@ -47,9 +47,13 @@ struct speech_request
     float min_token_text_ratio = 0.0f;
     bool has_max_token_text_ratio = false;
     float max_token_text_ratio = 0.0f;
+
+    bool stream = false;
+    bool has_chunk_tokens = false;
+    uint32_t chunk_tokens = 0;
 };
 
-static void set_openai_error(Response& res, int status, const std::string& message, const std::string& type, const char* param, const char* code)
+void set_openai_error(Response& res, int status, const std::string& message, const std::string& type, const char* param, const char* code)
 {
     json payload;
     payload["error"] = {
@@ -63,7 +67,7 @@ static void set_openai_error(Response& res, int status, const std::string& messa
     res.set_content(payload.dump(), "application/json");
 }
 
-static bool require_auth(const Request& req, const server_runtime& runtime, Response& res)
+bool require_auth(const Request& req, const server_runtime& runtime, Response& res)
 {
     if (runtime.api_key.empty())
         return true;
@@ -299,6 +303,33 @@ static bool parse_speech_request_json(const json& body, speech_request* request,
         return false;
     }
 
+    if (const auto it = body.find("stream"); it != body.end())
+    {
+        if (!it->is_boolean())
+        {
+            set_openai_error(res, 400, "Field must be a boolean: stream", "invalid_request_error", "stream", "invalid_type");
+            return false;
+        }
+        request->stream = it->get<bool>();
+    }
+
+    if (const auto it = body.find("chunk_tokens"); it != body.end())
+    {
+        if (!it->is_number_integer())
+        {
+            set_openai_error(res, 400, "Field must be an integer: chunk_tokens", "invalid_request_error", "chunk_tokens", "invalid_type");
+            return false;
+        }
+        const auto value = it->get<long long>();
+        if (value < 0 || static_cast<unsigned long long>(value) > UINT32_MAX)
+        {
+            set_openai_error(res, 400, "Field must be in [0, 4294967295]: chunk_tokens", "invalid_request_error", "chunk_tokens", "invalid_value");
+            return false;
+        }
+        request->chunk_tokens = static_cast<uint32_t>(value);
+        request->has_chunk_tokens = true;
+    }
+
     const auto it_instructions = body.find("instructions");
     const auto it_instruction = body.find("instruction");
     if (it_instructions != body.end())
@@ -349,28 +380,19 @@ static void fill_request_log_context_from_request(request_log_context* ctx, cons
     ctx->has_instructions = request.has_instructions;
     ctx->has_seed = request.has_seed;
     ctx->seed = request.seed;
+    ctx->stream = request.stream;
 }
 
-int cosyvoice_server_backend_run(server_runtime& runtime)
+void cosyvoice_server_register_api_routes(Server& server, server_runtime& runtime)
 {
-    Server server;
-    server.new_task_queue = [&runtime]() {
-        return new ThreadPool(runtime.concurrency, runtime.concurrency);
-    };
-
-    server.set_exception_handler([&](const Request& req, Response& res, std::exception_ptr ep)
+    // ---- CORS preflight ----
+    server.Options(R"(/.*)", [](const Request&, Response& res)
     {
-        (void)ep;
-        if (req.path.rfind("/v1/", 0) == 0)
-            set_openai_error(res, 500, "Internal server error.", "server_error", nullptr, "internal_error");
-        else
-            res.status = 500;
-    });
-
-    server.Get("/", [](const Request&, Response& res)
-    {
-        res.status = 200;
-        res.set_content("CosyVoice OpenAI Speech API Server is running.\n", "text/plain");
+        res.set_header("Access-Control-Allow-Origin",  "*");
+        res.set_header("Access-Control-Allow-Methods", "GET, POST, DELETE, PUT, OPTIONS");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        res.set_header("Access-Control-Max-Age",       "86400");
+        res.status = 204;
     });
 
     server.Get("/healthz", [&](const Request&, Response& res)
@@ -508,8 +530,8 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
             return;
         }
 
-        const uint32_t slot = get_or_assign_thread_slot(runtime);
-        if (slot >= runtime.concurrency)
+        const uint32_t slot = acquire_thread_slot(runtime);
+        if (slot == UINT32_MAX)
         {
             set_openai_error(res, 503, "Server is overloaded.", "server_error", nullptr, "server_overloaded");
             log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, 0, res.body.size(), "server_overloaded");
@@ -520,12 +542,12 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
         auto voice_ctx = get_slot_voice_session(runtime, slot, request.voice);
         if (!voice_ctx)
         {
+            release_thread_slot(runtime, slot);
             set_openai_error(res, 400, "Unknown voice for current slot.", "invalid_request_error", "voice", "invalid_voice");
             log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "voice_mismatch");
             return;
         }
 
-        cosyvoice_generated_speech generated = {};
         std::string payload;
         std::string encoding_error;
         std::string generation_error;
@@ -543,35 +565,169 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
 
         if (!apply_generation_overrides(go, runtime, model_ctx, &applied_seed, &generation_error))
         {
+            release_thread_slot(runtime, slot);
             set_openai_error(res, 400, generation_error, "invalid_request_error", nullptr, "invalid_generation_params");
             log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "generation_override");
             return;
         }
 
-        bool ok = false;
-        if (request.has_instructions)
-            ok = cosyvoice_tts_instruct(voice_ctx, request.input.c_str(), request.instructions.c_str(), request.speed, &generated);
-        else
-            ok = cosyvoice_tts_zero_shot(voice_ctx, request.input.c_str(), request.speed, &generated);
+        const bool is_streaming = request.stream || runtime.stream;
 
-        if (!ok || !generated.data || generated.length == 0)
+        // ---- Streaming path ----
+        if (is_streaming)
         {
-            set_openai_error(res, 500, "TTS generation failed.", "server_error", nullptr, "generation_failed");
-            log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "generation_failed");
+            // Apply chunk_tokens (from request or server default)
+            uint32_t ct = request.has_chunk_tokens ? request.chunk_tokens :
+                          (runtime.has_chunk_tokens ? runtime.chunk_tokens : 0);
+            if (ct > 0)
+                cosyvoice_set_chunk_tokens(model_ctx, ct);
+
+            // Build WAV header ahead of time (static header, sent before PCM data)
+            std::string wav_header;
+            if (format == response_audio_format::wav)
+                build_wav_header(&wav_header, runtime.sample_rate);
+
+            auto content_type = response_format_to_content_type(format);
+            bool has_wav = (format == response_audio_format::wav);
+
+            // Capture copies of resources needed inside the provider lambda.
+            // IMPORTANT: the provider runs AFTER the route handler returns, so
+            // any value captured by reference would be a dangling reference.
+            // Capture by value or via raw pointers that outlive the handler.
+            auto& rt = runtime;
+            auto* vctx = voice_ctx;
+            auto log_ctx_copy = log_ctx;
+            auto req_copy = request;  // value copy for provider use
+
+            res.set_chunked_content_provider(content_type,
+                [&rt, slot, req_copy, vctx, format, wav_header, has_wav, log_ctx_copy, applied_seed]
+                (size_t /*offset*/, DataSink& sink) -> bool
+                {
+                    // Write WAV header first (for WAV output format)
+                    if (has_wav && !wav_header.empty())
+                    {
+                        if (!sink.write(wav_header.data(), wav_header.size()))
+                        {
+                            release_thread_slot(rt, slot);
+                            sink.done();
+                            return true;
+                        }
+                    }
+
+                    std::atomic<bool> aborted{false};
+                    std::string stream_error;
+
+                    streaming_callback_context cb_ctx;
+                    cb_ctx.sink    = &sink;
+                    cb_ctx.encoder = nullptr;
+#ifndef COSYVOICE_NO_AUDIO
+                    cb_ctx.encoder = rt.audio_encoder.get();
+#endif
+                    cb_ctx.format              = format;
+                    cb_ctx.sample_rate         = rt.sample_rate;
+                    cb_ctx.wav_header_written  = has_wav;
+                    cb_ctx.error_out           = &stream_error;
+                    cb_ctx.aborted             = &aborted;
+
+                    // Streaming callback: encode PCM chunk and write to HTTP sink
+                    auto stream_cb = [](const float* audio, uint32_t n, void* ud) -> bool
+                    {
+                        return stream_audio_chunk(static_cast<streaming_callback_context*>(ud), audio, n);
+                    };
+
+                    bool ok = false;
+                    if (req_copy.has_instructions)
+                        ok = cosyvoice_tts_instruct_stream(vctx, req_copy.input.c_str(),
+                            req_copy.instructions.c_str(), req_copy.speed, stream_cb, &cb_ctx);
+                    else
+                        ok = cosyvoice_tts_zero_shot_stream(vctx, req_copy.input.c_str(),
+                            req_copy.speed, stream_cb, &cb_ctx);
+
+                    release_thread_slot(rt, slot);
+                    sink.done();
+
+                    if (!ok && !aborted)
+                    {
+                        log_request_done(rt.log_level, log_ctx_copy,
+                            request_log_status::failed, 200, applied_seed, 0, "stream_generation_failed");
+                    }
+                    else
+                    {
+                        log_request_done(rt.log_level, log_ctx_copy,
+                            request_log_status::ok, 200, applied_seed, 0, "stream_speech");
+                    }
+
+                    return true;
+                },
+                [](bool /*success*/) { /* resource releaser — no-op */ });
+
+            log_request_details(runtime.log_level, log_ctx);
             return;
         }
 
-        if (!build_audio_payload(format, generated, runtime, &payload, &encoding_error))
+        // ---- Non-streaming (blocking) path ----
         {
-            set_openai_error(res, 500, encoding_error, "server_error", nullptr, "audio_encode_failed");
-            log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "audio_encode_failed");
-            return;
-        }
+            cosyvoice_generated_speech generated = {};
 
-        res.status = 200;
-        res.set_content(std::move(payload), response_format_to_content_type(format));
-        log_request_done(runtime.log_level, log_ctx, request_log_status::ok, res.status, applied_seed, res.body.size(), "speech");
+            bool ok = false;
+            if (request.has_instructions)
+                ok = cosyvoice_tts_instruct(voice_ctx, request.input.c_str(), request.instructions.c_str(), request.speed, &generated);
+            else
+                ok = cosyvoice_tts_zero_shot(voice_ctx, request.input.c_str(), request.speed, &generated);
+
+            if (!ok || !generated.data || generated.length == 0)
+            {
+                release_thread_slot(runtime, slot);
+                set_openai_error(res, 500, "TTS generation failed.", "server_error", nullptr, "generation_failed");
+                log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "generation_failed");
+                return;
+            }
+
+            if (!build_audio_payload(format, generated, runtime, &payload, &encoding_error))
+            {
+                release_thread_slot(runtime, slot);
+                set_openai_error(res, 500, encoding_error, "server_error", nullptr, "audio_encode_failed");
+                log_request_done(runtime.log_level, log_ctx, request_log_status::failed, res.status, applied_seed, res.body.size(), "audio_encode_failed");
+                return;
+            }
+
+            release_thread_slot(runtime, slot);
+            res.status = 200;
+            res.set_content(std::move(payload), response_format_to_content_type(format));
+            log_request_done(runtime.log_level, log_ctx, request_log_status::ok, res.status, applied_seed, res.body.size(), "speech");
+        }
     });
+}
+
+int cosyvoice_server_backend_run(server_runtime& runtime)
+{
+    Server server;
+    server.new_task_queue = [&runtime]() {
+        return new ThreadPool(runtime.concurrency, runtime.concurrency);
+    };
+
+    server.set_exception_handler([&](const Request& req, Response& res, std::exception_ptr ep)
+    {
+        (void)ep;
+        if (req.path.rfind("/v1/", 0) == 0)
+            set_openai_error(res, 500, "Internal server error.", "server_error", nullptr, "internal_error");
+        else
+            res.status = 500;
+    });
+
+    server.set_pre_routing_handler([](const Request&, Response& res) -> HandlerResponse
+    {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        return HandlerResponse::Unhandled;
+    });
+
+    server.Get("/", [](const Request&, Response& res)
+    {
+        res.status = 200;
+        res.set_content("CosyVoice OpenAI Speech API Server is running.\n", "text/plain");
+    });
+
+    cosyvoice_server_register_api_routes(server, runtime);
 
     server.set_error_handler([&](const Request& req, Response& res)
     {
@@ -599,8 +755,8 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
     {
         char kv_buf[256];
         snprintf(kv_buf, sizeof(kv_buf), "requested: %s, actual: %s (%s)",
-            llm_kv_cache_type_to_string(runtime.requested_llm_kv_cache_type).c_str(),
-            llm_kv_cache_type_to_string(runtime.actual_llm_kv_cache_type).c_str(),
+            kv_cache_type_to_string(runtime.requested_llm_kv_cache_type).c_str(),
+            kv_cache_type_to_string(runtime.actual_llm_kv_cache_type).c_str(),
             runtime.has_llm_kv_cache_override ? "user override" : "default");
         print_info_log(runtime.log_level, "  llm_kv_cache_type  : %s\n", kv_buf);
     }
@@ -616,6 +772,9 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
     print_info_log(runtime.log_level, "  text_splitting     : %s\n", runtime.split_text_enabled ? "enabled" : "disabled");
     print_info_log(runtime.log_level, "  fast_split         : %s\n", runtime.fast_split_text_enabled ? "enabled" : "disabled");
     print_info_log(runtime.log_level, "  fade_in            : %s\n", runtime.fade_in_enabled ? "enabled" : "disabled");
+    print_info_log(runtime.log_level, "  stream             : %s\n", runtime.stream ? "enabled" : "disabled");
+    if (runtime.has_chunk_tokens)
+        print_info_log(runtime.log_level, "  chunk_tokens       : %u\n", runtime.chunk_tokens);
 #ifndef COSYVOICE_NO_AUDIO
     print_info_log(runtime.log_level, "  audio_encoder      : %s\n", runtime.audio_encoder ? "available" : "unavailable");
 #else
@@ -633,4 +792,3 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
 
     return 0;
 }
-

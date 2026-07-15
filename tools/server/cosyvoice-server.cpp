@@ -50,10 +50,22 @@ struct server_options
     uint32_t seed = 0;
 
     bool has_llm_kv_cache_type = false;
-    cosyvoice_llm_kv_cache_type_t llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
-        COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0,
-        COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0,
-        COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0);
+    cosyvoice_kv_cache_type_t llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+        COSYVOICE_KV_CACHE_TYPE_Q8_0,
+        COSYVOICE_KV_CACHE_TYPE_Q4_0,
+        COSYVOICE_KV_CACHE_TYPE_Q8_0);
+
+    bool has_dit_kv_cache_type = false;
+    cosyvoice_kv_cache_type_t dit_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+        COSYVOICE_KV_CACHE_TYPE_Q8_0,
+        COSYVOICE_KV_CACHE_TYPE_Q4_0,
+        COSYVOICE_KV_CACHE_TYPE_Q8_0);
+    uint32_t dit_kv_fixed_slots = 0;
+    uint32_t dit_kv_offloadable_slots = 0;
+    uint32_t dit_kv_cache_length = 0;
+    bool stream = false;
+    bool has_chunk_tokens = false;
+    uint32_t chunk_tokens = 0;
 
     bool has_temperature = false;
     float temperature = 0.0f;
@@ -115,6 +127,13 @@ static void print_usage(const char* argv0)
     printf("                                              KV cache type. Single type (e.g. q8_0) uses the same format for K and V.\n");
     printf("                                              Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
     printf("  --seed <value>                              Default random seed for built-in sampler.\n");
+    printf("  --dit-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>\n");
+    printf("                                              DiT KV cache type. Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
+    printf("  --dit-kv-fixed-slots <value>                DiT KV fixed slots (0 = auto).\n");
+    printf("  --dit-kv-offloadable-slots <value>          DiT KV offloadable slots (0 = auto).\n");
+    printf("  --dit-kv-cache-length <value>               DiT KV cache length (0 = auto).\n");
+    printf("  --stream                                    Enable streaming for TTS requests.\n");
+    printf("  --chunk-tokens <value>                      Tokens per streaming chunk. Default: model-defined.\n");
 
     printf("\nSampling defaults (server-level):\n");
     printf("  --temperature <value>                       Sampling temperature (> 0).\n");
@@ -224,11 +243,15 @@ static std::string derive_served_model_name(const std::string& model_path)
 
 static bool init_model_context(const server_options& options, ggml_backend_t backend, server_runtime* runtime)
 {
-    cosyvoice_context_params_v2_cpp context_params;
+    cosyvoice_context_params_v3_cpp context_params;
     cosyvoice_init_default_context_params(&context_params);
     context_params.inference_buffer_policy = options.inference_buffer_policy;
     context_params.n_max_seq = options.max_llm_len;
     context_params.llm_kv_cache_type = options.llm_kv_cache_type;
+    context_params.dit_kv_cache_type = options.dit_kv_cache_type;
+    context_params.dit_kv_fixed_slots = options.dit_kv_fixed_slots;
+    context_params.dit_kv_offloadable_slots = options.dit_kv_offloadable_slots;
+    context_params.dit_kv_cache_length = options.dit_kv_cache_length;
     if (options.has_seed)
         context_params.seed = options.seed;
     context_params.n_workers = options.concurrency;
@@ -245,6 +268,11 @@ static bool init_model_context(const server_options& options, ggml_backend_t bac
         fprintf(stderr, "Error: failed to load model file \"%s\".\n", options.model.c_str());
         return false;
     }
+
+    // Save effective DiT KV cache params from the context used to load
+    runtime->dit_kv_fixed_slots = context_params.dit_kv_fixed_slots;
+    runtime->dit_kv_offloadable_slots = context_params.dit_kv_offloadable_slots;
+    runtime->dit_kv_cache_length = context_params.dit_kv_cache_length;
 
     return true;
 }
@@ -363,9 +391,13 @@ static bool build_runtime(const server_options& options, server_runtime* runtime
     runtime->split_text_enabled = options.split_text_enabled;
     runtime->fast_split_text_enabled = options.fast_split_text_enabled;
     runtime->fade_in_enabled = options.fade_in_enabled;
+    runtime->stream = options.stream;
+    runtime->has_chunk_tokens = options.has_chunk_tokens;
+    runtime->chunk_tokens = options.chunk_tokens;
     runtime->log_level = get_log_level(options);
 
     runtime->seed_rng.seed(cosyvoice_generate_random_seed());
+    runtime->slot_in_use.resize(runtime->concurrency, false);
 
     cosyvoice_init_backend_from_path(options.backend_path.empty() ? nullptr : options.backend_path.c_str());
 
@@ -393,8 +425,8 @@ static bool build_runtime(const server_options& options, server_runtime* runtime
         runtime->actual_llm_kv_cache_type    = actual_params.llm_kv_cache_type;
         if (!options.quiet)
             fprintf(stderr, "llm_kv_cache_type: requested: %s, actual: %s\n",
-                llm_kv_cache_type_to_string(options.llm_kv_cache_type).c_str(),
-                llm_kv_cache_type_to_string(actual_params.llm_kv_cache_type).c_str());
+                kv_cache_type_to_string(options.llm_kv_cache_type).c_str(),
+                kv_cache_type_to_string(actual_params.llm_kv_cache_type).c_str());
     }
 
     if (!apply_generation_defaults(options, runtime))
@@ -446,9 +478,13 @@ static bool webui_build_runtime(const server_options& options, server_runtime* r
     runtime->split_text_enabled = options.split_text_enabled;
     runtime->fast_split_text_enabled = options.fast_split_text_enabled;
     runtime->fade_in_enabled = options.fade_in_enabled;
+    runtime->stream = options.stream;
+    runtime->has_chunk_tokens = options.has_chunk_tokens;
+    runtime->chunk_tokens = options.chunk_tokens;
     runtime->log_level = get_log_level(options);
 
     runtime->seed_rng.seed(cosyvoice_generate_random_seed());
+    runtime->slot_in_use.resize(runtime->concurrency, false);
 
     cosyvoice_init_backend_from_path(options.backend_path.empty() ? nullptr : options.backend_path.c_str());
 
@@ -810,14 +846,73 @@ int tool_entry(int argc, char** argv)
             else if (str_casecmp(arg, "--llm-kv-cache-type") == 0)
             {
                 const auto value = get_arg_value();
-                cosyvoice_llm_kv_cache_type_t type;
-                if (!parse_llm_kv_cache_type_arg(value, &type))
+                cosyvoice_kv_cache_type_t type;
+                if (!parse_kv_cache_type_arg(value, &type))
                 {
                     fprintf(stderr, "Error: invalid --llm-kv-cache-type value \"%s\".\n", value);
                     return 1;
                 }
                 options.llm_kv_cache_type = type;
                 options.has_llm_kv_cache_type = true;
+            }
+            else if (str_casecmp(arg, "--dit-kv-cache-type") == 0)
+            {
+                const auto value = get_arg_value();
+                cosyvoice_kv_cache_type_t type;
+                if (!parse_kv_cache_type_arg(value, &type))
+                {
+                    fprintf(stderr, "Error: invalid --dit-kv-cache-type value \"%s\".\n", value);
+                    return 1;
+                }
+                options.dit_kv_cache_type = type;
+                options.has_dit_kv_cache_type = true;
+            }
+            else if (str_casecmp(arg, "--dit-kv-fixed-slots") == 0)
+            {
+                const auto value = get_arg_value();
+                uint32_t v;
+                if (!parse_uint32_arg(value, &v))
+                {
+                    fprintf(stderr, "Error: invalid --dit-kv-fixed-slots value \"%s\".\n", value);
+                    return 1;
+                }
+                options.dit_kv_fixed_slots = v;
+            }
+            else if (str_casecmp(arg, "--dit-kv-offloadable-slots") == 0)
+            {
+                const auto value = get_arg_value();
+                uint32_t v;
+                if (!parse_uint32_arg(value, &v))
+                {
+                    fprintf(stderr, "Error: invalid --dit-kv-offloadable-slots value \"%s\".\n", value);
+                    return 1;
+                }
+                options.dit_kv_offloadable_slots = v;
+            }
+            else if (str_casecmp(arg, "--dit-kv-cache-length") == 0)
+            {
+                const auto value = get_arg_value();
+                uint32_t v;
+                if (!parse_uint32_arg(value, &v))
+                {
+                    fprintf(stderr, "Error: invalid --dit-kv-cache-length value \"%s\".\n", value);
+                    return 1;
+                }
+                options.dit_kv_cache_length = v;
+            }
+            else if (str_casecmp(arg, "--stream") == 0)
+                options.stream = true;
+            else if (str_casecmp(arg, "--chunk-tokens") == 0)
+            {
+                const auto value = get_arg_value();
+                uint32_t v;
+                if (!parse_uint32_arg(value, &v))
+                {
+                    fprintf(stderr, "Error: invalid --chunk-tokens value \"%s\".\n", value);
+                    return 1;
+                }
+                options.chunk_tokens = v;
+                options.has_chunk_tokens = true;
             }
             else if (str_casecmp(arg, "--verbose") == 0 || str_casecmp(arg, "-v") == 0)
                 options.verbose = true;
