@@ -39,8 +39,6 @@
     #include <signal.h>
 #endif
 
-constexpr auto parse_kv_cache_type_arg = parse_llm_kv_cache_type_arg;
-
 struct cli_options
 {
     uint32_t max_llm_len = COSYVOICE_DEFAULT_LLM_MAX_SEQ_LEN;
@@ -94,6 +92,8 @@ struct cli_options
     bool has_inference_buffer_policy = false;
     cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
     bool stream = false;
+    uint32_t chunk_tokens = 0;
+    bool has_chunk_tokens = false;
     bool verbose = false;
     bool quiet = false;
     bool has_temperature = false;
@@ -323,6 +323,7 @@ static void print_usage(const char* argv0)
     printf("  --dit-kv-offloadable-slots <value>          Number of offloadable DiT KV slots (interactive only). Default: 0.\n");
     printf("  --dit-kv-cache-length <value>               DiT KV cache max seq length (interactive only). Default: max-llm-len * 10.\n");
     printf("  --stream                                    Enable streaming playback in interactive mode.\n");
+    printf("  --chunk-tokens <value>                      Tokens per streaming chunk (interactive only). Default: model-defined.\n");
     printf("  --seed <value>                              Fixed seed for sampling.\n");
     printf("  --seed-policy <auto|fixed|random>           Seed strategy. Default: auto (fixed if --seed is set).\n");
 
@@ -771,10 +772,21 @@ static void print_tts_runtime_info(
     {
         char buf[256];
         snprintf(buf, sizeof(buf), "requested: %s, actual: %s (%s)",
-            llm_kv_cache_type_to_string(options.llm_kv_cache_type).c_str(),
-            llm_kv_cache_type_to_string(context_params.llm_kv_cache_type).c_str(),
+            kv_cache_type_to_string(options.llm_kv_cache_type).c_str(),
+            kv_cache_type_to_string(context_params.llm_kv_cache_type).c_str(),
             options.has_llm_kv_cache_type ? "cli override" : "default");
         print_kv_line_string("llm_kv_cache_type", buf);
+    }
+    if (options.interactive)
+    {
+        {
+            char buf[256];
+            snprintf(buf, sizeof(buf), "requested: %s (%s)",
+                kv_cache_type_to_string(options.dit_kv_cache_type).c_str(),
+                options.has_dit_kv_cache_type ? "cli override" : "default");
+            print_kv_line_string("dit_kv_cache_type", buf);
+        }
+        print_kv_line_u32("chunk_tokens", cosyvoice_get_chunk_tokens(ctx));
     }
     print_kv_line_string("buffer_policy", inference_buffer_policy_to_string(context_params.inference_buffer_policy));
     if (log_level == cli_log_level::verbose)
@@ -1568,6 +1580,18 @@ int tool_entry(int argc, char** argv)
         }
         else if (str_casecmp(arg, "--stream") == 0)
             options.stream = true;
+        else if (str_casecmp(arg, "--chunk-tokens") == 0)
+        {
+            auto value = get_arg_value();
+            uint32_t v;
+            if (!parse_uint32_arg(value, &v))
+            {
+                print_error_log("Error: invalid --chunk-tokens value \"%s\".\n", value);
+                return 1;
+            }
+            options.chunk_tokens = v;
+            options.has_chunk_tokens = true;
+        }
         else if (str_casecmp(arg, "--inference-buffer-policy") == 0)
         {
             auto value = get_arg_value();
@@ -1991,6 +2015,8 @@ int tool_entry(int argc, char** argv)
     cosyvoice_tts_context_set_split_text_enabled(tts_ctx.get(), options.split_text_enabled);
     cosyvoice_tts_context_set_fast_split_text_enabled(tts_ctx.get(), options.fast_split_text_enabled);
     cosyvoice_tts_context_set_fade_in_enabled(tts_ctx.get(), options.fade_in_enabled);
+    if (options.interactive && options.has_chunk_tokens)
+        cosyvoice_set_chunk_tokens(ctx.get(), options.chunk_tokens);
     cosyvoice_context_params_t effective_params;
     cosyvoice_get_context_params(ctx.get(), &effective_params);
     cosyvoice_generation_config_t generation_config;
