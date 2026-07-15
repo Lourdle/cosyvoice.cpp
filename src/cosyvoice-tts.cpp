@@ -409,7 +409,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     // Phase 1: Flow encode
     ggml_cgraph* gf = new_cgraph(ctx0.get());
     auto [mu, spks, conds, cut_len] = flow.build_cgraph_encode(ctx0.get(), token, prompt_token, prompt_feat, embedding, op_caps, (flow.decoder.diffusion_steps - params.dit_kv_fixed_slots - params.dit_kv_offloadable_slots) == 0 && offset ? *offset : 0, streaming);
-    const auto chunk_len = mu->ne[1];
+    const auto seq_len = mu->ne[1];
     auto ditctx = flow.decoder.prepare_context(ctx1.get(), mu, spks, conds);
     do
     {
@@ -436,12 +436,19 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     dit_sched_config<flow.decoder.diffusion_steps> config(params, cut_len, offset ? *offset : 0, streaming, kv_cache->can_reuse());
     if (offset)
         if (flow.decoder.diffusion_steps == params.dit_kv_fixed_slots + params.dit_kv_offloadable_slots)
-            *offset += chunk_len;
+            *offset += seq_len;
         else
-            *offset = chunk_len;
+            *offset = seq_len;
 
-    if (streaming && !finalize && offset)
+    if (streaming && offset)
         worker->chunk_boundaries.push_back(*offset);
+
+    if (offset)
+    {
+        const auto chunk_len = *offset - (worker->chunk_boundaries.size() > 1 ? worker->chunk_boundaries.rbegin()[1] : 0);
+        if (kv_cache->cur_len + chunk_len >= params.dit_kv_cache_length)
+            kv_cache->cur_len = params.dit_kv_cache_length - chunk_len;
+    }
 
     uint32_t noise_len = static_cast<uint32_t>(ggml_nelements(ditctx.x));
     float* noise_buffer = shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_FLOW, noise_len, nullptr, shared->noise_callback_ctx);
