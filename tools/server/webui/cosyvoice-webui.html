@@ -124,6 +124,9 @@
                             </select></div>
                         <div><label>Max LLM Length</label><input type="number" id="model-max-llm" min="0"></div>
                     </div>
+                    <div class="flag-grid" style="margin-top:10px">
+                        <label class="flag-item"><input type="checkbox" id="model-llm-flash-attn" checked><span>LLM Flash Attention</span></label>
+                    </div>
                 </div>
                 <div class="config-section" style="margin-top:14px">
                     <div class="config-section-title">DiT</div>
@@ -143,6 +146,9 @@
                         <div><label>Fixed Slots</label><input type="number" id="model-dit-fixed-slots" value="0" min="0"></div>
                         <div><label>Offloadable Slots</label><input type="number" id="model-dit-offloadable-slots" value="0" min="0"></div>
                         <div><label>KV Cache Length</label><input type="number" id="model-dit-cache-length" value="0" min="0"></div>
+                    </div>
+                    <div class="flag-grid" style="margin-top:10px">
+                        <label class="flag-item"><input type="checkbox" id="model-flow-flash-attn" checked><span>Flow Flash Attention</span></label>
                     </div>
                 </div>
                 <div style="margin-top:12px"><button class="btn btn-sm" id="btn-reset-model-config" style="width:100%">Reset Model Config to Defaults</button></div>

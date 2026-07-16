@@ -31,6 +31,7 @@ const ADV_PARAM_IDS = [
     'model-max-llm','model-kv-k','model-kv-v','model-buffer-policy',
     'model-threads','model-backend',
     'model-dit-kv-k','model-dit-kv-v','model-dit-fixed-slots','model-dit-offloadable-slots','model-dit-cache-length',
+    'model-llm-flash-attn','model-flow-flash-attn',
     'tts-stream','tts-chunk-tokens'
 ];
 
@@ -342,10 +343,14 @@ function updateModelUI() {
         const kv_v = statusData.v_cache_type || '?';
         const buf = statusData.buffer_policy || '?';
         const mll = statusData.max_llm_len || '?';
+        const llmFattn = statusData.llm_use_flash_attn !== undefined ? (statusData.llm_use_flash_attn ? 'yes' : 'no') : '?';
+        const flowFattn = statusData.flow_use_flash_attn !== undefined ? (statusData.flow_use_flash_attn ? 'yes' : 'no') : '?';
         els['model-loaded-info'].innerHTML = '<b>' + escapeHtml(arch) + '</b><br>'
             + 'KV Cache: K=' + kv_k + ', V=' + kv_v + '<br>'
             + 'Buffer Policy: ' + buf + '<br>'
             + 'Max LLM Length: ' + mll + '<br>'
+            + 'LLM Flash Attn: ' + llmFattn + '<br>'
+            + 'Flow Flash Attn: ' + flowFattn + '<br>'
             + 'Sample Rate: ' + (statusData.sample_rate || '?') + ' Hz';
     }
 }
@@ -488,6 +493,9 @@ function initModelLoad() {
             if (bp) body.inference_buffer_policy = bp;
             const ml = parseInt(els['model-max-llm'].value, 10);
             if (ml > 0) body.max_llm_len = ml;
+
+            if (els['model-llm-flash-attn']) body.llm_use_flash_attn = els['model-llm-flash-attn'].checked;
+            if (els['model-flow-flash-attn']) body.flow_use_flash_attn = els['model-flow-flash-attn'].checked;
 
             const dkt = els['model-dit-kv-k'].value;
             const dvt = els['model-dit-kv-v'].value;

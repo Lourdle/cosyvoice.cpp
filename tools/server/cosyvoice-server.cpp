@@ -90,6 +90,10 @@ struct server_options
     bool fade_in_enabled = true;
     bool verbose = false;
     bool quiet = false;
+    bool has_llm_flash_attn = false;
+    bool llm_flash_attn = true;
+    bool has_flow_flash_attn = false;
+    bool flow_flash_attn = true;
 };
 
 static void print_usage(const char* argv0)
@@ -144,7 +148,9 @@ static void print_usage(const char* argv0)
     printf("  --min-token-text-ratio <value>              Minimum token/text ratio (>= 0).\n");
     printf("  --max-token-text-ratio <value>              Maximum token/text ratio (>= 0).\n");
     printf("  --verbose, -v                               Verbose logs.\n");
-    printf("  --quiet, -q                                 Suppress non-error logs.\n");
+    printf("  --quiet, -q                               Suppress non-error logs.\n");
+    printf("  --llm-flash-attn <0|1>                    Enable/disable LLM flash attention. Default: 1.\n");
+    printf("  --flow-flash-attn <0|1>                   Enable/disable Flow/DiT flash attention. Default: 1.\n");
 
 #ifndef COSYVOICE_NO_ICU
     printf("\nText normalization:\n");
@@ -248,6 +254,10 @@ static bool init_model_context(const server_options& options, ggml_backend_t bac
     context_params.inference_buffer_policy = options.inference_buffer_policy;
     context_params.n_max_seq = options.max_llm_len;
     context_params.llm_kv_cache_type = options.llm_kv_cache_type;
+    if (options.has_llm_flash_attn)
+        context_params.llm_use_flash_attn = options.llm_flash_attn;
+    if (options.has_flow_flash_attn)
+        context_params.flow_use_flash_attn = options.flow_flash_attn;
     context_params.dit_kv_cache_type = options.dit_kv_cache_type;
     context_params.dit_kv_fixed_slots = options.dit_kv_fixed_slots;
     context_params.dit_kv_offloadable_slots = options.dit_kv_offloadable_slots;
@@ -928,6 +938,26 @@ int tool_entry(int argc, char** argv)
                 options.fast_split_text_enabled = false;
             else if (str_casecmp(arg, "--disable-fade-in") == 0)
                 options.fade_in_enabled = false;
+            else if (str_casecmp(arg, "--llm-flash-attn") == 0)
+            {
+                const auto v = to_lower(get_arg_value());
+                if (v == "1" || v == "yes" || v == "true" || v == "on")
+                    { options.llm_flash_attn = true; options.has_llm_flash_attn = true; }
+                else if (v == "0" || v == "no" || v == "false" || v == "off")
+                    { options.llm_flash_attn = false; options.has_llm_flash_attn = true; }
+                else
+                    { fprintf(stderr, "Error: invalid --llm-flash-attn value \"%s\". Use 0/1, yes/no, true/false, on/off.\n", v.c_str()); return 1; }
+            }
+            else if (str_casecmp(arg, "--flow-flash-attn") == 0)
+            {
+                const auto v = to_lower(get_arg_value());
+                if (v == "1" || v == "yes" || v == "true" || v == "on")
+                    { options.flow_flash_attn = true; options.has_flow_flash_attn = true; }
+                else if (v == "0" || v == "no" || v == "false" || v == "off")
+                    { options.flow_flash_attn = false; options.has_flow_flash_attn = true; }
+                else
+                    { fprintf(stderr, "Error: invalid --flow-flash-attn value \"%s\". Use 0/1, yes/no, true/false, on/off.\n", v.c_str()); return 1; }
+            }
             else
             {
                 const auto option = arg;

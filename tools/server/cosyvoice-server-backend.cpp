@@ -760,6 +760,12 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
             runtime.has_llm_kv_cache_override ? "user override" : "default");
         print_info_log(runtime.log_level, "  llm_kv_cache_type  : %s\n", kv_buf);
     }
+    {
+        cosyvoice_context_params_t ap;
+        cosyvoice_get_context_params(runtime.model_slots.front().get(), &ap);
+        print_info_log(runtime.log_level, "  llm_use_flash_attn : %s\n", ap.llm_use_flash_attn ? "yes" : "no");
+        print_info_log(runtime.log_level, "  flow_use_flash_attn: %s\n", ap.flow_use_flash_attn ? "yes" : "no");
+    }
     if (runtime.has_seed)
         print_info_log(runtime.log_level, "  seed_strategy      : server default=%u, request override allowed\n", runtime.seed);
     else

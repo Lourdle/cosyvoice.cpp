@@ -435,6 +435,8 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             json += ",\"k_cache_type\":\"" + kv_cache_type_to_string(actual_params.llm_k_cache_type) + "\"";
             json += ",\"v_cache_type\":\"" + kv_cache_type_to_string(actual_params.llm_v_cache_type) + "\"";
             json += ",\"buffer_policy\":\"" + std::string(inference_buffer_policy_to_string(actual_params.inference_buffer_policy)) + "\"";
+            json += ",\"llm_use_flash_attn\":" + std::string(actual_params.llm_use_flash_attn ? "true" : "false");
+            json += ",\"flow_use_flash_attn\":" + std::string(actual_params.flow_use_flash_attn ? "true" : "false");
             auto arch = cosyvoice_get_architecture(runtime.model_slots.front().get());
             if (arch && *arch)
                 json += ",\"model_arch\":\"" + std::string(arch) + "\"";
@@ -1200,8 +1202,15 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             uint32_t v = body["max_llm_len"].get<uint32_t>();
             if (v > 0) context_params.n_max_seq = v;
         }
+        if (body.contains("llm_use_flash_attn"))
+            context_params.llm_use_flash_attn = body["llm_use_flash_attn"].get<bool>();
+        if (body.contains("flow_use_flash_attn"))
+            context_params.flow_use_flash_attn = body["flow_use_flash_attn"].get<bool>();
 
         // Load the model - check result FIRST, then store
+        uint32_t chunk_tokens_val = 0;
+        if (body.contains("chunk_tokens"))
+            chunk_tokens_val = body["chunk_tokens"].get<uint32_t>();
         auto loaded_ctx = cosyvoice_load_from_file_ext(
             model_path.c_str(),
             &context_params,
@@ -1260,6 +1269,13 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             runtime.dit_kv_fixed_slots       = cp.dit_kv_fixed_slots;
             runtime.dit_kv_offloadable_slots = cp.dit_kv_offloadable_slots;
             runtime.dit_kv_cache_length      = cp.dit_kv_cache_length;
+        }
+
+        // Apply chunk_tokens if specified
+        if (chunk_tokens_val > 0)
+        {
+            for (auto& slot : runtime.model_slots)
+                cosyvoice_set_chunk_tokens(slot.get(), chunk_tokens_val);
         }
 
         // Get default generation config
@@ -1422,6 +1438,13 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     {
         const auto speakers_str = join_strings(runtime.voice_names, ", ");
         print_info_log(runtime.log_level, "  speakers           : %s\n", speakers_str.empty() ? "-" : speakers_str.c_str());
+    }
+    if (!runtime.model_slots.empty())
+    {
+        cosyvoice_context_params_t ap;
+        cosyvoice_get_context_params(runtime.model_slots.front().get(), &ap);
+        print_info_log(runtime.log_level, "  llm_use_flash_attn : %s\n", ap.llm_use_flash_attn ? "yes" : "no");
+        print_info_log(runtime.log_level, "  flow_use_flash_attn: %s\n", ap.flow_use_flash_attn ? "yes" : "no");
     }
     print_info_log(runtime.log_level, "  stream             : %s\n", runtime.stream ? "enabled" : "disabled");
     if (runtime.has_chunk_tokens)
