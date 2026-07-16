@@ -704,14 +704,16 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
         if (!(flags & COSYVOICE_TTS_FLAG_SPLIT_TEXT))
         {
             ctx->tokenize(effective_text, this, true);
-            return cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result);
+            return result ? cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result)
+                : cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data);
         }
 
         const auto fragments = cosyvoice_internal::split_into_fragments(effective_text);
         if (fragments.size() <= 1)
         {
             ctx->tokenize(effective_text, this, true);
-            return cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result);
+            return result ? cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result)
+                : cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data);
         }
 
         // Compute the maximum text-token budget per chunk:
