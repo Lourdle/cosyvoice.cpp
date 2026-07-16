@@ -110,6 +110,10 @@ struct cli_options
     float min_token_text_ratio = 0.0f;
     bool has_max_token_text_ratio = false;
     float max_token_text_ratio = 0.0f;
+    bool has_llm_flash_attn = false;
+    bool llm_flash_attn = true;
+    bool has_flow_flash_attn = false;
+    bool flow_flash_attn = true;
 };
 
 enum class cli_log_level
@@ -277,6 +281,7 @@ static void print_interactive_commands()
     printf("  /seed-policy <fixed|random>  Show or set seed policy.\n");
     printf("  /help                        Show command list.\n");
     printf("  /stream                      Toggle streaming playback.\n");
+    printf("  /chunk-tokens [value]        Show or set tokens per streaming chunk.\n");
     printf("  /exit                        Exit interactive mode. Ctrl+C also exits.\n");
 }
 
@@ -324,6 +329,8 @@ static void print_usage(const char* argv0)
     printf("  --dit-kv-cache-length <value>               DiT KV cache max seq length (interactive only). Default: max-llm-len * 10.\n");
     printf("  --stream                                    Enable streaming playback in interactive mode.\n");
     printf("  --chunk-tokens <value>                      Tokens per streaming chunk (interactive only). Default: model-defined.\n");
+    printf("  --llm-flash-attn <0|1>                      Enable/disable LLM flash attention. Default: 1.\n");
+    printf("  --flow-flash-attn <0|1>                     Enable/disable Flow/DiT flash attention. Default: 1.\n");
     printf("  --seed <value>                              Fixed seed for sampling.\n");
     printf("  --seed-policy <auto|fixed|random>           Seed strategy. Default: auto (fixed if --seed is set).\n");
 
@@ -789,12 +796,12 @@ static void print_tts_runtime_info(
         print_kv_line_u32("chunk_tokens", cosyvoice_get_chunk_tokens(ctx));
     }
     print_kv_line_string("buffer_policy", inference_buffer_policy_to_string(context_params.inference_buffer_policy));
+    print_kv_line_string("llm_use_flash_attn", enabled_to_string(context_params.llm_use_flash_attn));
+    print_kv_line_string("flow_use_flash_attn", enabled_to_string(context_params.flow_use_flash_attn));
     if (log_level == cli_log_level::verbose)
     {
         print_kv_line_u32("n_batch", context_params.n_batch);
         print_kv_line_u32("n_max_seq", context_params.n_max_seq);
-        print_kv_line_string("llm_use_flash_attn", enabled_to_string(context_params.llm_use_flash_attn));
-        print_kv_line_string("flow_use_flash_attn", enabled_to_string(context_params.flow_use_flash_attn));
         print_kv_line_string("llm_kv_fallback", enabled_to_string(context_params.llm_allow_kv_cache_fallback));
     }
 
@@ -1049,6 +1056,20 @@ static void run_interactive_loop(
                 streaming = !streaming;
                 printf("Streaming playback %s.\n", streaming ? "enabled" : "disabled");
             }
+            else if (cmd == "/chunk-tokens")
+            {
+                if (tokens.size() > 1)
+                {
+                    uint32_t v;
+                    if (!parse_uint32_arg(tokens[1], &v))
+                    {
+                        print_error_log("Error: invalid chunk-tokens value.\n");
+                        continue;
+                    }
+                    cosyvoice_set_chunk_tokens(ctx, v);
+                }
+                printf("chunk_tokens: %u\n", cosyvoice_get_chunk_tokens(ctx));
+            }
             else if (cmd == "/play")
             {
                 bool id_ok = false;
@@ -1088,6 +1109,9 @@ static void run_interactive_loop(
         cached_audio entry;
         entry.seed = used_seed;
         entry.text = trimmed;
+
+        std::chrono::steady_clock::time_point gen_start;
+        std::chrono::steady_clock::time_point gen_end;
 
         if (streaming)
         {
@@ -1131,6 +1155,7 @@ static void run_interactive_loop(
                     return true;
                 }));
 
+            gen_start = std::chrono::steady_clock::now();
             bool ok;
             if (options.mode == "cross-lingual")
                 ok = cosyvoice_tts_cross_lingual_stream(tts_ctx, trimmed.c_str(), options.speed, stream_callback, &play_state);
@@ -1140,6 +1165,7 @@ static void run_interactive_loop(
                 ok = cosyvoice_tts_instruct_stream(tts_ctx, trimmed.c_str(), options.instruction.c_str(), options.speed, stream_callback, &play_state);
 
             inferencing_done = true;
+            gen_end = std::chrono::steady_clock::now();
             playback_thread.join();
             ctrl_c_guard._register();
 
@@ -1151,6 +1177,7 @@ static void run_interactive_loop(
         }
         else
         {
+            gen_start = std::chrono::steady_clock::now();
             std::string error;
             auto pcm = generate_tts_audio(tts_ctx, options, trimmed, &error);
             if (!pcm.data)
@@ -1160,13 +1187,16 @@ static void run_interactive_loop(
                 continue;
             }
             entry.pcm.insert(entry.pcm.end(), pcm.data, pcm.data + pcm.length);
+            gen_end = std::chrono::steady_clock::now();
         }
 
         const auto id = cache.next_id++;
         cache.last_success_id = id;
         const auto duration = pcm_length_seconds(sample_rate, entry.pcm.size());
         cache.items.emplace(id, std::move(entry));
-        printf("Generated audio %u (%.2fs), seed=%u.\n", cache.last_success_id, duration, used_seed);
+        const double elapsed_sec = elapsed_ms(gen_start, gen_end) / 1000.0;
+        const double rtf = (duration > 0.0) ? (elapsed_sec / duration) : 0.0;
+        printf("Generated audio %u (%.2fs, rtf=%.2f), seed=%u.\n", cache.last_success_id, duration, rtf, used_seed);
     }
 }
 
@@ -1649,6 +1679,44 @@ int tool_entry(int argc, char** argv)
             options.fast_split_text_enabled = false;
         else if (str_casecmp(arg, "--disable-fade-in") == 0)
             options.fade_in_enabled = false;
+        else if (str_casecmp(arg, "--llm-flash-attn") == 0)
+        {
+            const auto v = to_lower(get_arg_value());
+            if (v == "1" || v == "yes" || v == "true" || v == "on")
+            {
+                options.llm_flash_attn = true;
+                options.has_llm_flash_attn = true;
+            }
+            else if (v == "0" || v == "no" || v == "false" || v == "off")
+            {
+                options.llm_flash_attn = false;
+                options.has_llm_flash_attn = true;
+            }
+            else
+            {
+                print_error_log("Error: invalid --llm-flash-attn value \"%s\". Use 0/1, yes/no, true/false, on/off.\n", v.c_str());
+                return 1;
+            }
+        }
+        else if (str_casecmp(arg, "--flow-flash-attn") == 0)
+        {
+            const auto v = to_lower(get_arg_value());
+            if (v == "1" || v == "yes" || v == "true" || v == "on")
+            {
+                options.flow_flash_attn = true;
+                options.has_flow_flash_attn = true;
+            }
+            else if (v == "0" || v == "no" || v == "false" || v == "off")
+            {
+                options.flow_flash_attn = false;
+                options.has_flow_flash_attn = true;
+            }
+            else
+            {
+                print_error_log("Error: invalid --flow-flash-attn value \"%s\". Use 0/1, yes/no, true/false, on/off.\n", v.c_str());
+                return 1;
+            }
+        }
         else if (str_casecmp(arg, "--speed") == 0 || str_casecmp(arg, "-s") == 0)
         {
             auto value = get_arg_value();
@@ -1932,6 +2000,10 @@ int tool_entry(int argc, char** argv)
     cosyvoice_init_default_context_params(&params.base_params.base_params);
     params.base_params.base_params.n_max_seq = options.max_llm_len;
     params.base_params.base_params.llm_kv_cache_type = options.llm_kv_cache_type;
+    if (options.has_llm_flash_attn)
+        params.base_params.base_params.llm_use_flash_attn = options.llm_flash_attn;
+    if (options.has_flow_flash_attn)
+        params.base_params.base_params.flow_use_flash_attn = options.flow_flash_attn;
     params.base_params.n_workers = 1;
     if (options.interactive)
     {
