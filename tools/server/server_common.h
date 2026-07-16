@@ -10,7 +10,7 @@
 
 namespace httplib { class Request; class Response; }
 
-#ifdef COSYVOICE_SERVER_USE_PCH
+#ifdef COSYVOICE_USE_PCH
 namespace httplib { class Server; }
 using Server = httplib::Server;
 #else
