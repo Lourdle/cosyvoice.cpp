@@ -383,6 +383,12 @@ struct dit_sched_config
 
 bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, uint32_t* offset, bool streaming, bool finalize, cosyvoice_generated_speech_ptr result)
 {
+    if (streaming && offset && *offset == 0)
+    {
+        worker->flow_cache.clear();
+        worker->chunk_boundaries.clear();
+    }
+
     const auto& params = shared->params;
     auto& sched = worker->sched;
     auto& flow = cv3_shared->flow;
@@ -580,7 +586,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
 
     // Phase 3: Copy flow output to speech_feat (persistent buffer)
     ggml_reset(ctx1.get());
-    auto cache_length = static_cast<int64_t>(worker->flow_cache.size() / feat->ne[0]);
+    const auto cache_length = streaming && offset ? static_cast<int64_t>(worker->flow_cache.size() / feat->ne[0]) : 0;
     ggml_tensor* speech_feat = ggml_new_tensor_2d(ctx1.get(), feat->type, feat->ne[0], feat->ne[1] + cache_length);
     if (cache_length != 0)
     {
@@ -645,12 +651,6 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     result->length = static_cast<uint32_t>(generated_speech->ne[0]);
     worker->status = ggml_backend_sched_graph_compute(sched.get(), gf);
     shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_HIFT, noise_len, noise_buffer, shared->noise_callback_ctx);
-
-    if (finalize)
-    {
-        worker->flow_cache.clear();
-        worker->chunk_boundaries.clear();
-    }
 
     if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
     {
