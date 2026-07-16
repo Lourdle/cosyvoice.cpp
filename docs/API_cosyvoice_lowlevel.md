@@ -395,6 +395,38 @@ Trims current KV-cache length.
 
 `len` must be less than or equal to the current length.
 
+## cosyvoice_llm_offload_kv_cache
+
+### Syntax
+
+```c
+COSYVOICE_API void cosyvoice_llm_offload_kv_cache(cosyvoice_context_t ctx);
+```
+
+### Description
+
+Offloads the LLM KV cache from device memory to CPU memory.
+
+### Parameters
+
+- `ctx`: Context handle.
+
+## cosyvoice_llm_load_kv_cache
+
+### Syntax
+
+```c
+COSYVOICE_API void cosyvoice_llm_load_kv_cache(cosyvoice_context_t ctx);
+```
+
+### Description
+
+Loads the LLM KV cache from CPU memory back to the backend device.
+
+### Parameters
+
+- `ctx`: Context handle.
+
 ## cosyvoice_llm_sample_token
 
 ### Syntax
@@ -545,6 +577,38 @@ Runs low-level LLM generation for tokenized text and prompt.
 
 `true` on success; otherwise `false`.
 
+## cosyvoice_llm_job_ext
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_llm_job_ext(
+    cosyvoice_context_t ctx,
+    const int*          text,
+    uint32_t            text_len,
+    cosyvoice_prompt_t  prompt,
+    uint32_t            max_new_tokens,
+    bool*               final
+);
+```
+
+### Description
+
+Runs low-level LLM generation with additional options.
+
+### Parameters
+
+- `ctx`: Context handle.
+- `text`: Text token ids.
+- `text_len`: Number of tokens in `text`.
+- `prompt`: Prompt handle.
+- `max_new_tokens`: Maximum number of new tokens to generate. If 0, no new tokens are generated.
+- `final`: Output parameter indicating whether the generation is complete (`true`) or more tokens can be generated (`false`).
+
+### Returns
+
+`true` on success; otherwise `false`.
+
 ## cosyvoice_token2wav
 
 ### Syntax
@@ -572,6 +636,44 @@ Converts speech tokens to waveform.
 - `speed`: Speech speed multiplier.
 - `prompt`: Prompt handle.
 - `generated_speech`: Output waveform container.
+
+### Returns
+
+`true` on success; otherwise `false`.
+
+## cosyvoice_token2wav_ext
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_token2wav_ext(
+    cosyvoice_context_t            ctx,
+    const int*                     token_ids,
+    uint32_t                       n_tokens,
+    float                          speed,
+    cosyvoice_prompt_t             prompt,
+    uint32_t*                      offset,
+    bool                           streaming,
+    bool                           finalize,
+    cosyvoice_generated_speech_ptr result
+);
+```
+
+### Description
+
+Converts speech tokens to waveform with additional options.
+
+### Parameters
+
+- `ctx`: Context handle.
+- `token_ids`: Speech token ids.
+- `n_tokens`: Number of speech tokens.
+- `speed`: Speech speed multiplier.
+- `prompt`: Prompt handle.
+- `offset`: Input/output token offset for incremental conversion.
+- `streaming`: If true, convert incrementally (partial chunks).
+- `finalize`: If true, flush and finalize the output.
+- `result`: Output waveform container.
 
 ### Returns
 
@@ -612,6 +714,40 @@ Runs full low-level text-to-speech pipeline.
 ### Remarks
 
 Runs LLM generation and waveform conversion as a single convenience pipeline.
+
+## cosyvoice_tts_stream
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_tts_stream(
+    cosyvoice_context_t            ctx,
+    const int*                     text,
+    uint32_t                       text_len,
+    float                          speed,
+    cosyvoice_prompt_t             prompt,
+    cosyvoice_tts_audio_callback_t callback,
+    void*                          user_data
+);
+```
+
+### Description
+
+Runs full low-level text-to-speech pipeline with streaming output. Audio chunks are delivered incrementally via the callback.
+
+### Parameters
+
+- `ctx`: Context handle.
+- `text`: Text token ids.
+- `text_len`: Number of text tokens.
+- `speed`: Speech speed multiplier.
+- `prompt`: Prompt handle.
+- `callback`: Callback receiving each audio chunk.
+- `user_data`: Opaque context passed to the callback.
+
+### Returns
+
+`true` on success; otherwise `false`.
 
 ## cosyvoice_get_tokenizer
 
@@ -884,6 +1020,26 @@ Gets currently registered noise callback and context.
 
 No return value.
 
+## cosyvoice_get_chunk_tokens
+
+### Syntax
+
+```c
+COSYVOICE_API uint32_t cosyvoice_get_chunk_tokens(cosyvoice_context_t ctx);
+```
+
+### Description
+
+Gets the number of tokens processed in each chunk during streaming inference.
+
+### Parameters
+
+- `ctx`: Context handle.
+
+### Returns
+
+Current chunk token count.
+
 ## cosyvoice_get_hift_rand_ini_len
 
 ### Syntax
@@ -903,6 +1059,23 @@ Gets required length of HiFT initialization noise buffer.
 ### Returns
 
 Required sample count.
+
+## cosyvoice_set_chunk_tokens
+
+### Syntax
+
+```c
+COSYVOICE_API void cosyvoice_set_chunk_tokens(cosyvoice_context_t ctx, uint32_t n_tokens);
+```
+
+### Description
+
+Sets the number of tokens processed in each chunk during streaming inference.
+
+### Parameters
+
+- `ctx`: Context handle.
+- `n_tokens`: Number of tokens per chunk. Smaller values reduce first-chunk latency but increase overhead; larger values reduce RTF but increase first-chunk latency.
 
 ## cosyvoice_set_hift_rand_ini
 

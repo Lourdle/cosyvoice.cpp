@@ -28,6 +28,7 @@ struct cosyvoice_model_context
     virtual cosyvoice_builtin_sampler_rng_policy_t get_builtin_sampler_rng_policy() = 0;
     virtual bool set_builtin_sampler_rng_policy(cosyvoice_builtin_sampler_rng_policy_t policy) = 0;
     virtual bool set_sampler_seed(uint32_t seed) = 0;
+    virtual uint32_t get_sampler_seed() = 0;
 
     virtual bool llm_prefill(ggml_type type, const void* data, uint32_t seq_len) = 0;
     virtual bool llm_decode(ggml_type type, const void* data) = 0;
@@ -38,6 +39,8 @@ struct cosyvoice_model_context
 
     virtual uint32_t llm_get_kv_cache_len() = 0;
     virtual bool llm_set_kv_cache_len(uint32_t len) = 0;
+    virtual void llm_offload_kv_cache() = 0;
+    virtual void llm_load_kv_cache() = 0;
 
     virtual int llm_sample_token() = 0;
     virtual bool llm_is_stop_token(int token_id) = 0;
@@ -55,6 +58,28 @@ struct cosyvoice_model_context
         cosyvoice_generated_speech_ptr result
     ) = 0;
 
+    virtual bool llm_job_ext(
+        const int*          text,
+        uint32_t            text_len,
+        cosyvoice_prompt_t  prompt,
+        uint32_t            max_new_tokens,
+        bool*               final
+    ) = 0;
+
+    virtual bool token2wav_ext(
+        const int*                     token_ids,
+        uint32_t                       n_tokens,
+        float                          speed,
+        cosyvoice_prompt_t             prompt,
+        uint32_t*                      offset,
+        bool                           streaming,
+        bool                           finalize,
+        cosyvoice_generated_speech_ptr result
+    ) = 0;
+
+    virtual uint32_t get_chunk_tokens() = 0;
+    virtual void set_chunk_tokens(uint32_t n_tokens) = 0;
+
     virtual ggml_status get_last_status() = 0;
 
     virtual void set_prompt(
@@ -65,6 +90,7 @@ struct cosyvoice_model_context
     ) = 0;
 
     virtual void get_memory_usage(cosyvoice_memory_usage_t* usage) = 0;
+    virtual void get_total_memory_usage(cosyvoice_memory_usage_t* usage) = 0;
     virtual void empty_buffer_cache() = 0;
 
     virtual void set_noise_callback(cosyvoice_noise_callback_t callback, void* callback_ctx) = 0;
@@ -533,6 +559,38 @@ Trims KV-cache length.
 
 `true` on success; otherwise `false`.
 
+## cosyvoice_model_context::llm_offload_kv_cache
+
+### Syntax
+
+```cpp
+virtual void llm_offload_kv_cache() = 0;
+```
+
+### Description
+
+Offloads the KV cache to CPU memory.
+
+### Returns
+
+No return value.
+
+## cosyvoice_model_context::llm_load_kv_cache
+
+### Syntax
+
+```cpp
+virtual void llm_load_kv_cache() = 0;
+```
+
+### Description
+
+Loads the KV cache from CPU memory back to the backend.
+
+### Returns
+
+No return value.
+
 ## cosyvoice_model_context::llm_sample_token
 
 ### Syntax
@@ -659,6 +717,36 @@ Runs low-level LLM generation.
 
 `true` on success; otherwise `false`.
 
+## cosyvoice_model_context::llm_job_ext
+
+### Syntax
+
+```cpp
+virtual bool llm_job_ext(
+    const int*          text,
+    uint32_t            text_len,
+    cosyvoice_prompt_t  prompt,
+    uint32_t            max_new_tokens,
+    bool*               final
+) = 0;
+```
+
+### Description
+
+Runs low-level LLM generation with additional options.
+
+### Parameters
+
+- `text`: Input text tokens.
+- `text_len`: Number of tokens.
+- `prompt`: Prompt handle.
+- `max_new_tokens`: Maximum number of new tokens to generate. If 0, no new tokens are generated.
+- `final`: Output parameter indicating whether generation is complete (`true`) or more tokens can be generated (`false`).
+
+### Returns
+
+`true` on success; otherwise `false`.
+
 ## cosyvoice_model_context::token2wav
 
 ### Syntax
@@ -688,6 +776,78 @@ Converts speech tokens to waveform.
 ### Returns
 
 `true` on success; otherwise `false`.
+
+## cosyvoice_model_context::token2wav_ext
+
+### Syntax
+
+```cpp
+virtual bool token2wav_ext(
+    const int*                     token_ids,
+    uint32_t                       n_tokens,
+    float                          speed,
+    cosyvoice_prompt_t             prompt,
+    uint32_t*                      offset,
+    bool                           streaming,
+    bool                           finalize,
+    cosyvoice_generated_speech_ptr result
+) = 0;
+```
+
+### Description
+
+Converts speech tokens to waveform with additional options.
+
+### Parameters
+
+- `token_ids`: Speech token ids.
+- `n_tokens`: Number of tokens.
+- `speed`: Speed multiplier.
+- `prompt`: Prompt handle.
+- `offset`: Input/output token offset for incremental conversion.
+- `streaming`: If true, convert incrementally.
+- `finalize`: If true, flush and finalize output.
+- `result`: Output waveform container.
+
+### Returns
+
+`true` on success; otherwise `false`.
+
+## cosyvoice_model_context::get_chunk_tokens
+
+### Syntax
+
+```cpp
+virtual uint32_t get_chunk_tokens() = 0;
+```
+
+### Description
+
+Gets the number of tokens processed in each chunk during streaming inference.
+
+### Returns
+
+Current chunk token count.
+
+## cosyvoice_model_context::set_chunk_tokens
+
+### Syntax
+
+```cpp
+virtual void set_chunk_tokens(uint32_t n_tokens) = 0;
+```
+
+### Description
+
+Sets the number of tokens processed in each chunk during streaming inference.
+
+### Parameters
+
+- `n_tokens`: Number of tokens per chunk.
+
+### Returns
+
+No return value.
 
 ## cosyvoice_model_context::get_last_status
 
@@ -744,6 +904,26 @@ virtual void get_memory_usage(cosyvoice_memory_usage_t* usage) = 0;
 ### Description
 
 Gets memory-usage snapshot.
+
+### Parameters
+
+- `usage`: Output usage structure.
+
+### Returns
+
+No return value.
+
+## cosyvoice_model_context::get_total_memory_usage
+
+### Syntax
+
+```cpp
+virtual void get_total_memory_usage(cosyvoice_memory_usage_t* usage) = 0;
+```
+
+### Description
+
+Gets total memory usage across all workers.
 
 ### Parameters
 
