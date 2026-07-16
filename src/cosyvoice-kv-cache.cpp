@@ -391,7 +391,7 @@ void cosyvoice_kv_cache::slide_kv_slot()
     GGML_ASSERT(cur_slot_idx < n_slots);
     if (fattn)
     {
-        auto layer_idx = cur_slot_idx * layers;
+        auto layer_idx = cur_slot_idx++ * layers;
         const auto end = layer_idx + layers;
         for (int cur = layer_idx; cur != end; ++cur)
         {
