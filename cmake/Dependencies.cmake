@@ -16,30 +16,92 @@ add_subdirectory(vendor/pcre2)
 set(BUILD_SHARED_LIBS ${ORIGINAL_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libraries" FORCE)
 
 # 2. GGML
-if(NOT EXISTS "${GGML_SOURCE_DIR}/CMakeLists.txt")
-    message(STATUS "ggml not found in ${GGML_SOURCE_DIR}. Cloning from https://github.com/ggml-org/ggml.git...")
-    execute_process(
-        COMMAND git clone --depth=1 https://github.com/ggml-org/ggml.git "${GGML_SOURCE_DIR}"
-    )
+#
+# The Metal PAD beg-padding patch in cmake/patches/ is written against a
+# specific ggml snapshot. If ggml is allowed to float to the latest master
+# while Metal is enabled, line drift / kernel rewrites regularly break
+# `git apply`, silently disabling Metal PAD support (see issue #3).
+#
+# To keep the patch valid we pin the ggml commit — but ONLY for Metal users,
+# so other backends stay on the latest ggml as before. The gate is
+# GGML_METAL: on Apple Silicon it defaults ON (see ggml's own CMakeLists),
+# and the user can force it with -DGGML_METAL=ON/OFF.
+#
+# To upgrade ggml (Metal build only): bump GGML_PINNED_COMMIT below AND
+# regenerate the patch against the new tree (run the build, edit
+# vendor/ggml/src/ggml-metal/*, then
+# `git -C vendor/ggml diff --src-prefix=a/ --dst-prefix=b/ > cmake/patches/ggml-metal-pad-beg.patch`),
+# and re-verify Metal synthesis end-to-end.
+if(NOT DEFINED GGML_METAL)
+    set(_GGML_USES_METAL ${APPLE})
+else()
+    set(_GGML_USES_METAL ${GGML_METAL})
 endif()
 
-# Apply local patches to ggml (idempotent — skips if already applied).
-set(GGML_PAD_PATCH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/patches/ggml-metal-pad-beg.patch")
-if(APPLE AND EXISTS "${GGML_PAD_PATCH}")
-    execute_process(
-        COMMAND git apply --check "${GGML_PAD_PATCH}"
-        WORKING_DIRECTORY "${GGML_SOURCE_DIR}"
-        RESULT_VARIABLE PATCH_CHECK_RESULT
-        OUTPUT_QUIET ERROR_QUIET
-    )
-    if(PATCH_CHECK_RESULT EQUAL 0)
-        message(STATUS "Applying ggml-metal PAD beg-padding patch...")
+set(GGML_PINNED_COMMIT
+    "af97976c7810cdabb1863172f31c432dab767de7"
+    CACHE STRING "Pinned ggml commit for the Metal PAD patch. Only used when Metal is enabled.")
+
+if(_GGML_USES_METAL)
+    if(NOT EXISTS "${GGML_SOURCE_DIR}/CMakeLists.txt")
+        message(STATUS "ggml not found in ${GGML_SOURCE_DIR}. Cloning (Metal on, pinned @ ${GGML_PINNED_COMMIT})...")
         execute_process(
-            COMMAND git apply "${GGML_PAD_PATCH}"
-            WORKING_DIRECTORY "${GGML_SOURCE_DIR}"
+            COMMAND git clone https://github.com/ggml-org/ggml.git "${GGML_SOURCE_DIR}"
+            RESULT_VARIABLE GGML_CLONE_RESULT
         )
-    else()
-        message(STATUS "ggml-metal PAD beg-padding patch already applied or not applicable — skipping.")
+        if(NOT GGML_CLONE_RESULT EQUAL 0)
+            message(FATAL_ERROR "Failed to clone ggml into ${GGML_SOURCE_DIR}")
+        endif()
+        execute_process(
+            COMMAND git -C "${GGML_SOURCE_DIR}" checkout "${GGML_PINNED_COMMIT}"
+            RESULT_VARIABLE GGML_CHECKOUT_RESULT
+        )
+        if(NOT GGML_CHECKOUT_RESULT EQUAL 0)
+            message(FATAL_ERROR "Failed to checkout ggml commit ${GGML_PINNED_COMMIT} in ${GGML_SOURCE_DIR}")
+        endif()
+    elseif(EXISTS "${GGML_SOURCE_DIR}/.git")
+        # Already cloned — warn (not fail) if it has drifted off the pinned
+        # commit, so a stale checkout doesn't silently break the patch.
+        execute_process(
+            COMMAND git -C "${GGML_SOURCE_DIR}" rev-parse HEAD
+            OUTPUT_VARIABLE GGML_CURRENT_HEAD
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if(NOT GGML_CURRENT_HEAD STREQUAL GGML_PINNED_COMMIT)
+            message(WARNING
+                "Metal is enabled but vendor/ggml is at ${GGML_CURRENT_HEAD}, not the "
+                "pinned ${GGML_PINNED_COMMIT} that the PAD patch expects. If the patch "
+                "fails to apply, run:\n"
+                "  git -C ${GGML_SOURCE_DIR} checkout ${GGML_PINNED_COMMIT}")
+        endif()
+    endif()
+
+    # Apply the Metal PAD patch (idempotent — skips if already applied).
+    set(GGML_PAD_PATCH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/patches/ggml-metal-pad-beg.patch")
+    if(EXISTS "${GGML_PAD_PATCH}")
+        execute_process(
+            COMMAND git apply --check "${GGML_PAD_PATCH}"
+            WORKING_DIRECTORY "${GGML_SOURCE_DIR}"
+            RESULT_VARIABLE PATCH_CHECK_RESULT
+            OUTPUT_QUIET ERROR_QUIET
+        )
+        if(PATCH_CHECK_RESULT EQUAL 0)
+            message(STATUS "Applying ggml-metal PAD beg-padding patch...")
+            execute_process(
+                COMMAND git apply "${GGML_PAD_PATCH}"
+                WORKING_DIRECTORY "${GGML_SOURCE_DIR}"
+            )
+        else()
+            message(STATUS "ggml-metal PAD beg-padding patch already applied or not applicable — skipping.")
+        endif()
+    endif()
+else()
+    # Non-Metal build: keep the original behaviour — latest ggml, no patch.
+    if(NOT EXISTS "${GGML_SOURCE_DIR}/CMakeLists.txt")
+        message(STATUS "ggml not found in ${GGML_SOURCE_DIR}. Cloning from https://github.com/ggml-org/ggml.git...")
+        execute_process(
+            COMMAND git clone --depth=1 https://github.com/ggml-org/ggml.git "${GGML_SOURCE_DIR}"
+        )
     endif()
 endif()
 
