@@ -124,6 +124,7 @@ enum class cli_log_level
 };
 
 static bool g_quiet_logs = false;
+static std::atomic_bool g_stop_requested = false;
 inline std::atomic_bool g_interactive_exit_requested = false;
 static constexpr const char* ANSI_RESET = "\033[0m";
 static constexpr const char* ANSI_RED = "\033[31m";
@@ -139,6 +140,7 @@ static BOOL WINAPI handle_console_ctrl(DWORD ctrl_type)
     {
         g_interactive_exit_requested.store(true, std::memory_order_relaxed);
         interrupt_playback();
+        g_stop_requested.store(true, std::memory_order_release);
 
         // Unregister self: next Ctrl+C triggers default handler (process termination)
         SetConsoleCtrlHandler(handle_console_ctrl, FALSE);
@@ -153,6 +155,7 @@ static void handle_sigint(int)
 {
     g_interactive_exit_requested.store(true, std::memory_order_relaxed);
     interrupt_playback();
+    g_stop_requested.store(true, std::memory_order_release);
 
     // Restore default handler: next Ctrl+C terminates the process immediately
     signal(SIGINT, SIG_DFL);
@@ -179,6 +182,7 @@ public:
     void _register()
     {
         g_interactive_exit_requested.store(false, std::memory_order_relaxed);
+        g_stop_requested.store(false, std::memory_order_release);
 #ifndef COSYVOICE_CLI_NO_PLAYBACK
         g_playback_interrupted.store(false, std::memory_order_relaxed);
 #endif
@@ -195,6 +199,55 @@ private:
     using sig_handler_t = void (*)(int);
     sig_handler_t previous_sigint_handler = SIG_DFL;
 #endif
+};
+
+// RAII: spawns a monitoring thread during TTS generation that calls
+// cosyvoice_request_stop() when Ctrl+C is detected (g_stop_requested).
+// The destructor signals the thread to exit and joins it.
+class stop_monitor
+{
+public:
+    stop_monitor(cosyvoice_context_t ctx)
+    {
+        worker = std::thread([this, ctx]()
+        {
+            for (;;)
+            {
+                if (stop_thread_flag.load(std::memory_order_acquire))
+                    break;
+                if (g_stop_requested.load(std::memory_order_acquire))
+                {
+                    if (ctx)
+                    {
+                        cosyvoice_request_stop(ctx);
+                        triggered = true;
+                    }
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        });
+    }
+
+    ~stop_monitor()
+    {
+        stop_thread_flag.store(true, std::memory_order_release);
+        if (worker.joinable())
+            worker.join();
+    }
+
+    // True if cosyvoice_request_stop() was actually called.
+    bool was_stop_requested()
+    {
+        if (worker.joinable())
+            worker.join();
+        return triggered;
+    }
+
+private:
+    bool triggered{false};
+    std::atomic<bool> stop_thread_flag{false};
+    std::thread worker;
 };
 
 static bool has_generation_overrides(const cli_options& options)
@@ -1157,6 +1210,7 @@ static void run_interactive_loop(
 
             gen_start = std::chrono::steady_clock::now();
             bool ok;
+            stop_monitor sm(ctx);
             if (options.mode == "cross-lingual")
                 ok = cosyvoice_tts_cross_lingual_stream(tts_ctx, trimmed.c_str(), options.speed, stream_callback, &play_state);
             else if (options.mode == "zero-shot")
@@ -1171,7 +1225,10 @@ static void run_interactive_loop(
 
             if (!ok)
             {
-                print_error_log("Error: TTS streaming generation failed.\n");
+                if (sm.was_stop_requested())
+                    printf("Generation cancelled.\n");
+                else
+                    print_error_log("Error: TTS streaming generation failed.\n");
                 continue;
             }
         }
@@ -1179,10 +1236,21 @@ static void run_interactive_loop(
         {
             gen_start = std::chrono::steady_clock::now();
             std::string error;
-            auto pcm = generate_tts_audio(tts_ctx, options, trimmed, &error);
+            cosyvoice_generated_speech pcm{};
+            {
+                stop_monitor sm(ctx);
+                pcm = generate_tts_audio(tts_ctx, options, trimmed, &error);
+                if (!pcm.data && !sm.was_stop_requested() && error.empty())
+                    error = "TTS generation failed.";
+            }
             if (!pcm.data)
             {
-                if (!error.empty())
+                if (g_stop_requested.load(std::memory_order_acquire))
+                {
+                    ctrl_c_guard._register();
+                    printf("Generation cancelled.\n");
+                }
+                else if (!error.empty())
                     print_error_log("Error: %s\n", error.c_str());
                 continue;
             }
@@ -2140,8 +2208,24 @@ int tool_entry(int argc, char** argv)
 
     stage_start = std::chrono::steady_clock::now();
     std::string tts_error;
-    auto pcm = generate_tts_audio(tts_ctx.get(), options, options.text, &tts_error);
-    timing.tts_generate_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
+    cosyvoice_generated_speech pcm = {};
+    {
+        stop_monitor sm(ctx.get());
+        // Install a signal handler for non-interactive mode so Ctrl+C stops generation
+        interactive_ctrl_c_guard ctrl_c_guard;
+        pcm = generate_tts_audio(tts_ctx.get(), options, options.text, &tts_error);
+        timing.tts_generate_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
+        if (!pcm.data)
+        {
+            if (sm.was_stop_requested())
+            {
+                if (tts_error.empty())
+                    tts_error = "TTS generation cancelled.";
+            }
+            else if (tts_error.empty())
+                tts_error = "TTS generation failed.";
+        }
+    }
 
     if (!pcm.data)
     {
