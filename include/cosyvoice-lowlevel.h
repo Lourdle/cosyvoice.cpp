@@ -458,6 +458,26 @@ COSYVOICE_API uint32_t cosyvoice_get_hift_rand_ini_len(cosyvoice_context_t ctx);
 COSYVOICE_API void     cosyvoice_set_hift_rand_ini(cosyvoice_context_t ctx, const float* data);
 
 // ----------------------------------------------------------------------------
+// Stop-Request API
+// ----------------------------------------------------------------------------
+
+/**
+ * @brief Request that the current worker's job stop as soon as possible.
+ * @param ctx Model context.
+ */
+COSYVOICE_API void cosyvoice_request_stop(cosyvoice_context_t ctx);
+
+/**
+ * @brief Check and atomically clear the stop-requested flag for the current worker.
+ * @param ctx Model context.
+ * @return True if a stop was requested, false otherwise.
+ * @note Used internally by hot paths (llm_job_ext, token2wav_ext, tts) to
+ *       detect stop requests. The flag is atomically reset so subsequent calls
+ *       return false.
+ */
+COSYVOICE_API bool cosyvoice_stop_requested(cosyvoice_context_t ctx);
+
+// ----------------------------------------------------------------------------
 // Prompt Utilities
 // ----------------------------------------------------------------------------
 

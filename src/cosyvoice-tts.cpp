@@ -23,6 +23,7 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
 
 bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt, uint32_t max_new_tokens, bool* final)
 {
+    use_count_guard _guard(this);
     const auto& params = shared->params;
     auto& sched = worker->sched;
     const auto& llm = cv3_shared->llm;
@@ -30,6 +31,12 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
     auto& prompt_crc32 = worker->prompt_crc32;
     auto last_prompt_crc32 = prompt_crc32;
     bool stop_reached = false;
+
+    if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
+    {
+        ggml_backend_sched_reset(sched.get());
+        worker->llm_kv_cache.load_cache(worker->backend.get(), sched.get());
+    }
 
     try
     {
@@ -161,6 +168,16 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
 
         for (uint32_t n = llm_get_n_accepted_tokens(); n != limit; ++n)
         {
+            if (worker->stop_flag.load(std::memory_order_acquire))
+            {
+                worker->stop_flag.store(false, std::memory_order_release);
+                worker->llm_input = nullptr;
+                cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, "LLM generation stopped by user.\n");
+                if (params.builtin_sampler_rng_policy == COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION)
+                    reset_builtin_sampler_rng();
+                return false;
+            }
+
             if (!llm_decode(speech_type, cur))
                 throw std::runtime_error("Failed to decode LLM output.\n");
 
@@ -383,6 +400,7 @@ struct dit_sched_config
 
 bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, uint32_t* offset, bool streaming, bool finalize, cosyvoice_generated_speech_ptr result)
 {
+    use_count_guard _guard(this);
     if (streaming && offset && *offset == 0)
     {
         worker->flow_cache.clear();
@@ -525,6 +543,15 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     int kv_slot = config[0].cache_kv && !config[0].offload;
     for (int step = 1; step != flow.decoder.diffusion_steps; ++step)
     {
+        if (worker->stop_flag.load(std::memory_order_acquire))
+        {
+            worker->stop_flag.store(false, std::memory_order_release);
+            ggml_reset(ctx0.get());
+            ggml_backend_sched_reset(sched.get());
+            cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, "token2wav stopped during DiT steps.\n");
+            return false;
+        }
+
         if (config[step].slice)
         {
             const auto cut_len = config[step - 1].cut_len;
@@ -652,11 +679,6 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     worker->status = ggml_backend_sched_graph_compute(sched.get(), gf);
     shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_HIFT, noise_len, noise_buffer, shared->noise_callback_ctx);
 
-    if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
-    {
-        ggml_backend_sched_reset(sched.get());
-        worker->llm_kv_cache.load_cache(backend.get(), sched.get());
-    }
     return worker->status == GGML_STATUS_SUCCESS;
 }
 
@@ -781,6 +803,12 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
                 combined_pcm.clear();
                 for (auto& chunk_tokens : chunk_token_list)
                 {
+                    if (ctx->stop_requested())
+                    {
+                        result->data = nullptr;
+                        result->length = 0;
+                        return false;
+                    }
                     tokens = std::move(chunk_tokens);
                     cosyvoice_generated_speech part = {};
                     if (!cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, &part)
@@ -799,6 +827,8 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
 
             for (auto& chunk_tokens : chunk_token_list)
             {
+                if (ctx->stop_requested())
+                    return false;
                 tokens = std::move(chunk_tokens);
                 if (!cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data))
                     return false;
@@ -829,6 +859,12 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
         combined_pcm.clear();
         for (const auto& chunk : chunks)
         {
+            if (ctx->stop_requested())
+            {
+                result->data = nullptr;
+                result->length = 0;
+                return false;
+            }
             ctx->tokenize(chunk.c_str(), this, true);
             cosyvoice_generated_speech part = {};
             if (!cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, &part)

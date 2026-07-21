@@ -217,6 +217,8 @@ void cosyvoice_kv_cache::load_cache(ggml_backend_t backend, ggml_backend_sched* 
     const size_t v_head_nbytes = fattn ? kv_cache_layers[0].v->nb[1] * offloaded_cache->len : ggml_row_size(kv_cache_layers[0].v->type, offloaded_cache->len) * kv_cache_layers[0].v->ne[1];
     cur_len = offloaded_cache->len;
 
+    if (cur_len == 0) return;
+
     if (!fattn)
     {
         ggml_reset(offloaded_cache->ctx);

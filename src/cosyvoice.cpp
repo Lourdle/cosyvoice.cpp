@@ -25,6 +25,20 @@ uint32_t cosyvoice_generate_random_seed()
     return dist(gen);
 }
 
+use_count_guard::use_count_guard(cosyvoice_model* model) : worker(model->worker)
+{
+    worker->use_count.fetch_add(1, std::memory_order_relaxed);
+}
+
+use_count_guard::use_count_guard(cosyvoice_context* ctx)
+    : use_count_guard(dynamic_cast<cosyvoice_model*>(ctx)) {}
+
+use_count_guard::~use_count_guard()
+{
+    if (worker->use_count.fetch_sub(1, std::memory_order_release) == 1)
+        worker->cv.notify_all();
+}
+
 #ifdef _WIN32
     #define NOMINMAX
     #include <Windows.h>
@@ -363,6 +377,8 @@ static bool check_length(cosyvoice_prompt_t prompt, uint32_t text_len, uint32_t 
 
 bool cosyvoice_tts(cosyvoice_context_t ctx, const int* text, uint32_t text_len, float speed, cosyvoice_prompt_t prompt, cosyvoice_generated_speech_ptr result)
 {
+    use_count_guard guard(ctx);
+
     {
         cosyvoice_context_params_t params;
         ctx->get_context_params(&params);
@@ -376,7 +392,18 @@ bool cosyvoice_tts(cosyvoice_context_t ctx, const int* text, uint32_t text_len, 
 
     if (ctx->llm_job(text, text_len, prompt)
         && ctx->token2wav(ctx->llm_get_accepted_tokens(), ctx->llm_get_n_accepted_tokens(), speed, prompt, result))
+    {
+        // Check if stop was requested during token2wav
+        if (ctx->stop_requested())
+        {
+            result->data = nullptr;
+            result->length = 0;
+            return false;
+        }
         return true;
+    }
+    // Clear stop flag if generation failed due to stop request
+    ctx->stop_requested();
     result->data = nullptr;
     result->length = 0;
     return false;
@@ -384,6 +411,8 @@ bool cosyvoice_tts(cosyvoice_context_t ctx, const int* text, uint32_t text_len, 
 
 bool cosyvoice_tts_stream(cosyvoice_context_t ctx, const int* text, uint32_t text_len, float speed, cosyvoice_prompt_t prompt, cosyvoice_tts_audio_callback_t callback, void* user_data)
 {
+    use_count_guard guard(ctx);
+
     cosyvoice_context_params_t params;
     ctx->get_context_params(&params);
     if (!check_length(prompt, text_len, params.n_max_seq))
@@ -398,6 +427,9 @@ bool cosyvoice_tts_stream(cosyvoice_context_t ctx, const int* text, uint32_t tex
     bool final = false;
     do
     {
+        if (ctx->stop_requested())
+            return false;
+
         if (!final)
             if (!ctx->llm_job_ext(text, text_len, prompt, chunk_tokens + 1, &final))
                 return false;
@@ -448,6 +480,16 @@ void cosyvoice_get_total_memory_usage(cosyvoice_context_t ctx, cosyvoice_memory_
 void cosyvoice_empty_buffer_cache(cosyvoice_context_t ctx)
 {
     ctx->empty_buffer_cache();
+}
+
+void cosyvoice_request_stop(cosyvoice_context_t ctx)
+{
+    ctx->request_stop();
+}
+
+bool cosyvoice_stop_requested(cosyvoice_context_t ctx)
+{
+    return ctx->stop_requested();
 }
 
 void cosyvoice_set_noise_callback(cosyvoice_context_t ctx, cosyvoice_noise_callback_t callback, void* callback_ctx)

@@ -559,6 +559,29 @@ uint32_t cosyvoice_model::get_n_workers()
     return shared->params.n_workers;
 }
 
+void cosyvoice_model::request_stop()
+{
+    if (worker->use_count.load(std::memory_order_acquire) == 0)
+    {
+        worker->stop_flag.store(false, std::memory_order_release);
+        return;
+    }
+
+    worker->stop_flag.store(true, std::memory_order_release);
+
+    std::unique_lock<std::mutex> lock(worker->cv_mutex);
+    worker->cv.wait(lock, [this]() {
+        return worker->use_count.load(std::memory_order_acquire) == 0;
+    });
+
+    worker->stop_flag.store(false, std::memory_order_release);
+}
+
+bool cosyvoice_model::stop_requested()
+{
+    return worker->stop_flag.exchange(false, std::memory_order_acq_rel);
+}
+
 uint32_t cosyvoice_model::llm_get_kv_cache_len()
 {
     return worker->llm_kv_cache.cur_len;

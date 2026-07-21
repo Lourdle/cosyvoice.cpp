@@ -120,6 +120,10 @@ struct cosyvoice_model_context
     virtual void get_noise_callback(cosyvoice_noise_callback_t* callback, void** callback_ctx) = 0; ///< Query the shared noise callback.
     virtual uint32_t get_hift_rand_ini_len() = 0; ///< Get the required shared HiFT initialization-noise length.
     virtual void set_hift_rand_ini(const float* data) = 0; ///< Set the shared HiFT initialization-noise buffer.
+
+    // Stop-request API
+    virtual void request_stop() = 0; ///< Request that the active worker's current job stop as soon as possible.
+    virtual bool stop_requested() = 0; ///< Check and atomically clear the stop-requested flag. Returns true if a stop was requested.
 };
 
 // ----------------------------------------------------------------------------

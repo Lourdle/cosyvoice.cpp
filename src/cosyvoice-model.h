@@ -8,6 +8,8 @@
 #include <ggml-cpp.h>
 
 #include <set>
+#include <mutex>
+#include <condition_variable>
 #include <random>
 #include <memory>
 #include <shared_mutex>
@@ -81,6 +83,11 @@ struct cosyvoice_worker_context
     std::unique_ptr<float[]> probs;
     ggml_backend_buffer_ptr llm_kv_buffer;
     ggml_backend_buffer_ptr dit_kv_buffer;
+
+    std::atomic<bool> stop_flag{false};
+    std::atomic<int>  use_count{0};
+    std::mutex        cv_mutex;
+    std::condition_variable cv;
 };
 
 struct cosyvoice_model : virtual cosyvoice_model_context, virtual cosyvoice_object_ref_counter
@@ -92,6 +99,8 @@ struct cosyvoice_model : virtual cosyvoice_model_context, virtual cosyvoice_obje
 
     uint32_t get_worker_no();
     uint32_t get_n_workers();
+    void request_stop();
+    bool stop_requested();
 
     uint32_t llm_get_kv_cache_len();
     bool llm_set_kv_cache_len(uint32_t len);
