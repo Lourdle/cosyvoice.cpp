@@ -715,6 +715,7 @@ When neither `--text` nor `--output` is provided, interactive mode is enabled au
 Type text at the `> ` prompt to synthesize, or use slash commands:
 
 - `/play [code]`: Play cached audio (requires audio support; disabled with `COSYVOICE_CLI_NO_PLAYBACK=ON`). Press `Ctrl+C` to stop playback.
+- Press `Ctrl+C` during TTS generation to gracefully stop synthesis mid-generation via the stop-request API — output up to that point remains valid.
 - `/save <file> [code]`: Save cached audio to file.
 - `/list`: List cached audio.
 - `/query [code]`: Show audio details.

@@ -693,6 +693,7 @@ cosyvoice-cli \
 在 `> ` 提示符下输入文本即可合成，或使用斜杠命令：
 
 - `/play [code]`：播放缓存音频（需要音频支持；`COSYVOICE_CLI_NO_PLAYBACK=ON` 时不可用）。按 `Ctrl+C` 可停止播放。
+- 在 TTS 生成过程中按 `Ctrl+C` 可通过 stop-request API 优雅地停止合成——终止点之前的输出仍然有效。
 - `/save <file> [code]`：保存缓存音频到文件。
 - `/list`：列出缓存音频。
 - `/query [code]`：查看音频详情。

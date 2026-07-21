@@ -97,6 +97,9 @@ struct cosyvoice_model_context
     virtual void get_noise_callback(cosyvoice_noise_callback_t* callback, void** callback_ctx) = 0;
     virtual uint32_t get_hift_rand_ini_len() = 0;
     virtual void set_hift_rand_ini(const float* data) = 0;
+
+    virtual void request_stop() = 0;
+    virtual bool stop_requested() = 0;
 };
 ```
 
@@ -1026,6 +1029,38 @@ Sets HiFT initialization-noise buffer.
 ### Returns
 
 No return value.
+
+## cosyvoice_model_context::request_stop
+
+### Syntax
+
+```cpp
+virtual void request_stop() = 0;
+```
+
+### Description
+
+Requests that the active worker's current job stop as soon as possible. The worker finishes the current operation before honouring the request, so output up to that point remains valid.
+
+### Returns
+
+No return value.
+
+## cosyvoice_model_context::stop_requested
+
+### Syntax
+
+```cpp
+virtual bool stop_requested() = 0;
+```
+
+### Description
+
+Checks and atomically clears the stop-requested flag for the active worker. Used internally by hot paths to detect stop requests. The flag is atomically reset so subsequent calls return `false`.
+
+### Returns
+
+`true` if a stop was requested since the last check; `false` otherwise.
 
 ## cosyvoice_tokenization_result
 

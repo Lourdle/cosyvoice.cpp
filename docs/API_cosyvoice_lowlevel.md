@@ -1098,6 +1098,42 @@ Overrides HiFT initialization noise buffer.
 
 No return value.
 
+## cosyvoice_request_stop
+
+### Syntax
+
+```c
+COSYVOICE_API void cosyvoice_request_stop(cosyvoice_context_t ctx);
+```
+
+### Description
+
+Requests that the active worker's current job stop as soon as possible. The stop is graceful — the worker will finish the current operation before honouring the request, so the output up to that point remains valid.
+
+### Parameters
+
+- `ctx`: Context handle.
+
+## cosyvoice_stop_requested
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_stop_requested(cosyvoice_context_t ctx);
+```
+
+### Description
+
+Checks and atomically clears the stop-requested flag for the active worker. Used internally by hot paths (`llm_job_ext`, `token2wav_ext`, `tts`) to detect stop requests. The flag is atomically reset so subsequent calls return `false`.
+
+### Parameters
+
+- `ctx`: Context handle.
+
+### Returns
+
+`true` if a stop was requested since the last check; `false` otherwise.
+
 ## cosyvoice_prompt_speech_get_crc32
 
 ### Syntax
