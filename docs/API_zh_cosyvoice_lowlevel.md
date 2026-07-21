@@ -395,6 +395,38 @@ COSYVOICE_API bool cosyvoice_llm_set_kv_cache_len(cosyvoice_context_t ctx, uint3
 
 `len` 不得大于当前长度。
 
+## cosyvoice_llm_offload_kv_cache
+
+### 语法
+
+```c
+COSYVOICE_API void cosyvoice_llm_offload_kv_cache(cosyvoice_context_t ctx);
+```
+
+### 说明
+
+将 LLM KV 缓存从设备内存卸载到 CPU 内存。
+
+### 参数
+
+- `ctx`：模型上下文。
+
+## cosyvoice_llm_load_kv_cache
+
+### 语法
+
+```c
+COSYVOICE_API void cosyvoice_llm_load_kv_cache(cosyvoice_context_t ctx);
+```
+
+### 说明
+
+将 LLM KV 缓存从 CPU 内存加载回后端设备。
+
+### 参数
+
+- `ctx`：模型上下文。
+
 ## cosyvoice_llm_sample_token
 
 ### 语法
@@ -545,6 +577,38 @@ COSYVOICE_API bool cosyvoice_llm_job(
 
 成功返回 `true`，失败返回 `false`。
 
+## cosyvoice_llm_job_ext
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_llm_job_ext(
+    cosyvoice_context_t ctx,
+    const int*          text,
+    uint32_t            text_len,
+    cosyvoice_prompt_t  prompt,
+    uint32_t            max_new_tokens,
+    bool*               final
+);
+```
+
+### 说明
+
+运行低层级 LLM 生成，附增额外选项。
+
+### 参数
+
+- `ctx`：模型上下文。
+- `text`：文本 token ID。
+- `text_len`：`text` 中的 token 数量。
+- `prompt`：提示句柄。
+- `max_new_tokens`：最大新生成 token 数。0 表示不生成新 token。
+- `final`：输出参数，指示生成是否已完成（`true`）或可继续生成更多 token（`false`）。
+
+### 返回值
+
+成功返回 `true`，失败返回 `false`。
+
 ## cosyvoice_token2wav
 
 ### 语法
@@ -572,6 +636,44 @@ COSYVOICE_API bool cosyvoice_token2wav(
 - `speed`：语速系数。
 - `prompt`：提示对象。
 - `generated_speech`：输出波形容器。
+
+### 返回值
+
+成功返回 `true`，失败返回 `false`。
+
+## cosyvoice_token2wav_ext
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_token2wav_ext(
+    cosyvoice_context_t            ctx,
+    const int*                     token_ids,
+    uint32_t                       n_tokens,
+    float                          speed,
+    cosyvoice_prompt_t             prompt,
+    uint32_t*                      offset,
+    bool                           streaming,
+    bool                           finalize,
+    cosyvoice_generated_speech_ptr result
+);
+```
+
+### 说明
+
+将语音 token 转换为波形数据，附增额外选项。
+
+### 参数
+
+- `ctx`：模型上下文。
+- `token_ids`：语音 token ID。
+- `n_tokens`：语音 token 数量。
+- `speed`：语速系数。
+- `prompt`：提示句柄。
+- `offset`：输入/输出 token 偏移量，用于增量转换。
+- `streaming`：若为 true，增量转换（部分分块）。
+- `finalize`：若为 true，刷新并完成输出。
+- `result`：输出波形容器。
 
 ### 返回值
 
@@ -612,6 +714,40 @@ COSYVOICE_API bool cosyvoice_tts(
 ### 备注
 
 该接口将 LLM 生成与波形转换封装为一次调用。
+
+## cosyvoice_tts_stream
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_tts_stream(
+    cosyvoice_context_t            ctx,
+    const int*                     text,
+    uint32_t                       text_len,
+    float                          speed,
+    cosyvoice_prompt_t             prompt,
+    cosyvoice_tts_audio_callback_t callback,
+    void*                          user_data
+);
+```
+
+### 说明
+
+运行完整低层级 TTS 流水线并流式输出。音频块通过回调逐段交付。
+
+### 参数
+
+- `ctx`：模型上下文。
+- `text`：文本 token ID。
+- `text_len`：文本 token 数量。
+- `speed`：语速系数。
+- `prompt`：提示句柄。
+- `callback`：接收每段音频的回调函数。
+- `user_data`：传入回调的不透明上下文。
+
+### 返回值
+
+成功返回 `true`，失败返回 `false`。
 
 ## cosyvoice_get_tokenizer
 
@@ -888,6 +1024,26 @@ COSYVOICE_API void cosyvoice_get_noise_callback(cosyvoice_context_t ctx, cosyvoi
 
 无返回值。
 
+## cosyvoice_get_chunk_tokens
+
+### 语法
+
+```c
+COSYVOICE_API uint32_t cosyvoice_get_chunk_tokens(cosyvoice_context_t ctx);
+```
+
+### 说明
+
+获取流式推理时每个分块处理的 token 数。
+
+### 参数
+
+- `ctx`：模型上下文。
+
+### 返回值
+
+当前分块 token 数。
+
 ## cosyvoice_get_hift_rand_ini_len
 
 ### 语法
@@ -907,6 +1063,23 @@ COSYVOICE_API uint32_t cosyvoice_get_hift_rand_ini_len(cosyvoice_context_t ctx);
 ### 返回值
 
 所需采样点数量。
+
+## cosyvoice_set_chunk_tokens
+
+### 语法
+
+```c
+COSYVOICE_API void cosyvoice_set_chunk_tokens(cosyvoice_context_t ctx, uint32_t n_tokens);
+```
+
+### 说明
+
+设置流式推理时每个分块处理的 token 数。
+
+### 参数
+
+- `ctx`：模型上下文。
+- `n_tokens`：每个分块的 token 数。越小首块延迟越低但开销越大；越大 RTF 越低但首块延迟越高。
 
 ## cosyvoice_set_hift_rand_ini
 
@@ -928,6 +1101,42 @@ COSYVOICE_API void cosyvoice_set_hift_rand_ini(cosyvoice_context_t ctx, const fl
 ### 返回值
 
 无返回值。
+
+## cosyvoice_request_stop
+
+### 语法
+
+```c
+COSYVOICE_API void cosyvoice_request_stop(cosyvoice_context_t ctx);
+```
+
+### 说明
+
+请求当前 worker 的当前任务尽快停止。停止是优雅的——worker 会完成当前操作后才响应请求，因此截止点之前的输出仍然有效。
+
+### 参数
+
+- `ctx`：模型上下文。
+
+## cosyvoice_stop_requested
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_stop_requested(cosyvoice_context_t ctx);
+```
+
+### 说明
+
+检查并原子清除当前 worker 的停止请求标志。内部热路径（`llm_job_ext`、`token2wav_ext`、`tts`）使用此函数检测停止请求。标志被原子重置，后续调用返回 `false`。
+
+### 参数
+
+- `ctx`：模型上下文。
+
+### 返回值
+
+若自上次检查以来有停止请求则返回 `true`，否则返回 `false`。
 
 ## cosyvoice_prompt_speech_get_crc32
 
