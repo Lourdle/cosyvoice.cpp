@@ -833,51 +833,65 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
                 if (!cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data))
                     return false;
             }
+            return true;
         }
 
         // Slow-split path: tokenize each fragment only for counting,
         // reassemble text chunks, then re-tokenize each chunk.
         cosyvoice_tokenization_result_impl tokens_scratch;
         const auto token_count = [&](std::string_view fragment) -> std::size_t
-        {
-            tokens_scratch.tokens.clear();
-            ctx->tokenize(fragment.data(), static_cast<uint32_t>(fragment.size()), &tokens_scratch, true);
-            return tokens_scratch.get_n_tokens();
-        };
+            {
+                tokens_scratch.tokens.clear();
+                ctx->tokenize(fragment.data(), static_cast<uint32_t>(fragment.size()), &tokens_scratch, true);
+                return tokens_scratch.get_n_tokens();
+            };
         const auto chunks = cosyvoice_internal::reassemble_by_token_budget(
             fragments, max_text_tokens, token_count);
 
         if (chunks.size() <= 1)
         {
             ctx->tokenize(effective_text, this, true);
-            return cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result);
+            return result ? cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result)
+                : cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data);
         }
 
         // Multi-chunk path: synthesize each chunk and copy its PCM into a context-owned buffer.
         // cosyvoice_tts() points result->data at an internal token2wav buffer that is overwritten
         // on the next call, so the copy must happen before the following synthesis begins.
         combined_pcm.clear();
-        for (const auto& chunk : chunks)
+        if (result)
         {
-            if (ctx->stop_requested())
+            for (const auto& chunk : chunks)
             {
-                result->data = nullptr;
-                result->length = 0;
-                return false;
+                if (ctx->stop_requested())
+                {
+                    result->data = nullptr;
+                    result->length = 0;
+                    return false;
+                }
+                ctx->tokenize(chunk.c_str(), this, true);
+                cosyvoice_generated_speech part = {};
+                if (!cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, &part)
+                    || !part.data || part.length == 0)
+                {
+                    result->data = nullptr;
+                    result->length = 0;
+                    return false;
+                }
+                combined_pcm.insert(combined_pcm.end(), part.data, part.data + part.length);
             }
-            ctx->tokenize(chunk.c_str(), this, true);
-            cosyvoice_generated_speech part = {};
-            if (!cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, &part)
-                || !part.data || part.length == 0)
-            {
-                result->data = nullptr;
-                result->length = 0;
-                return false;
-            }
-            combined_pcm.insert(combined_pcm.end(), part.data, part.data + part.length);
+            result->data = combined_pcm.data();
+            result->length = static_cast<uint32_t>(combined_pcm.size());
         }
-        result->data = combined_pcm.data();
-        result->length = static_cast<uint32_t>(combined_pcm.size());
+        else
+            for (const auto& chunk : chunks)
+            {
+                if (ctx->stop_requested())
+                    return false;
+                ctx->tokenize(chunk.c_str(), this, true);
+                if (!cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data))
+                    return false;
+            }
         return true;
     }
 
