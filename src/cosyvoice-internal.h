@@ -145,6 +145,22 @@ struct cosyvoice_prompt
     void calculate_crc32();
 };
 
+struct cosyvoice_worker_context;
+struct cosyvoice_model;
+
+struct use_count_guard
+{
+    cosyvoice_worker_context* worker;
+
+    use_count_guard(cosyvoice_context* ctx);
+    use_count_guard(cosyvoice_model* model);
+
+    ~use_count_guard();
+
+    use_count_guard(const use_count_guard&) = delete;
+    use_count_guard& operator=(const use_count_guard&) = delete;
+};
+
 struct cosyvoice_tokenization_result_impl : cosyvoice_tokenization_result {
     cosyvoice_tokenization_result_impl() {}
 
@@ -160,8 +176,6 @@ bool cosyvoice_frontend_util_text_normalize(
     uint32_t text_len,
     const char* locale
 );
-
-struct cosyvoice_worker_context;
 
 int cosyvoice_llm_sampler(
     cosyvoice_llm_token_prob_t* nucleus_probs,

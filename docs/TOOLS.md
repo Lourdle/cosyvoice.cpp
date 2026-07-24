@@ -129,7 +129,7 @@ The WebUI provides a modern single-page application with the following capabilit
 #### Model Management
 - **Load a model** at runtime: enter a `.gguf` file path, select backend and threads, then click "Load Model".
 - **Unload a model**: releases the model from memory without restarting the server.
-- **Parameter configuration**: KV cache types, buffer policy, max LLM length — configurable before loading.
+- **Parameter configuration**: LLM/DiT KV cache types, buffer policy, max LLM length, flash attention toggles, DiT KV cache slots — configurable before loading.
 - **Dynamic backend selection**: queries available GGML backends at startup (Auto / CPU / CUDA / Vulkan / Metal).
 
 #### Speaker (Voice) Management
@@ -143,12 +143,13 @@ The WebUI provides a modern single-page application with the following capabilit
 
 #### TTS Generation
 - **Text input** with configurable voice, mode (zero-shot / instruct / cross-lingual), and output format.
+- **Streaming TTS**: enable streaming mode for progressive playback as audio chunks arrive. Configurable chunk token count.
 - **Advanced sampling controls**: temperature, top-k, top-p, repetition window, tau-r, seed (with "lock for session").
 - **Instruct mode**: enter instructions to control speaking style (requires an instruct-capable model).
-- **Audio playback**: generated audio plays directly in the browser with a live waveform visualizer.
+- **Audio playback**: generated audio plays directly in the browser with a live waveform visualizer. Streaming mode uses MediaSource for true progressive playback.
 - **Download**: save generated audio as a file.
 - **History panel**: recent generations are cached up to 20 entries; click to replay or re-download.
-- **Responsive output formats**: `wav`, `mp3`, `flac`, `opus`, `aac`, `m4a`, `pcm` (subset depends on FFmpeg runtime).
+- **Responsive output formats**: `wav`, `mp3`, `flac`, `opus`, `aac`, `m4a`, `pcm` (subset depends on FFmpeg runtime). Streaming via the WebUI browser player requires MP3, Opus, AAC or FLAC (the MediaSource API does not support WAV progressive playback; WAV streaming via the API works through chunked transfer with a placeholder header).
 - **Theme toggle**: light / dark mode, persisted in `localStorage`.
 
 #### Drag & Drop
@@ -206,7 +207,15 @@ If provided at startup, the WebUI pre-populates the frontend configuration field
 | `--max-llm-len <value>` | Maximum LLM sequence length. Default: `2048`. |
 | `--threads, -j <value>` | CPU thread count. Default: `0` (hardware concurrency). |
 | `--inference-buffer-policy <shared\|balanced\|dedicated>` | Inference buffer policy. Default: `balanced`. |
-| `--llm-kv-cache-type <f32\|f16\|q8_0\|q5_1\|q5_0\|q4_1\|q4_0\|k=<type>,v=<type>[,fallback=<type>]>` | KV cache type. Single type (e.g. `q8_0`) uses the same format for K and V. Default: `k=q8_0,v=q4_0,fallback=q8_0`. |
+| `--llm-kv-cache-type <f32\|f16\|q8_0\|q5_1\|q5_0\|q4_1\|q4_0\|k=<type>,v=<type>[,fallback=<type>]>` | LLM KV cache type. Single type (e.g. `q8_0`) uses the same format for K and V. Default: `k=q8_0,v=q4_0,fallback=q8_0`. |
+| `--dit-kv-cache-type <f32\|f16\|q8_0\|q5_1\|q5_0\|q4_1\|q4_0\|k=<type>,v=<type>[,fallback=<type>]>` | DiT (flow matching) KV cache type. Same format as LLM KV cache. Default: `k=q8_0,v=q4_0,fallback=q8_0`. |
+| `--dit-kv-fixed-slots <value>` | Number of fixed (non-offloadable) DiT KV cache slots. Default: `0` (auto). |
+| `--dit-kv-offloadable-slots <value>` | Number of CPU-offloadable DiT KV cache slots. Default: `0` (auto). |
+| `--dit-kv-cache-length <value>` | Maximum sequence length for the DiT KV cache. Default: `0` (auto, `max-llm-len * 10`). |
+| `--llm-flash-attn <0\|1>` | Enable/disable LLM flash attention. Default: `1` (enabled). |
+| `--flow-flash-attn <0\|1>` | Enable/disable Flow/DiT flash attention. Default: `1` (enabled). |
+| `--stream` | Enable streaming TTS for all requests by default (WebUI and API). |
+| `--chunk-tokens <value>` | Number of tokens per streaming chunk. Smaller chunks → lower first-chunk latency but higher overhead and RTF; larger chunks → lower RTF but higher first-chunk latency. Default: model-defined (varies by model). |
 | `--seed <value>` | Default random seed for the built-in sampler (when request does not provide a seed). |
 
 ### Sampling Default Overrides (Server-level)
@@ -298,6 +307,8 @@ Returns server status as JSON:
   "k_cache_type": "Q8_0",
   "v_cache_type": "Q4_0",
   "buffer_policy": "balanced",
+  "llm_use_flash_attn": true,
+  "flow_use_flash_attn": true,
   "model_arch": "cosyvoice3-2512",
   "frontend_available": false,
   "speakers": ["alloy", "nova"]
@@ -362,24 +373,36 @@ Generates speech. JSON body:
   "min_token_text_ratio": 1.0,
   "max_token_text_ratio": 5.0,
   "instruction": "Speak with a warm and calm style.",
-  "fadein": true
+  "fadein": true,
+  "stream": false,
+  "chunk_tokens": 0
 }
 ```
 
 Returns raw audio bytes with the appropriate `Content-Type` header (`audio/wav`, `audio/mpeg`, etc.).
 
+When `stream` is `true` (or the server was started with `--stream`), the response is delivered as a chunked HTTP transfer. Audio chunks are streamed incrementally as they are generated. All output formats support streaming at the server level. When using the WebUI, the browser player requires MP3, Opus, AAC or FLAC (the MediaSource API does not support WAV progressive playback). When `stream` is `false` (default), the full audio is buffered and returned as a single blob.
+
 #### `GET /model/defaults`
 
-Returns default model parameters as JSON:
+Returns default model parameters as JSON (field set varies based on loaded model):
 ```json
 {
   "max_llm_len": 2048,
   "temperature": 1.0,
   "top_k": 50,
   "top_p": 0.9,
+  "chunk_tokens": 75,
+  "default_dit_k_cache_type": "q8_0",
+  "default_dit_v_cache_type": "q4_0",
+  "default_dit_kv_fixed_slots": 1,
+  "default_dit_kv_offloadable_slots": 0,
+  "default_dit_kv_cache_length": 20480,
   ...
 }
 ```
+
+DiT KV cache defaults are populated from the effective configuration after model load. `chunk_tokens` reflects the currently configured value (0 = model default).
 
 #### `POST /model/load`
 
@@ -392,9 +415,24 @@ Loads a model into the server at runtime. JSON body:
   "max_llm_len": 2048,
   "buffer_policy": "balanced",
   "k_cache_type": "q8_0",
-  "v_cache_type": "q4_0"
+  "v_cache_type": "q4_0",
+  "llm_use_flash_attn": true,
+  "flow_use_flash_attn": true,
+  "dit_kv_cache_type": "k=q8_0,v=q4_0,fallback=q8_0",
+  "dit_kv_fixed_slots": 0,
+  "dit_kv_offloadable_slots": 0,
+  "dit_kv_cache_length": 0,
+  "chunk_tokens": 0
 }
 ```
+
+Additional fields:
+- `llm_use_flash_attn`, `flow_use_flash_attn`: `true`/`false` toggles for flash attention.
+- `dit_kv_cache_type`: DiT KV cache type (same format as `k_cache_type`).
+- `dit_kv_fixed_slots`: Number of fixed DiT KV cache slots (0 = auto).
+- `dit_kv_offloadable_slots`: Number of CPU-offloadable DiT KV cache slots (0 = auto).
+- `dit_kv_cache_length`: Maximum DiT KV cache sequence length (0 = auto, `max_llm_len * 10`).
+- `chunk_tokens`: Tokens per streaming chunk (0 = model default).
 
 #### `POST /model/unload`
 
@@ -433,7 +471,7 @@ Authentication behavior:
 #### Speech request behavior (`POST /v1/audio/speech`):
 - Required fields: `model`, `input`, `voice`.
 - Optional standard fields: `instructions`, `speed`, `response_format`.
-- Optional extension fields: `seed`, `temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, `min_token_text_ratio`, `max_token_text_ratio`.
+- Optional extension fields: `seed`, `temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, `min_token_text_ratio`, `max_token_text_ratio`, `stream` (boolean), `chunk_tokens` (uint32).
 - Seed precedence: request `seed` extension > server `--seed` > random seed per request.
 - Mode selection is automatic: non-empty `instructions` -> instruct mode; otherwise zero-shot mode.
 - Supported `response_format`: `wav`, `pcm`, plus FFmpeg-backed formats `mp3`, `aac`, `flac`, `m4a`, and `opus` when the linked FFmpeg runtime actually provides the required encoders. The server prints the runtime-supported subset in its help text.
@@ -441,6 +479,7 @@ Authentication behavior:
 - `wav` is supported through the audio encoder in normal builds, and through an internal PCM16 WAV fallback when audio helpers are disabled.
 - `pcm` returns raw 16-bit little-endian mono PCM payload.
 - If a requested format is not available at runtime the server will return an error explaining the unsupported format; clients should fall back to `wav` or `pcm`.
+- **Streaming**: When `stream` is `true` (or the server was started with `--stream`), the API returns a chunked transfer response. Each chunk contains raw audio bytes — no SSE framing. The client must read the stream until exhaustion. All response formats support streaming — there is no format restriction on the API side. WAV sends a placeholder header first, followed by raw PCM16 chunks.
 
 OpenAI Python client example:
 ```python
@@ -462,15 +501,18 @@ with open("out.mp3", "wb") as f:
 
 Non-standard extension fields (OpenAI SDK `extra_body`):
 - Standard OpenAI Speech requests usually use: `model`, `input`, `voice`, optional `instructions/speed/response_format`.
-- `cosyvoice-server` additionally supports request-level sampling extensions:
+- `cosyvoice-server` additionally supports request-level extensions:
   - `seed`, `temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, `min_token_text_ratio`, `max_token_text_ratio`
-- With the OpenAI Python SDK, pass these extensions via `extra_body`:
+  - `stream` (boolean): enable streaming TTS.
+  - `chunk_tokens` (uint32): tokens per streaming chunk (0 = model default).
+- With the OpenAI Python SDK, pass these via `extra_body`:
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(base_url="http://127.0.0.1:8080/v1", api_key="sk-local-demo")
 
+# Non-streaming request with sampling overrides
 audio = client.audio.speech.create(
     model="cosyvoice-3",
     voice="alloy",
@@ -487,9 +529,25 @@ audio = client.audio.speech.create(
         "max_token_text_ratio": 5.0,
     },
 )
-
 with open("out.wav", "wb") as f:
     f.write(audio.read())
+
+# Streaming request (read raw stream manually)
+import httpx
+response = httpx.post(
+    "http://127.0.0.1:8080/v1/audio/speech",
+    json={
+        "model": "cosyvoice-3",
+        "voice": "alloy",
+        "input": "Hello from streaming TTS",
+        "response_format": "mp3",
+        "stream": True,
+    },
+    headers={"Authorization": "Bearer sk-local-demo"},
+)
+with open("out.mp3", "wb") as f:
+    for chunk in response.iter_bytes():
+        f.write(chunk)
 ```
 
 Validation rules for these extensions:
@@ -501,6 +559,8 @@ Validation rules for these extensions:
 - `tau_r`: `>= 0`
 - `min_token_text_ratio`: `>= 0`
 - `max_token_text_ratio`: `>= 0` and `>= min_token_text_ratio` (when both are set)
+- `stream`: boolean
+- `chunk_tokens`: uint32 (`[0, 4294967295]`)
 
 If validation fails, the server returns OpenAI-style `400` with an error object.
 
@@ -571,6 +631,23 @@ python tools/server/synthesize_via_api.py \
   --max-token-text-ratio 5.0
 ```
 
+- Streaming request with real-time playback (requires `pyaudio`):
+
+```bash
+python tools/server/synthesize_via_api.py \
+  --base-url http://127.0.0.1:8080 \
+  --model cosyvoice-3 \
+  --voice alloy \
+  --text "Streaming TTS demo" \
+  --response-format wav \
+  --stream
+```
+
+Additional options for streaming:
+- `--stream`: Enable streaming TTS. Audio plays in real-time via pyaudio (WAV format) or saves progressively.
+- `--chunk-tokens <value>`: Tokens per streaming chunk (0 = model default).
+- `--no-play`: Disable real-time playback even with `--stream` (useful for saving streaming output to file).
+
 #### `tools/server/batch_tts_stress_test.py`
 
 Concurrent stress test helper that sends multiple concurrent requests and keeps all generated audio files.
@@ -638,6 +715,7 @@ When neither `--text` nor `--output` is provided, interactive mode is enabled au
 Type text at the `> ` prompt to synthesize, or use slash commands:
 
 - `/play [code]`: Play cached audio (requires audio support; disabled with `COSYVOICE_CLI_NO_PLAYBACK=ON`). Press `Ctrl+C` to stop playback.
+- Press `Ctrl+C` during TTS generation to gracefully stop synthesis mid-generation via the stop-request API — output up to that point remains valid.
 - `/save <file> [code]`: Save cached audio to file.
 - `/list`: List cached audio.
 - `/query [code]`: Show audio details.
@@ -645,6 +723,8 @@ Type text at the `> ` prompt to synthesize, or use slash commands:
 - `/clear`: Clear cached audio.
 - `/seed [value]`: Show or set next seed.
 - `/seed-policy <fixed|random>`: Show or set seed policy.
+- `/stream`: Toggle streaming playback (audio plays progressively during generation).
+- `/chunk-tokens [value]`: Show or set tokens per streaming chunk.
 - `/help`: Show command list.
 - `/exit`: Exit interactive mode. `Ctrl+C` also exits.
 
@@ -672,6 +752,14 @@ Core options:
 - `--inference-buffer-policy <shared|balanced|dedicated>`: Inference buffer policy. Only effective in interactive mode; non-interactive mode always uses `shared` for minimal memory footprint and fastest single-shot synthesis. Default: `balanced`.
 - `--mode <zero-shot|instruct|cross-lingual>`: TTS mode. Default: auto-detect from `--instruction`.
 - `--instruction, -i <text>`: Instruction text for instruct mode.
+- `--dit-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>`: DiT KV cache type (interactive only). Same format as `--llm-kv-cache-type`. Default: `k=q8_0,v=q4_0,fallback=q8_0`.
+- `--dit-kv-fixed-slots <value>`: Number of fixed (non-offloadable) DiT KV cache slots (interactive only). Default: `0` (auto).
+- `--dit-kv-offloadable-slots <value>`: Number of CPU-offloadable DiT KV cache slots (interactive only). Default: `0` (auto).
+- `--dit-kv-cache-length <value>`: Maximum DiT KV cache sequence length (interactive only). Default: `0` (auto, `max-llm-len * 10`).
+- `--stream`: Enable streaming playback in interactive mode (audio plays progressively during generation).
+- `--chunk-tokens <value>`: Tokens per streaming chunk (interactive only). Smaller chunks → lower first-chunk latency but higher overhead and RTF; larger chunks → lower RTF but higher first-chunk latency. Default: model-defined.
+- `--llm-flash-attn <0|1>`: Enable/disable LLM flash attention. Default: `1` (enabled).
+- `--flow-flash-attn <0|1>`: Enable/disable Flow/DiT flash attention. Default: `1` (enabled).
 
 Sampling override options:
 - `--temperature <value>`: Sampling temperature, must be `> 0`.
@@ -753,6 +841,14 @@ Required vs optional:
 | `--llm-kv-cache-type` | `k=q8_0,v=q4_0,fallback=q8_0` | CLI |
 | `--inference-buffer-policy` | `balanced` (interactive) / `shared` (non-interactive) | CLI |
 | `--seed` | random | runtime |
+| `--stream` | `false` | CLI |
+| `--chunk-tokens` | model-defined | model |
+| `--dit-kv-cache-type` | `k=q8_0,v=q4_0,fallback=q8_0` | CLI |
+| `--dit-kv-fixed-slots` | `0` (auto) | CLI |
+| `--dit-kv-offloadable-slots` | `0` (auto) | CLI |
+| `--dit-kv-cache-length` | `0` (auto, `max-llm-len * 10`) | CLI |
+| `--llm-flash-attn` | `1` (enabled) | CLI |
+| `--flow-flash-attn` | `1` (enabled) | CLI |
 | `temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, `min/max_token_text_ratio` | model metadata | model |
 
 ### Typical command templates

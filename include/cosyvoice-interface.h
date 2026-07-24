@@ -50,6 +50,8 @@ struct cosyvoice_model_context
     // KV Cache
     virtual uint32_t llm_get_kv_cache_len() = 0; ///< Get the current KV-cache sequence length.
     virtual bool llm_set_kv_cache_len(uint32_t len) = 0; ///< Trim the KV-cache sequence length.
+    virtual void llm_offload_kv_cache() = 0; ///< Offload the KV cache to CPU memory.
+    virtual void llm_load_kv_cache() = 0; ///< Load the KV cache from CPU memory back to the backend.
 
     // Token Sampling and Acceptance
     virtual int llm_sample_token() = 0; ///< Sample the next token from the current logits.
@@ -60,14 +62,42 @@ struct cosyvoice_model_context
     virtual const int* llm_get_accepted_tokens() = 0; ///< Get the accepted-token buffer.
 
     // Inference
-    virtual bool llm_job(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt) = 0; ///< Run low-level LLM inference for a prompt and tokenized text.
+    virtual bool llm_job(
+        const int*          text,
+        uint32_t            text_len,
+        cosyvoice_prompt_t  prompt
+    ) = 0; ///< Run low-level LLM inference for a prompt and tokenized text.
+    
     virtual bool token2wav(
-        const int* token_ids,
-        uint32_t                   n_tokens,
-        float                      speed,
-        cosyvoice_prompt_t         prompt,
+        const int*                     token_ids,
+        uint32_t                       n_tokens,
+        float                          speed,
+        cosyvoice_prompt_t             prompt,
         cosyvoice_generated_speech_ptr result
     ) = 0; ///< Convert speech tokens into waveform samples.
+    
+    // Extended Inference
+    virtual bool llm_job_ext(
+        const int*          text,
+        uint32_t            text_len,
+        cosyvoice_prompt_t  prompt,
+        uint32_t            max_new_tokens,
+        bool*               final
+    ) = 0; ///< Run low-level LLM inference for a prompt and tokenized text with additional options.
+   
+    virtual bool token2wav_ext(
+        const int*                     token_ids,
+        uint32_t                       n_tokens,
+        float                          speed,
+        cosyvoice_prompt_t             prompt,
+        uint32_t*                      offset,
+        bool                           streaming,
+        bool                           finalize,
+        cosyvoice_generated_speech_ptr result
+    ) = 0; ///< Convert speech tokens into waveform samples with additional options.
+
+    virtual uint32_t get_chunk_tokens() = 0; ///< Get the number of tokens processed in each chunk during streaming inference.
+    virtual void set_chunk_tokens(uint32_t n_tokens) = 0; ///< Set the number of tokens processed in each chunk during streaming inference.
 
     // Status
     virtual ggml_status get_last_status() = 0; ///< Get the status of the most recent backend operation.
@@ -76,7 +106,7 @@ struct cosyvoice_model_context
     virtual void set_prompt(
         cosyvoice_prompt_t         prompt,
         cosyvoice_inference_mode_t mode,
-        const int* instruction,
+        const int*                 instruction,
         uint32_t                   instruction_length
     ) = 0;
 
@@ -90,6 +120,10 @@ struct cosyvoice_model_context
     virtual void get_noise_callback(cosyvoice_noise_callback_t* callback, void** callback_ctx) = 0; ///< Query the shared noise callback.
     virtual uint32_t get_hift_rand_ini_len() = 0; ///< Get the required shared HiFT initialization-noise length.
     virtual void set_hift_rand_ini(const float* data) = 0; ///< Set the shared HiFT initialization-noise buffer.
+
+    // Stop-request API
+    virtual void request_stop() = 0; ///< Request that the active worker's current job stop as soon as possible.
+    virtual bool stop_requested() = 0; ///< Check and atomically clear the stop-requested flag. Returns true if a stop was requested.
 };
 
 // ----------------------------------------------------------------------------

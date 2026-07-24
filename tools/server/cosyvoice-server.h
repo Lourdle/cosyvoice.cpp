@@ -3,7 +3,7 @@
 #include "tool_common_cosyvoice.h"
 
 #include <cstdint>
-#include <atomic>
+#include <mutex>
 #include <random>
 #include <string>
 #include <unordered_map>
@@ -36,8 +36,8 @@ struct server_runtime
     uint32_t concurrency = 1;
     cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
     bool has_llm_kv_cache_override = false;
-    cosyvoice_llm_kv_cache_type_t requested_llm_kv_cache_type = static_cast<cosyvoice_llm_kv_cache_type_t>(0);
-    cosyvoice_llm_kv_cache_type_t actual_llm_kv_cache_type = static_cast<cosyvoice_llm_kv_cache_type_t>(0);
+    cosyvoice_kv_cache_type_t requested_llm_kv_cache_type = static_cast<cosyvoice_kv_cache_type_t>(0);
+    cosyvoice_kv_cache_type_t actual_llm_kv_cache_type = static_cast<cosyvoice_kv_cache_type_t>(0);
 #ifndef COSYVOICE_NO_ICU
     bool text_normalization_enabled = true;
 #endif
@@ -45,6 +45,15 @@ struct server_runtime
     bool fast_split_text_enabled = true;
     bool fade_in_enabled = true;
     server_log_level log_level = server_log_level::concise;
+
+    bool stream = false;
+    bool has_chunk_tokens = false;
+    uint32_t chunk_tokens = 0;
+
+    // Effective DiT KV cache params (populated after model load)
+    uint32_t dit_kv_fixed_slots          = 0;
+    uint32_t dit_kv_offloadable_slots    = 0;
+    uint32_t dit_kv_cache_length         = 0;
 
     // Frontend model paths (ONNX, for feature extraction)
     std::string frontend_model;
@@ -67,7 +76,10 @@ struct server_runtime
     std::vector<std::vector<std::pair<std::string, cosyvoice_tts_context_handle>>> voice_sessions;
 
     std::mt19937 seed_rng;
-    std::atomic_uint32_t thread_slot_counter{0};
+
+    // Concurrency slot management (request-scoped, not thread-local)
+    std::mutex              slot_mutex;
+    std::vector<bool>       slot_in_use;
 };
 
 inline cosyvoice_context_t get_slot_model_context(server_runtime& runtime, uint32_t slot)
@@ -84,12 +96,32 @@ inline cosyvoice_tts_context_t get_slot_voice_session(server_runtime& runtime, u
     return nullptr;
 }
 
+// Acquire a concurrency slot for this request. Returns UINT32_MAX if all
+// slots are in use (caller should return 503 / overloaded).
+inline uint32_t acquire_thread_slot(server_runtime& runtime)
+{
+    std::lock_guard<std::mutex> lock(runtime.slot_mutex);
+    for (uint32_t i = 0; i < runtime.concurrency; ++i)
+        if (!runtime.slot_in_use[i])
+        {
+            runtime.slot_in_use[i] = true;
+            return i;
+        }
+    return UINT32_MAX;
+}
+
+// Release a concurrency slot previously acquired via acquire_thread_slot.
+inline void release_thread_slot(server_runtime& runtime, uint32_t slot)
+{
+    if (slot >= runtime.concurrency)
+        return;
+    std::lock_guard<std::mutex> lock(runtime.slot_mutex);
+    runtime.slot_in_use[slot] = false;
+}
+
 inline uint32_t get_or_assign_thread_slot(server_runtime& runtime)
 {
-    thread_local uint32_t slot = UINT32_MAX;
-    if (slot == UINT32_MAX)
-        slot = runtime.thread_slot_counter.fetch_add(1, std::memory_order_relaxed);
-    return slot;
+    return acquire_thread_slot(runtime);
 }
 
 int cosyvoice_server_backend_run(server_runtime& runtime);

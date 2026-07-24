@@ -29,42 +29,57 @@
 
 静态链接时定义 `COSYVOICE_STATIC` 可关闭导入属性；Windows 默认使用 `__declspec(dllimport)`。
 
-## cosyvoice_llm_kv_cache_type_t
+## cosyvoice_kv_cache_type_t
 
 ### 语法
 
 ```c
-typedef enum cosyvoice_llm_kv_cache_type
+typedef enum cosyvoice_kv_cache_type
 {
-    COSYVOICE_LLM_KV_CACHE_TYPE_F32,
-    COSYVOICE_LLM_KV_CACHE_TYPE_F16,
-    COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0,
-    COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1,
-    COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0,
-    COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1,
-    COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0,
-    COSYVOICE_LLM_KV_CACHE_TYPE_COUNT
-} cosyvoice_llm_kv_cache_type_t;
+    COSYVOICE_KV_CACHE_TYPE_F32,
+    COSYVOICE_KV_CACHE_TYPE_F16,
+    COSYVOICE_KV_CACHE_TYPE_Q8_0,
+    COSYVOICE_KV_CACHE_TYPE_Q5_1,
+    COSYVOICE_KV_CACHE_TYPE_Q5_0,
+    COSYVOICE_KV_CACHE_TYPE_Q4_1,
+    COSYVOICE_KV_CACHE_TYPE_Q4_0,
+    COSYVOICE_KV_CACHE_TYPE_COUNT
+} cosyvoice_kv_cache_type_t, cosyvoice_llm_kv_cache_type_t;
+```
+
+#### 向后兼容别名
+
+旧的 `cosyvoice_llm_kv_cache_type_t` 和 `COSYVOICE_LLM_KV_CACHE_TYPE_*` 常量以后向兼容宏提供：
+
+```c
+#define COSYVOICE_LLM_KV_CACHE_TYPE_F32   COSYVOICE_KV_CACHE_TYPE_F32
+#define COSYVOICE_LLM_KV_CACHE_TYPE_F16   COSYVOICE_KV_CACHE_TYPE_F16
+#define COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0  COSYVOICE_KV_CACHE_TYPE_Q8_0
+#define COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1  COSYVOICE_KV_CACHE_TYPE_Q5_1
+#define COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0  COSYVOICE_KV_CACHE_TYPE_Q5_0
+#define COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1  COSYVOICE_KV_CACHE_TYPE_Q4_1
+#define COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0  COSYVOICE_KV_CACHE_TYPE_Q4_0
+#define COSYVOICE_LLM_KV_CACHE_TYPE_COUNT COSYVOICE_KV_CACHE_TYPE_COUNT
 ```
 
 ### 说明
 
-指定 LLM 的 KV 缓存存储格式。
+指定 KV 缓存存储格式。同时用于 LLM 和 DiT 模块。
 
 ### 枚举值
 
-- `COSYVOICE_LLM_KV_CACHE_TYPE_F32`：32 位浮点格式。
-- `COSYVOICE_LLM_KV_CACHE_TYPE_F16`：16 位浮点格式。
-- `COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0`：GGML `Q8_0` 量化格式。
-- `COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1`：GGML `Q5_1` 量化格式。
-- `COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0`：GGML `Q5_0` 量化格式。
-- `COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1`：GGML `Q4_1` 量化格式。
-- `COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0`：GGML `Q4_0` 量化格式。
-- `COSYVOICE_LLM_KV_CACHE_TYPE_COUNT`：哨兵值，不用于运行配置。
+- `COSYVOICE_KV_CACHE_TYPE_F32`：32 位浮点格式。
+- `COSYVOICE_KV_CACHE_TYPE_F16`：16 位浮点格式。
+- `COSYVOICE_KV_CACHE_TYPE_Q8_0`：GGML `Q8_0` 量化格式。
+- `COSYVOICE_KV_CACHE_TYPE_Q5_1`：GGML `Q5_1` 量化格式。
+- `COSYVOICE_KV_CACHE_TYPE_Q5_0`：GGML `Q5_0` 量化格式。
+- `COSYVOICE_KV_CACHE_TYPE_Q4_1`：GGML `Q4_1` 量化格式。
+- `COSYVOICE_KV_CACHE_TYPE_Q4_0`：GGML `Q4_0` 量化格式。
+- `COSYVOICE_KV_CACHE_TYPE_COUNT`：哨兵值，不用于运行配置。
 
 ### 分离 K/V 缓存宏
 
-`cosyvoice_llm_kv_cache_type_t` 可以通过位打包（bit-packing）编码 K 和 V 缓存的不同类型，
+`cosyvoice_kv_cache_type_t` 可以通过位打包（bit-packing）编码 K 和 V 缓存的不同类型，
 从而为 K 和 V 张量使用不同的量化格式（例如 K 用 `Q8_0`、V 用 `Q4_0`），在质量与内存之间灵活取舍。
 
 #### 打包格式（bit 31 = 1 表示分离模式）
@@ -77,7 +92,7 @@ typedef enum cosyvoice_llm_kv_cache_type
 | 15–30  | 保留           |
 | 31     | 分离标志位     |
 
-当 bit 31 为 0 时，值被当作普通的 `cosyvoice_llm_kv_cache_type_t`，K 和 V 使用同一类型（向后兼容）。
+当 bit 31 为 0 时，值被当作普通的 `cosyvoice_kv_cache_type_t`，K 和 V 使用同一类型（向后兼容）。
 
 ```c
 #define COSYVOICE_MAKE_SEPARATE_KV_CACHE(k_type, v_type, fallback_type)
@@ -97,11 +112,11 @@ typedef enum cosyvoice_llm_kv_cache_type
 
 #### 在参数中使用
 
-可以直接使用 `cosyvoice_context_params_t` 中的位域成员，或通过 `COSYVOICE_MAKE_SEPARATE_KV_CACHE` 打包后赋值给 `llm_kv_cache_type`：
+可以直接使用 `cosyvoice_context_params_t` 或 `cosyvoice_context_params_v3_t` 中的位域成员，或通过 `COSYVOICE_MAKE_SEPARATE_KV_CACHE` 打包后赋值给 `llm_kv_cache_type` / `dit_kv_cache_type`：
 
 ```c
-params.llm_k_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0;
-params.llm_v_cache_type = COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0;
+params.llm_k_cache_type = COSYVOICE_KV_CACHE_TYPE_Q8_0;
+params.llm_v_cache_type = COSYVOICE_KV_CACHE_TYPE_Q4_0;
 params.llm_kv_cache_separate_buffers = true;
 ```
 
@@ -109,9 +124,9 @@ params.llm_kv_cache_separate_buffers = true;
 
 ```c
 params.llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
-    COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0,
-    COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0,
-    COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0);
+    COSYVOICE_KV_CACHE_TYPE_Q8_0,
+    COSYVOICE_KV_CACHE_TYPE_Q4_0,
+    COSYVOICE_KV_CACHE_TYPE_Q8_0);
 ```
 
 ## cosyvoice_inference_buffer_policy_t
@@ -352,13 +367,13 @@ typedef struct cosyvoice_context_params
     {
         struct
         {
-            cosyvoice_llm_kv_cache_type_t  llm_k_cache_type : 5;              ///< K 缓存数据类型。
-            cosyvoice_llm_kv_cache_type_t  llm_v_cache_type : 5;              ///< V 缓存数据类型。
-            cosyvoice_llm_kv_cache_type_t  llm_kv_cache_fallback : 5;         ///< 首选类型不受支持时的回退类型。
-            cosyvoice_llm_kv_cache_type_t : 16;                               ///< 保留位。
-            cosyvoice_llm_kv_cache_type_t  llm_kv_cache_separate_buffers : 1; ///< 是否分别为 K 和 V 分配独立缓存。
+            cosyvoice_kv_cache_type_t llm_k_cache_type : 5;              ///< K 缓存数据类型。
+            cosyvoice_kv_cache_type_t llm_v_cache_type : 5;              ///< V 缓存数据类型。
+            cosyvoice_kv_cache_type_t llm_kv_cache_fallback : 5;         ///< 首选类型不受支持时的回退类型。
+            cosyvoice_kv_cache_type_t : 16;                               ///< 保留位。
+            uint32_t                  llm_kv_cache_separate_buffers : 1; ///< 是否分别为 K 和 V 分配独立缓存。
         };
-        cosyvoice_llm_kv_cache_type_t      llm_kv_cache_type;                 ///< 向后兼容的统一类型。
+        cosyvoice_kv_cache_type_t      llm_kv_cache_type;                 ///< 向后兼容的统一类型。
     };
     bool                                llm_allow_kv_cache_fallback;
     cosyvoice_inference_buffer_policy_t inference_buffer_policy;
@@ -552,6 +567,117 @@ COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_with_params_v2(
 
 - `filename`：模型文件路径。
 - `params`：扩展上下文参数。
+
+### 返回值
+
+成功返回上下文句柄，失败返回 `NULL`。
+
+## cosyvoice_context_params_v3_t
+
+### 语法
+
+```c
+typedef struct cosyvoice_context_params_v3
+{
+    cosyvoice_context_params_v2_t base_params;
+
+    union
+    {
+        struct
+        {
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) || defined(_BYTE_ORDER) && (_BYTE_ORDER == _BIG_ENDIAN) || defined(__BIG_ENDIAN__) && !defined(__LITTLE_ENDIAN__) || defined(__ARMEB__) || defined(__MIPSEB__) || defined(__sparc__)
+            uint32_t                  dit_kv_cache_separate_buffers : 1;
+            cosyvoice_kv_cache_type_t : 16;
+            cosyvoice_kv_cache_type_t dit_kv_cache_fallback : 5;
+            cosyvoice_kv_cache_type_t dit_v_cache_type : 5;
+            cosyvoice_kv_cache_type_t dit_k_cache_type : 5;
+#else
+            cosyvoice_kv_cache_type_t dit_k_cache_type : 5;
+            cosyvoice_kv_cache_type_t dit_v_cache_type : 5;
+            cosyvoice_kv_cache_type_t dit_kv_cache_fallback : 5;
+            cosyvoice_kv_cache_type_t : 16;
+            uint32_t                  dit_kv_cache_separate_buffers : 1;
+#endif
+        };
+        cosyvoice_kv_cache_type_t dit_kv_cache_type;
+    };
+    bool     dit_allow_kv_cache_fallback;
+    uint32_t dit_kv_fixed_slots;
+    uint32_t dit_kv_offloadable_slots;
+    uint32_t dit_kv_cache_length;
+} cosyvoice_context_params_v3_t;
+
+#ifdef __cplusplus
+struct cosyvoice_context_params_v3_cpp : cosyvoice_context_params_v2_cpp
+{
+    union
+    {
+        struct
+        {
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) || defined(_BYTE_ORDER) && (_BYTE_ORDER == _BIG_ENDIAN) || defined(__BIG_ENDIAN__) && !defined(__LITTLE_ENDIAN__) || defined(__ARMEB__) || defined(__MIPSEB__) || defined(__sparc__)
+            uint32_t                  dit_kv_cache_separate_buffers : 1;
+            cosyvoice_kv_cache_type_t : 16;
+            cosyvoice_kv_cache_type_t dit_kv_cache_fallback : 5;
+            cosyvoice_kv_cache_type_t dit_v_cache_type : 5;
+            cosyvoice_kv_cache_type_t dit_k_cache_type : 5;
+#else
+            cosyvoice_kv_cache_type_t dit_k_cache_type : 5;
+            cosyvoice_kv_cache_type_t dit_v_cache_type : 5;
+            cosyvoice_kv_cache_type_t dit_kv_cache_fallback : 5;
+            cosyvoice_kv_cache_type_t : 16;
+            uint32_t                  dit_kv_cache_separate_buffers : 1;
+#endif
+        };
+        cosyvoice_kv_cache_type_t dit_kv_cache_type;
+    };
+    bool     dit_allow_kv_cache_fallback;
+    uint32_t dit_kv_fixed_slots;
+    uint32_t dit_kv_offloadable_slots;
+    uint32_t dit_kv_cache_length;
+};
+#endif
+```
+
+### 说明
+
+在 `cosyvoice_context_params_v2_t` 基础上增加 DiT（扩散模型）KV 缓存配置。流式 TTS 时 DiT 模块会运行多个扩散步，每步计算完整音频序列的自注意力——KV 缓存可以跨步复用注意力计算结果，但缓存本身非常大（最多 `sequence_length × n_diffusion_steps` 个 key-value 对）。
+
+### 成员
+
+- `base_params`：V2 基础参数。
+- `dit_k_cache_type`：DiT 模块 K 缓存数据类型。
+- `dit_v_cache_type`：DiT 模块 V 缓存数据类型。
+- `dit_kv_cache_separate_buffers`：若为 true，则分别为 K 和 V 分配独立缓存。
+- `dit_kv_cache_fallback`：首选类型不受支持时的回退类型。
+- `dit_kv_cache_type`：快捷方式——指定统一类型（不分离 K/V）。
+- `dit_allow_kv_cache_fallback`：若为 true，不支持时回退到 flash attention 兼容类型。
+- `dit_kv_fixed_slots`：固定（设备内存，从不卸载）DiT KV 槽位数。每个槽位对应一个扩散步的 KV 缓存。
+- `dit_kv_offloadable_slots`：可卸载（CPU 卸载）DiT KV 槽位数。
+- `dit_kv_cache_length`：DiT KV 缓存最大序列长度。0 表示使用默认值（`n_max_seq × 10`）。
+
+### DiT KV 缓存概念
+
+详见 [README_zh.md — 流式 TTS 与 DiT KV 缓存](#) 的详细说明。
+
+## cosyvoice_load_from_file_with_params_v3
+
+### 语法
+
+```c
+COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_with_params_v3(
+    const char*                          filename,
+    const cosyvoice_context_params_v3_t* params
+);
+```
+
+### 说明
+
+使用 V3 扩展参数加载模型上下文，包含 DiT KV 缓存配置。
+
+### 参数
+
+- `filename`：模型文件路径。
+- `params`：V3 上下文参数。
 
 ### 返回值
 
@@ -1506,6 +1632,120 @@ COSYVOICE_API bool cosyvoice_tts_cross_lingual(
 
 成功返回 `true`，失败返回 `false`。
 
+## cosyvoice_tts_audio_callback_t
+
+### 语法
+
+```c
+typedef bool (*cosyvoice_tts_audio_callback_t)(const float* audio, uint32_t n_samples, void* user_data);
+```
+
+### 说明
+
+流式 TTS API 用于逐段交付音频的回调函数类型。
+
+### 参数
+
+- `audio`：32 位浮点 PCM 采样数据，单声道。
+- `n_samples`：本次回调的采样点数。
+- `user_data`：注册回调时传入的不透明上下文。
+
+### 返回值
+
+返回 `true` 继续流式合成，返回 `false` 中止合成。
+
+## cosyvoice_tts_zero_shot_stream
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_tts_zero_shot_stream(
+    cosyvoice_tts_context_t        ctx,
+    const char*                    text,
+    float                          speed,
+    cosyvoice_tts_audio_callback_t callback,
+    void*                          user_data
+);
+```
+
+### 说明
+
+以 zero-shot 模式流式生成语音，通过回调逐段交付音频。
+
+### 参数
+
+- `ctx`：TTS 会话。
+- `text`：输入文本。
+- `speed`：语速系数。
+- `callback`：接收每段音频的回调函数。
+- `user_data`：传入回调的不透明上下文。
+
+### 返回值
+
+成功返回 `true`，失败返回 `false`。
+
+## cosyvoice_tts_instruct_stream
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_tts_instruct_stream(
+    cosyvoice_tts_context_t        ctx,
+    const char*                    text,
+    const char*                    instruction,
+    float                          speed,
+    cosyvoice_tts_audio_callback_t callback,
+    void*                          user_data
+);
+```
+
+### 说明
+
+以 instruct 模式流式生成语音。
+
+### 参数
+
+- `ctx`：TTS 会话。
+- `text`：输入文本。
+- `instruction`：指令文本。
+- `speed`：语速系数。
+- `callback`：接收每段音频的回调函数。
+- `user_data`：传入回调的不透明上下文。
+
+### 返回值
+
+成功返回 `true`，失败返回 `false`。
+
+## cosyvoice_tts_cross_lingual_stream
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_tts_cross_lingual_stream(
+    cosyvoice_tts_context_t        ctx,
+    const char*                    text,
+    float                          speed,
+    cosyvoice_tts_audio_callback_t callback,
+    void*                          user_data
+);
+```
+
+### 说明
+
+以 cross-lingual 模式流式生成语音。
+
+### 参数
+
+- `ctx`：TTS 会话。
+- `text`：输入文本。
+- `speed`：语速系数。
+- `callback`：接收每段音频的回调函数。
+- `user_data`：传入回调的不透明上下文。
+
+### 返回值
+
+成功返回 `true`，失败返回 `false`。
+
 ## cosyvoice_save_wav
 
 ### 语法
@@ -1575,6 +1815,27 @@ COSYVOICE_API void cosyvoice_get_memory_usage(cosyvoice_context_t ctx, cosyvoice
 ### 说明
 
 获取当前内存占用快照。
+
+### 参数
+
+- `ctx`：模型上下文。
+- `usage`：输出内存明细结构体。
+
+### 返回值
+
+无返回值。
+
+## cosyvoice_get_total_memory_usage
+
+### 语法
+
+```c
+COSYVOICE_API void cosyvoice_get_total_memory_usage(cosyvoice_context_t ctx, cosyvoice_memory_usage_t* usage);
+```
+
+### 说明
+
+获取所有 worker 的总内存占用快照。
 
 ### 参数
 

@@ -29,7 +29,10 @@ const ADV_PARAM_IDS = [
     'tts-fadein','tts-textnorm','tts-split','tts-fastsplit',
     'tts-mode','tts-format',
     'model-max-llm','model-kv-k','model-kv-v','model-buffer-policy',
-    'model-threads','model-backend'
+    'model-threads','model-backend',
+    'model-dit-kv-k','model-dit-kv-v','model-dit-fixed-slots','model-dit-offloadable-slots','model-dit-cache-length',
+    'model-llm-flash-attn','model-flow-flash-attn',
+    'tts-stream','tts-chunk-tokens'
 ];
 
 function saveAdvParam(id) {
@@ -137,6 +140,7 @@ function initEls() {
         // Model
         'model-path', 'model-backend', 'model-threads',
         'model-kv-k', 'model-kv-v', 'model-buffer-policy', 'model-max-llm',
+        'model-dit-kv-k', 'model-dit-kv-v', 'model-dit-fixed-slots', 'model-dit-offloadable-slots', 'model-dit-cache-length',
         'btn-reset-model-config',
         'btn-load-model', 'btn-unload-model',
         'model-load-area', 'model-loaded-area', 'model-loaded-info',
@@ -164,6 +168,7 @@ function initEls() {
         'tts-speed', 'speed-val',
         'tts-seed', 'tts-temp', 'tts-topk', 'tts-topp', 'tts-winsize', 'tts-taur',
         'tts-fadein', 'tts-textnorm', 'tts-split', 'tts-fastsplit',
+        'tts-stream', 'tts-chunk-tokens',
         'seed-dice', 'seed-lock',
         'btn-tts', 'btn-reset-gen-config',
         'player-area', 'audio-player', 'download-link',
@@ -338,10 +343,14 @@ function updateModelUI() {
         const kv_v = statusData.v_cache_type || '?';
         const buf = statusData.buffer_policy || '?';
         const mll = statusData.max_llm_len || '?';
+        const llmFattn = statusData.llm_use_flash_attn !== undefined ? (statusData.llm_use_flash_attn ? 'yes' : 'no') : '?';
+        const flowFattn = statusData.flow_use_flash_attn !== undefined ? (statusData.flow_use_flash_attn ? 'yes' : 'no') : '?';
         els['model-loaded-info'].innerHTML = '<b>' + escapeHtml(arch) + '</b><br>'
             + 'KV Cache: K=' + kv_k + ', V=' + kv_v + '<br>'
             + 'Buffer Policy: ' + buf + '<br>'
             + 'Max LLM Length: ' + mll + '<br>'
+            + 'LLM Flash Attn: ' + llmFattn + '<br>'
+            + 'Flow Flash Attn: ' + flowFattn + '<br>'
             + 'Sample Rate: ' + (statusData.sample_rate || '?') + ' Hz';
     }
 }
@@ -484,6 +493,19 @@ function initModelLoad() {
             if (bp) body.inference_buffer_policy = bp;
             const ml = parseInt(els['model-max-llm'].value, 10);
             if (ml > 0) body.max_llm_len = ml;
+
+            if (els['model-llm-flash-attn']) body.llm_use_flash_attn = els['model-llm-flash-attn'].checked;
+            if (els['model-flow-flash-attn']) body.flow_use_flash_attn = els['model-flow-flash-attn'].checked;
+
+            const dkt = els['model-dit-kv-k'].value;
+            const dvt = els['model-dit-kv-v'].value;
+            body.dit_kv_cache_type = (dkt === dvt) ? dkt : 'k=' + dkt + ',v=' + dvt;
+            const dfs = parseInt(els['model-dit-fixed-slots'].value, 10) || 0;
+            body.dit_kv_fixed_slots = dfs;
+            const dos = parseInt(els['model-dit-offloadable-slots'].value, 10) || 0;
+            body.dit_kv_offloadable_slots = dos;
+            const dcl = parseInt(els['model-dit-cache-length'].value, 10) || 0;
+            body.dit_kv_cache_length = dcl;
 
             await apiFetch('/model/load', { method: 'POST', ...jsonBody(body) });
             showSuccess(els['model-success'], 'Model loaded successfully');
@@ -1139,6 +1161,25 @@ function initTts() {
     }
 }
 
+// After streaming finishes: set up download link, history, reset button.
+// The audio player already has the data via MediaSource or blob URL.
+function onStreamDone(chunks, contentType, els, voice, ext, text) {
+    if (chunks.length === 0) return;
+    const blob = new Blob(chunks, { type: contentType });
+    const url = URL.createObjectURL(blob);
+    if (els['download-link']) {
+        els['download-link'].href = url;
+        els['download-link'].download = 'cosyvoice_' + voice + '.' + ext;
+        els['download-link'].innerHTML = ICONS.download + ' Download ' + ext.toUpperCase() + ' (' + formatFileSize(blob.size) + ')';
+    }
+    addHistory({ voice, text, blob, url, format: ext, mode: els['tts-mode'] ? els['tts-mode'].value : '', timestamp: new Date() });
+    showToast('Stream complete: ' + formatFileSize(blob.size), 'success');
+    if (els['btn-tts']) {
+        els['btn-tts'].disabled = false;
+        els['btn-tts'].innerHTML = ICONS.speaker + ' Generate Speech';
+    }
+}
+
 async function generateTts() {
     hideError(els['tts-error']);
     const voice = els['tts-voice'].value;
@@ -1158,6 +1199,12 @@ async function generateTts() {
         fast_split: els['tts-fastsplit'] ? els['tts-fastsplit'].checked : true,
     };
 
+    if (els['tts-stream']) body.stream = els['tts-stream'].checked;
+    if (els['tts-chunk-tokens']) {
+        const ct = parseInt(els['tts-chunk-tokens'].value, 10);
+        if (ct > 0) body.chunk_tokens = ct;
+    }
+
     const instr = els['tts-instructions'] ? els['tts-instructions'].value.trim() : '';
     if (instr) body.instructions = instr;
 
@@ -1171,10 +1218,7 @@ async function generateTts() {
     ];
     for (const [k, el] of adv) {
         const v = el.value.trim();
-        if (v === '') {
-            showError(els['tts-error'], 'Please fill in all advanced parameters (empty: "' + k + '").');
-            return;
-        }
+        if (v === '') continue;  // skip empty — server uses its defaults
         body[k] = k === 'seed' || k === 'top_k' || k === 'win_size'
             ? parseInt(v, 10) : parseFloat(v);
     }
@@ -1185,35 +1229,119 @@ async function generateTts() {
     btn.innerHTML = '<span class="spinner"></span> Generating...';
 
     try {
-        const res = await apiFetch('/tts', { method: 'POST', ...jsonBody(body) });
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        if (els['audio-player']) els['audio-player'].src = url;
-        if (els['player-area']) els['player-area'].style.display = 'block';
+        const isStream = body.stream === true;
+        let ext = body.format || 'wav';
 
-        const ext = body.format || 'wav';
-        if (els['download-link']) {
-            els['download-link'].href = url;
-            els['download-link'].download = 'cosyvoice_' + voice + '.' + ext;
-            els['download-link'].innerHTML = ICONS.download + ' Download ' + ext.toUpperCase() + ' (' + formatFileSize(blob.size) + ')';
+        if (isStream) {
+            const res = await fetch('/tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+                credentials: 'same-origin',
+            });
+            if (!res.ok) {
+                let msg = 'HTTP ' + res.status;
+                try { const j = await res.json(); msg = j.error || j.message || msg; } catch(e) { /* ignore */ }
+                throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+            }
+
+            const contentType = res.headers.get('Content-Type') || 'audio/mpeg';
+            const reader = res.body.getReader();
+            const chunks = [];
+
+            // Set up audio player immediately
+            const audio = els['audio-player'];
+            if (els['player-area']) els['player-area'].style.display = 'block';
+            btn.innerHTML = '<span class="spinner"></span> Streaming...';
+
+            // Use MediaSource for true progressive playback when supported
+            if (window.MediaSource && MediaSource.isTypeSupported(contentType)) {
+                const mediaSource = new MediaSource();
+                const audioUrl = URL.createObjectURL(mediaSource);
+                if (audio) audio.src = audioUrl;
+
+                mediaSource.onsourceopen = () => {
+                    const sb = mediaSource.addSourceBuffer(contentType);
+                    const pump = async () => {
+                        try {
+                            while (true) {
+                                const { done, value } = await reader.read();
+                                if (done) break;
+                                chunks.push(value);
+                                // Wait for previous append to complete
+                                if (sb.updating)
+                                    await new Promise(r => sb.addEventListener('updateend', r, { once: true }));
+                                sb.appendBuffer(value);
+                            }
+                            // Wait for final append to finish
+                            if (sb.updating)
+                                await new Promise(r => sb.addEventListener('updateend', r, { once: true }));
+                            if (mediaSource.readyState === 'open')
+                                mediaSource.endOfStream();
+                            onStreamDone(chunks, contentType, els, voice, ext, text);
+                        } catch(e) {
+                            console.error('Stream error:', e);
+                            try { if (mediaSource.readyState === 'open') mediaSource.endOfStream(); } catch(_) {}
+                            onStreamDone(chunks, contentType, els, voice, ext, text);
+                        }
+                    };
+                    pump();
+                };
+
+                // Auto-play once data arrives
+                audio.oncanplaythrough = () => audio.play().catch(() => {});
+                audio.oncanplay = () => audio.play().catch(() => {});
+            } else {
+                // Fallback: accumulate all chunks then play
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                }
+                const blob = new Blob(chunks, { type: contentType });
+                const url = URL.createObjectURL(blob);
+                if (audio) audio.src = url;
+                audio.oncanplay = () => audio.play().catch(() => {});
+                onStreamDone(chunks, contentType, els, voice, ext, text);
+            }
+        } else {
+            // Non-streaming path: wait for full blob
+            const res = await apiFetch('/tts', { method: 'POST', ...jsonBody(body) });
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            if (els['audio-player']) els['audio-player'].src = url;
+            if (els['player-area']) els['player-area'].style.display = 'block';
+
+            if (els['download-link']) {
+                els['download-link'].href = url;
+                els['download-link'].download = 'cosyvoice_' + voice + '.' + ext;
+                els['download-link'].innerHTML = ICONS.download + ' Download ' + ext.toUpperCase() + ' (' + formatFileSize(blob.size) + ')';
+            }
+
+            // Auto-play
+            if (els['audio-player']) els['audio-player'].play().catch(() => {});
+
+            // Add to history
+            addHistory({
+                voice: voice,
+                text: text,
+                blob: blob,
+                url: url,
+                format: ext,
+                mode: els['tts-mode'].value,
+                timestamp: new Date(),
+            });
         }
-
-        // Auto-play
-        if (els['audio-player']) els['audio-player'].play().catch(() => {});
-
-        // Add to history
-        addHistory({
-            voice: voice,
-            text: text,
-            blob: blob,
-            url: url,
-            format: ext,
-            mode: els['tts-mode'].value,
-            timestamp: new Date(),
-        });
 
         // Auto-roll seed
         if (!seedLocked && els['seed-dice']) els['seed-dice'].click();
+
+        // For streaming, the MediaSource pump runs asynchronously — don't
+        // reset the button here; it stays "Streaming..." until onStreamDone.
+        if (isStream) {
+            isGenerating = false;
+            return;
+        }
     } catch(e) {
         showError(els['tts-error'], 'Synthesis failed: ' + e.message);
         showToast('TTS generation failed', 'error');
@@ -1580,6 +1708,30 @@ function initResetButtons() {
 
     const splitCheck = document.getElementById('tts-split');
     if (splitCheck) splitCheck.addEventListener('change', updateFastSplitState);
+
+    // Streaming ↔ format auto-switch: enabling streaming forces mp3/opus/aac;
+    // switching format away from a streamable one disables streaming.
+    const streamCheck = document.getElementById('tts-stream');
+    const formatSelect = document.getElementById('tts-format');
+    const STREAMABLE_FORMATS = ['mp3', 'opus', 'm4a', 'aac', 'flac'];
+    if (streamCheck && formatSelect) {
+        const syncStreamable = () => {
+            if (streamCheck.checked && !STREAMABLE_FORMATS.includes(formatSelect.value)) {
+                if (!confirm('Streaming requires MP3, Opus, AAC or FLAC. Switch to MP3?')) {
+                    streamCheck.checked = false;
+                } else {
+                    formatSelect.value = 'mp3';
+                }
+            }
+        };
+        streamCheck.addEventListener('change', syncStreamable);
+        formatSelect.addEventListener('change', () => {
+            if (!STREAMABLE_FORMATS.includes(formatSelect.value)) {
+                streamCheck.checked = false;
+                showToast('Streaming disabled — format not compatible with progressive playback', 'warning');
+            }
+        });
+    }
 }
 
 // ---- Fetch Defaults ----
@@ -1605,6 +1757,42 @@ async function fetchDefaults() {
             }
         }
         els['model-threads'].value = d.default_n_threads !== undefined ? d.default_n_threads : 0;
+
+        if (d.default_dit_k_cache_type && els['model-dit-kv-k']) {
+            const kSel = els['model-dit-kv-k'];
+            for (let i = 0; i < kSel.options.length; i++) {
+                if (kSel.options[i].value === d.default_dit_k_cache_type) { kSel.selectedIndex = i; break; }
+            }
+        }
+        if (d.default_dit_v_cache_type && els['model-dit-kv-v']) {
+            const vSel = els['model-dit-kv-v'];
+            for (let i = 0; i < vSel.options.length; i++) {
+                if (vSel.options[i].value === d.default_dit_v_cache_type) { vSel.selectedIndex = i; break; }
+            }
+        }
+        // DiT defaults: 0 = auto for slots, 10× LLM max seq for cache length
+        if (d.default_dit_kv_fixed_slots !== undefined && els['model-dit-fixed-slots'])
+            els['model-dit-fixed-slots'].value = d.default_dit_kv_fixed_slots;
+        else if (els['model-dit-fixed-slots'] && !els['model-dit-fixed-slots'].value)
+            els['model-dit-fixed-slots'].value = '0';
+
+        if (d.default_dit_kv_offloadable_slots !== undefined && els['model-dit-offloadable-slots'])
+            els['model-dit-offloadable-slots'].value = d.default_dit_kv_offloadable_slots;
+        else if (els['model-dit-offloadable-slots'] && !els['model-dit-offloadable-slots'].value)
+            els['model-dit-offloadable-slots'].value = '0';
+
+        // DiT KV Cache Length: server value > 0 → use it; otherwise 10× LLM max seq
+        if (d.default_dit_kv_cache_length && els['model-dit-cache-length'])
+            els['model-dit-cache-length'].value = d.default_dit_kv_cache_length;
+        else if (els['model-dit-cache-length'] && els['model-max-llm'])
+        {
+            const llm = parseInt(els['model-max-llm'].value, 10);
+            els['model-dit-cache-length'].value = llm > 0 ? String(llm * 10) : '0';
+        }
+
+        // Chunk tokens (0 = model default)
+        if (d.chunk_tokens !== undefined && els['tts-chunk-tokens'])
+            els['tts-chunk-tokens'].value = d.chunk_tokens;
 
         if (d.temperature !== undefined) els['tts-temp'].value = r(d.temperature, 6);
         if (d.top_k !== undefined) els['tts-topk'].value = d.top_k;

@@ -1,6 +1,6 @@
 #include "cosyvoice-internal.h"
 #include "cosyvoice-model.h"
-#include "cosyvoice-llm-kv-cache.h"
+#include "cosyvoice-kv-cache.h"
 
 #include <algorithm>
 #include <span>
@@ -27,7 +27,7 @@ static void build_causal_mask(ggml_fp16_t* mask, uint32_t n_batch, uint32_t seq_
     }
 }
 
-static ggml_tensor* build_qwen2_decoder_layer(const Qwen2DecoderLayer& layer, ggml_context* ctx0, ggml_cgraph* gf, ggml_tensor* hidden_states, ggml_tensor* position_ids, cosyvoice_llm_kv_cache& kv_cache, ggml_tensor* attention_mask, float rope_theta, float rms_norm_eps, int num_attention_heads, int num_key_value_heads, int layer_idx)
+static ggml_tensor* build_qwen2_decoder_layer(const Qwen2DecoderLayer& layer, ggml_context* ctx0, ggml_cgraph* gf, ggml_tensor* hidden_states, ggml_tensor* position_ids, cosyvoice_kv_cache& kv_cache, ggml_tensor* attention_mask, float rope_theta, float rms_norm_eps, int num_attention_heads, int num_key_value_heads, int layer_idx)
 {
     auto residual = hidden_states;
     hidden_states = layer.input_layernorm.build_cgraph(ctx0, hidden_states, rms_norm_eps);
@@ -62,7 +62,7 @@ static ggml_tensor* build_qwen2_decoder_layer(const Qwen2DecoderLayer& layer, gg
     query_states = ggml_cont(ctx0, query_states);
     kv_cache.update_cache(ctx0, gf, key_states, value_states, position_ids, static_cast<int>(layer_idx));
 
-    ggml_tensor* attn_output = kv_cache.attention_forward(ctx0, gf, query_states, key_states, value_states, attention_mask, layer_idx);
+    ggml_tensor* attn_output = kv_cache.attention_forward(ctx0, query_states, key_states, value_states, attention_mask);
     attn_output = ggml_reshape_2d(
         ctx0, attn_output,
         attn_output->ne[0] * attn_output->ne[1],
@@ -99,7 +99,7 @@ bool cosyvoice_model_3::llm_prefill(
     uint32_t n_tokens
 )
 {
-    auto kv_cache = &worker->kv_cache;
+    auto kv_cache = &worker->llm_kv_cache;
     auto total_len = n_tokens + kv_cache->cur_len;
     if (total_len > shared->params.n_max_seq - 1) return false;
     if (n_tokens > shared->params.n_batch) return false;
@@ -130,7 +130,7 @@ bool cosyvoice_model_3::llm_prefill(
     auto& llm_probs = worker->llm_probs;
     if (gf && llm_input && !llm_probs
         && llm_input->type == type && n_tokens == llm_input->ne[1]
-        && kv_cache->can_reuse(true))
+        && kv_cache->can_reuse())
     {
         ggml_backend_tensor_set_async(worker->backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
         kv_cache->shift_kv_node_pos(n_tokens);
@@ -203,7 +203,7 @@ bool cosyvoice_model_3::llm_prefill(
 
 bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
 {
-    auto kv_cache = &worker->kv_cache;
+    auto kv_cache = &worker->llm_kv_cache;
     if (kv_cache->cur_len + 1 > shared->params.n_max_seq) return false;
 
     auto& position_ids = worker->position_ids;
@@ -215,7 +215,7 @@ bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
     auto& llm_probs = worker->llm_probs;
     if (gf && llm_input && llm_probs
         && llm_input->type == type && 1 == llm_input->ne[1]
-        && kv_cache->can_reuse(false))
+        && kv_cache->can_reuse())
     {
         ggml_backend_tensor_set_async(shared->op_caps.emb_cast_f32 ? worker->backend.get() : worker->cpu_backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
         kv_cache->shift_kv_node_pos(1);

@@ -27,19 +27,28 @@ extern "C" {
 // ----------------------------------------------------------------------------
 
 /**
- * @brief Supported KV-cache storage formats for the LLM module.
+ * @brief Supported KV-cache storage formats.
  */
-typedef enum cosyvoice_llm_kv_cache_type
+typedef enum cosyvoice_kv_cache_type
 {
-    COSYVOICE_LLM_KV_CACHE_TYPE_F32,   ///< Store KV cache in 32-bit floating point format.
-    COSYVOICE_LLM_KV_CACHE_TYPE_F16,   ///< Store KV cache in 16-bit floating point format.
-    COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0,  ///< Store KV cache in GGML Q8_0 quantized format.
-    COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1,  ///< Store KV cache in GGML Q5_1 quantized format.
-    COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0,  ///< Store KV cache in GGML Q5_0 quantized format.
-    COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1,  ///< Store KV cache in GGML Q4_1 quantized format.
-    COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0,  ///< Store KV cache in GGML Q4_0 quantized format.
-    COSYVOICE_LLM_KV_CACHE_TYPE_COUNT  // Sentinel value.
-} cosyvoice_llm_kv_cache_type_t;
+    COSYVOICE_KV_CACHE_TYPE_F32,   ///< Store KV cache in 32-bit floating point format.
+    COSYVOICE_KV_CACHE_TYPE_F16,   ///< Store KV cache in 16-bit floating point format.
+    COSYVOICE_KV_CACHE_TYPE_Q8_0,  ///< Store KV cache in GGML Q8_0 quantized format.
+    COSYVOICE_KV_CACHE_TYPE_Q5_1,  ///< Store KV cache in GGML Q5_1 quantized format.
+    COSYVOICE_KV_CACHE_TYPE_Q5_0,  ///< Store KV cache in GGML Q5_0 quantized format.
+    COSYVOICE_KV_CACHE_TYPE_Q4_1,  ///< Store KV cache in GGML Q4_1 quantized format.
+    COSYVOICE_KV_CACHE_TYPE_Q4_0,  ///< Store KV cache in GGML Q4_0 quantized format.
+    COSYVOICE_KV_CACHE_TYPE_COUNT  // Sentinel value.
+} cosyvoice_kv_cache_type_t, cosyvoice_llm_kv_cache_type_t;
+
+#define COSYVOICE_LLM_KV_CACHE_TYPE_F32 COSYVOICE_KV_CACHE_TYPE_F32
+#define COSYVOICE_LLM_KV_CACHE_TYPE_F16 COSYVOICE_KV_CACHE_TYPE_F16
+#define COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0 COSYVOICE_KV_CACHE_TYPE_Q8_0
+#define COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1 COSYVOICE_KV_CACHE_TYPE_Q5_1
+#define COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0 COSYVOICE_KV_CACHE_TYPE_Q5_0
+#define COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1 COSYVOICE_KV_CACHE_TYPE_Q4_1
+#define COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0 COSYVOICE_KV_CACHE_TYPE_Q4_0
+#define COSYVOICE_LLM_KV_CACHE_TYPE_COUNT COSYVOICE_KV_CACHE_TYPE_COUNT
 
 /**
  * @brief Buffer allocation strategies for inference workloads.
@@ -181,14 +190,14 @@ typedef int (*cosyvoice_sampler_ext_t)(
  *   bits 15–30 unused
  *   bit      31 separate-K/V flag (must be 1)
  *
- * When bit 31 is 0, the value is a plain `cosyvoice_llm_kv_cache_type_t`
+ * When bit 31 is 0, the value is a plain `cosyvoice_kv_cache_type_t`
  * that applies to both K and V (backward compatible).
  *
  * When the preferred K or V type is not supported by the backend, the
  * fallback type is tried first; if that also fails, auto-fallback applies.
  */
 #define COSYVOICE_MAKE_SEPARATE_KV_CACHE(k_type, v_type, fallback_type) \
-    ((cosyvoice_llm_kv_cache_type_t)((k_type) | ((v_type) << 5) | ((fallback_type) << 10) | (1U << 31)))
+    ((cosyvoice_kv_cache_type_t)((k_type) | ((v_type) << 5) | ((fallback_type) << 10) | (1U << 31)))
 
 /**
  * @brief Test whether llm_kv_cache_type is in separate-K/V mode.
@@ -198,17 +207,17 @@ typedef int (*cosyvoice_sampler_ext_t)(
 /**
  * @brief Extract the K cache type from a packed value.
  */
-#define COSYVOICE_K_CACHE_TYPE(t)          ((cosyvoice_llm_kv_cache_type_t)((t) & 0x1F))
+#define COSYVOICE_K_CACHE_TYPE(t)          ((cosyvoice_kv_cache_type_t)((t) & 0x1F))
 
 /**
  * @brief Extract the V cache type from a packed value.
  */
-#define COSYVOICE_V_CACHE_TYPE(t)          ((cosyvoice_llm_kv_cache_type_t)(((t) >> 5) & 0x1F))
+#define COSYVOICE_V_CACHE_TYPE(t)          ((cosyvoice_kv_cache_type_t)(((t) >> 5) & 0x1F))
 
 /**
  * @brief Extract the fallback cache type from a packed value.
  */
-#define COSYVOICE_KV_CACHE_FALLBACK(t)     ((cosyvoice_llm_kv_cache_type_t)(((t) >> 10) & 0x1F))
+#define COSYVOICE_KV_CACHE_FALLBACK(t)     ((cosyvoice_kv_cache_type_t)(((t) >> 10) & 0x1F))
 
 /**
  * @brief Parameters used when creating a model context.
@@ -223,20 +232,20 @@ typedef struct cosyvoice_context_params
         struct
         {
 #if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) || defined(_BYTE_ORDER) && (_BYTE_ORDER == _BIG_ENDIAN) || defined(__BIG_ENDIAN__) && !defined(__LITTLE_ENDIAN__) || defined(__ARMEB__) || defined(__MIPSEB__) || defined(__sparc__)
-            uint32_t                       llm_kv_cache_separate_buffers : 1; ///< If true, allocate separate buffers for the K and V caches in the LLM module. Ignored when `llm_kv_cache_type` is set to a unified format.
-            cosyvoice_llm_kv_cache_type_t : 16;                               ///< Unused bits.
-            cosyvoice_llm_kv_cache_type_t  llm_kv_cache_fallback : 5;         ///< Fallback type when the preferred K or V type is unsupported.
-            cosyvoice_llm_kv_cache_type_t  llm_v_cache_type : 5;              ///< The data type of the V cache in the LLM module.
-            cosyvoice_llm_kv_cache_type_t  llm_k_cache_type : 5;              ///< The data type of the K cache in the LLM module.
+            uint32_t                    llm_kv_cache_separate_buffers : 1; ///< If true, allocate separate buffers for the K and V caches in the LLM module. Ignored when `llm_kv_cache_type` is set to a unified format.
+            cosyvoice_kv_cache_type_t : 16;                               ///< Unused bits.
+            cosyvoice_kv_cache_type_t   llm_kv_cache_fallback : 5;         ///< Fallback type when the preferred K or V type is unsupported.
+            cosyvoice_kv_cache_type_t   llm_v_cache_type : 5;              ///< The data type of the V cache in the LLM module.
+            cosyvoice_kv_cache_type_t   llm_k_cache_type : 5;              ///< The data type of the K cache in the LLM module.
 #else
-            cosyvoice_llm_kv_cache_type_t  llm_k_cache_type : 5;              ///< The data type of the K cache in the LLM module.
-            cosyvoice_llm_kv_cache_type_t  llm_v_cache_type : 5;              ///< The data type of the V cache in the LLM module.
-            cosyvoice_llm_kv_cache_type_t  llm_kv_cache_fallback : 5;         ///< Fallback type when the preferred K or V type is unsupported.
-            cosyvoice_llm_kv_cache_type_t : 16;                               ///< Unused bits.
-            uint32_t                       llm_kv_cache_separate_buffers : 1; ///< If true, allocate separate buffers for the K and V caches in the LLM module. Ignored when `llm_kv_cache_type` is set to a unified format.
+            cosyvoice_kv_cache_type_t   llm_k_cache_type : 5;              ///< The data type of the K cache in the LLM module.
+            cosyvoice_kv_cache_type_t   llm_v_cache_type : 5;              ///< The data type of the V cache in the LLM module.
+            cosyvoice_kv_cache_type_t   llm_kv_cache_fallback : 5;         ///< Fallback type when the preferred K or V type is unsupported.
+            cosyvoice_kv_cache_type_t : 16;                               ///< Unused bits.
+            uint32_t                    llm_kv_cache_separate_buffers : 1; ///< If true, allocate separate buffers for the K and V caches in the LLM module. Ignored when `llm_kv_cache_type` is set to a unified format.
 #endif
         };
-        cosyvoice_llm_kv_cache_type_t      llm_kv_cache_type;                 ///< The data type of the KV cache in the LLM module.
+        cosyvoice_kv_cache_type_t       llm_kv_cache_type;                 ///< The data type of the KV cache in the LLM module.
     };
     bool                                llm_allow_kv_cache_fallback; ///< If true, fall back to a Flash Attention-compatible KV cache type when the requested one is unsupported.
     cosyvoice_inference_buffer_policy_t inference_buffer_policy;     ///< Controls how inference buffers are allocated and reused, which affects performance and memory usage.
@@ -261,10 +270,70 @@ typedef struct cosyvoice_context_params_v2
     uint32_t n_workers;                      ///< Number of workers to use for inference.
 } cosyvoice_context_params_v2_t;
 
+/**
+ * @brief Extended context parameters that add DiT KV cache configuration options.
+ */
+typedef struct cosyvoice_context_params_v3
+{
+    cosyvoice_context_params_v2_t base_params; ///< V2 base parameters.
+
+    union
+    {
+        struct
+        {
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) || defined(_BYTE_ORDER) && (_BYTE_ORDER == _BIG_ENDIAN) || defined(__BIG_ENDIAN__) && !defined(__LITTLE_ENDIAN__) || defined(__ARMEB__) || defined(__MIPSEB__) || defined(__sparc__)
+            uint32_t                  dit_kv_cache_separate_buffers : 1; ///< If true, allocate separate buffers for the K and V caches in the DiT module. Ignored when `dit_kv_cache_type` is set to a unified format.
+            cosyvoice_kv_cache_type_t : 16;                              ///< Unused bits.
+            cosyvoice_kv_cache_type_t dit_kv_cache_fallback : 5;         ///< Fallback type when the preferred K or V type is unsupported.
+            cosyvoice_kv_cache_type_t dit_v_cache_type : 5;              ///< The data type of the V cache in the DiT module.
+            cosyvoice_kv_cache_type_t dit_k_cache_type : 5;              ///< The data type of the K cache in the DiT module.
+#else
+            cosyvoice_kv_cache_type_t dit_k_cache_type : 5;              ///< The data type of the K cache in the DiT module.
+            cosyvoice_kv_cache_type_t dit_v_cache_type : 5;              ///< The data type of the V cache in the DiT module.
+            cosyvoice_kv_cache_type_t dit_kv_cache_fallback : 5;         ///< Fallback type when the preferred K or V type is unsupported.
+            cosyvoice_kv_cache_type_t : 16;                              ///< Unused bits.
+            uint32_t                  dit_kv_cache_separate_buffers : 1; ///< If true, allocate separate buffers for the K and V caches in the DiT module. Ignored when `dit_kv_cache_type` is set to a unified format.
+#endif
+        };
+        cosyvoice_kv_cache_type_t dit_kv_cache_type;                     ///< The data type of the KV cache in the DiT module.
+    };
+    bool     dit_allow_kv_cache_fallback; ///< If true, fall back to a Flash Attention-compatible KV cache type when the requested one is unsupported.
+    uint32_t dit_kv_fixed_slots;          ///< Number of fixed (non-offloadable) DiT KV slots.
+    uint32_t dit_kv_offloadable_slots;    ///< Number of offloadable DiT KV slots.
+    uint32_t dit_kv_cache_length;         ///< Maximum sequence length for the DiT KV cache. 0 to use default (n_max_seq * 10).
+} cosyvoice_context_params_v3_t;
 #ifdef __cplusplus
 struct cosyvoice_context_params_v2_cpp : cosyvoice_context_params_t
 {
     uint32_t n_workers; ///< Number of workers to use for inference.
+};
+
+struct cosyvoice_context_params_v3_cpp : cosyvoice_context_params_v2_cpp
+{
+    union
+    {
+        struct
+        {
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) || defined(_BYTE_ORDER) && (_BYTE_ORDER == _BIG_ENDIAN) || defined(__BIG_ENDIAN__) && !defined(__LITTLE_ENDIAN__) || defined(__ARMEB__) || defined(__MIPSEB__) || defined(__sparc__)
+            uint32_t                  dit_kv_cache_separate_buffers : 1; ///< If true, allocate separate buffers for the K and V caches in the DiT module. Ignored when `dit_kv_cache_type` is set to a unified format.
+            cosyvoice_kv_cache_type_t : 16;                              ///< Unused bits.
+            cosyvoice_kv_cache_type_t dit_kv_cache_fallback : 5;         ///< Fallback type when the preferred K or V type is unsupported.
+            cosyvoice_kv_cache_type_t dit_v_cache_type : 5;              ///< The data type of the V cache in the DiT module.
+            cosyvoice_kv_cache_type_t dit_k_cache_type : 5;              ///< The data type of the K cache in the DiT module.
+#else
+            cosyvoice_kv_cache_type_t dit_k_cache_type : 5;              ///< The data type of the K cache in the DiT module.
+            cosyvoice_kv_cache_type_t dit_v_cache_type : 5;              ///< The data type of the V cache in the DiT module.
+            cosyvoice_kv_cache_type_t dit_kv_cache_fallback : 5;         ///< Fallback type when the preferred K or V type is unsupported.
+            cosyvoice_kv_cache_type_t : 16;                              ///< Unused bits.
+            uint32_t                  dit_kv_cache_separate_buffers : 1; ///< If true, allocate separate buffers for the K and V caches in the DiT module. Ignored when `dit_kv_cache_type` is set to a unified format.
+#endif
+        };
+        cosyvoice_kv_cache_type_t dit_kv_cache_type;                     ///< The data type of the KV cache in the DiT module.
+    };
+    bool     dit_allow_kv_cache_fallback; ///< If true, fall back to a Flash Attention-compatible KV cache type when the requested one is unsupported.
+    uint32_t dit_kv_fixed_slots;          ///< Number of fixed (non-offloadable) DiT KV slots.
+    uint32_t dit_kv_offloadable_slots;    ///< Number of offloadable DiT KV slots.
+    uint32_t dit_kv_cache_length;          ///< Maximum sequence length for the DiT KV cache. 0 to use default (n_max_seq * 10).
 };
 #endif
 
@@ -322,6 +391,14 @@ COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_with_params(
 COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_with_params_v2(
     const char*                          filename,
     const cosyvoice_context_params_v2_t* params
+);
+
+/**
+ * @brief Load a model context from a GGUF file using V3 context parameters with DiT KV cache configuration.
+ */
+COSYVOICE_API cosyvoice_context_t cosyvoice_load_from_file_with_params_v3(
+    const char*                          filename,
+    const cosyvoice_context_params_v3_t* params
 );
 
 /**
@@ -606,6 +683,62 @@ COSYVOICE_API bool cosyvoice_tts_cross_lingual(
     const char*                    text,
     float                          speed,
     cosyvoice_generated_speech_ptr result
+);
+
+/**
+ * @brief Callback invoked by the streaming TTS API for each generated audio chunk.
+ * @param audio PCM samples in 32-bit floating point format, 1 channel.
+ * @param n_samples Number of samples in this chunk.
+ * @param user_data Opaque context passed when registering the callback.
+ * @return True to continue streaming, false to abort the synthesis.
+ */
+typedef bool (*cosyvoice_tts_audio_callback_t)(const float* audio, uint32_t n_samples, void* user_data);
+
+/**
+ * @brief Generate speech with streaming output, delivering audio chunks via a callback.
+ * @details The function synthesizes speech incrementally and invokes @p callback for
+ *          each chunk as it becomes available. The callback receives the PCM data
+ *          sequentially; the previous chunk's data is no longer valid after the
+ *          callback returns.
+ * @param ctx The TTS context.
+ * @param text Input text to synthesize.
+ * @param instruction Optional instruction (used in instruct mode). Pass NULL for zero-shot or cross-lingual.
+ * @param speed Speed multiplier (1.0 = normal).
+ * @param callback Callback receiving each audio chunk.
+ * @param user_data Opaque context passed to @p callback.
+ * @return True on success, false on failure.
+ */
+COSYVOICE_API bool cosyvoice_tts_zero_shot_stream(
+    cosyvoice_tts_context_t        ctx,
+    const char*                    text,
+    float                          speed,
+    cosyvoice_tts_audio_callback_t callback,
+    void*                          user_data
+);
+
+/**
+ * @brief Generate speech with streaming output in instruct mode.
+ * @see cosyvoice_tts_zero_shot_stream
+ */
+COSYVOICE_API bool cosyvoice_tts_instruct_stream(
+    cosyvoice_tts_context_t        ctx,
+    const char*                    text,
+    const char*                    instruction,
+    float                          speed,
+    cosyvoice_tts_audio_callback_t callback,
+    void*                          user_data
+);
+
+/**
+ * @brief Generate speech with streaming output in cross-lingual mode.
+ * @see cosyvoice_tts_zero_shot_stream
+ */
+COSYVOICE_API bool cosyvoice_tts_cross_lingual_stream(
+    cosyvoice_tts_context_t        ctx,
+    const char*                    text,
+    float                          speed,
+    cosyvoice_tts_audio_callback_t callback,
+    void*                          user_data
 );
 
 // ----------------------------------------------------------------------------

@@ -15,6 +15,8 @@
 
 本仓库仅提供独立社区实现，不包含任何官方支持承诺。
 
+支持 **zero-shot**、**instruct** 和 **cross-lingual** 三种 TTS 模式，同时提供同步输出与**流式输出**（streaming）。前端流水线（speech tokenizer + speaker embedding）可处理参考音频，也可复用预编码的 `prompt_speech` 跳过 ONNX 前端以提升性能。
+
 本项目提供：
 - 核心 C/C++ 推理库（`cosyvoice`）
 - 命令行合成工具（`cosyvoice-cli`）
@@ -51,6 +53,10 @@
 | **交互式 REPL** | CLI 交互模式，支持 /play、/save、/list、/query、/seed 等斜杠命令 |
 | **并发服务** | Server 的 `--concurrency` 参数，支持并行请求处理 |
 | **模型量化** | 内置 `quantize` 工具，支持 Q2_K 到 F16 多种量化格式 |
+| **流式 TTS** | 实时语音生成，通过回调逐段交付音频——在完整语句尚未合成完毕前即可开始播放 |
+| **DiT KV 缓存** | 在流式推理过程中，跨扩散步复用注意力 KV 缓存，避免冗余计算——可配置固定（设备内存）、可卸载（CPU）、不缓存三种槽位类型 |
+| **Flash Attention** | LLM 与 Flow 模块均支持 flash attention（`--llm-flash-attn`、`--flow-flash-attn`），后端支持时可降低显存并加速推理 |
+| **分块 Token 控制** | 通过 `--chunk-tokens` 调节流式推理的延迟与开销平衡——较小分块降低首块延迟，较大分块降低 RTF |
 | **KV Cache 量化** | 通过 `--llm-kv-cache-type` 降低 LLM 内存占用（f32 / f16 / q8_0 / q5_1 / q4_0 / ...）。支持非对称量化，K 和 V 可独立指定类型（如 `k=q8_0,v=q4_0`）。 |
 | **Prompt Speech 复用** | 一次编码参考音色，后续合成直接复用，无需再跑 ONNX |
 | **音频后端可切换** | 可选 MINIAUDIO（默认）或 FFMPEG，支持 WAV、MP3、AAC、FLAC、OPUS、M4A |
@@ -59,6 +65,41 @@
 | **文本拆分与淡入** | 长文本智能拆分与可配置的输出淡入后处理 |
 | **多后端支持** | CPU、CUDA、Metal、SYCL（见[后端测试情况](#后端测试情况)） |
 | **跨平台** | Windows (x64)、Linux (x86_64)、macOS (arm64) — 均在 CI 中测试 |
+
+## 流式 TTS 与 DiT KV 缓存
+
+流式 TTS 在合成过程中通过回调函数逐段交付音频，无需等待完整语句生成完毕即可开始播放，从而实现实时播放与更低的主观延迟。
+
+流式流水线引入了 **DiT KV 缓存** 以避免冗余计算。非流式推理时，DiT 模块运行 10 步扩散，每步对完整音频序列计算自注意力——总共会执行 10 次注意力重算。KV 缓存跨扩散步存储中间 key/value 张量，使每个位置只需计算一次。
+
+### 槽位组织
+
+DiT KV 缓存按 **槽位（slot）** 组织，每个槽位对应一个扩散步的 KV 缓存。默认 10 个扩散步意味着最多 10 个槽位。
+
+槽位分为三类：
+
+| 类别 | 内存位置 | 行为 |
+|----------|--------|------|
+| **固定** | 常驻设备（GPU） | 最快，从不卸载 |
+| **可卸载** | 不使用时卸载到 CPU | 节省设备显存，但增加传输开销 |
+| **不缓存** | 不存储 | 每步全量重算注意力，无额外内存开销 |
+
+总槽位数 = `固定 + 可卸载`。剩余步（10 − 总槽位）使用全量重算。
+
+KV 缓存占用较大，因此默认 0 个槽位（全部 10 步全量重算）。启用缓存后，若序列长度超过配置的缓存长度，会丢弃部分位置——推理可正常继续，但输出质量可能下降。
+
+> DiT KV 缓存**仅在流式 TTS 时使用**；非流式调用始终执行全量重算，忽略此缓存。
+
+### 配置
+
+DiT KV 缓存参数通过 `cosyvoice_context_params_v3_t`（C API）或 CLI/server 的 `--dit-kv-*` 参数配置：
+
+- `--dit-kv-type` / `dit_kv_cache_type`：DiT KV 缓存存储格式（f32/f16/q8_0/...）。
+- `--dit-kv-fixed-slots` / `dit_kv_fixed_slots`：常驻设备内存的槽位数。
+- `--dit-kv-offloadable-slots` / `dit_kv_offloadable_slots`：可卸载到 CPU 的槽位数。
+- `--dit-kv-cache-length` / `dit_kv_cache_length`：缓存保留的最大序列位置数。
+
+流式输出通过 `--stream` 标志启用。分块粒度由 `--chunk-tokens` 控制（默认 128 tokens/块）。
 
 ## 预转换模型
 

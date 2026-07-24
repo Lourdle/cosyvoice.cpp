@@ -24,7 +24,7 @@ def guess_output_path(response_format: str) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Call cosyvoice-server via OpenAI SDK and save speech audio."
+        description="Call cosyvoice-server via OpenAI API and save/play speech audio."
     )
     parser.add_argument(
         "--base-url",
@@ -60,6 +60,9 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional max_token_text_ratio extension (>= 0)",
     )
+    parser.add_argument("--stream", action="store_true", help="Enable streaming TTS (play while receiving if format is wav)")
+    parser.add_argument("--chunk-tokens", type=int, default=None, help="Tokens per streaming chunk")
+    parser.add_argument("--no-play", action="store_true", help="Disable real-time playback even with --stream")
     parser.add_argument(
         "--output",
         default="",
@@ -107,6 +110,9 @@ def validate_args(args: argparse.Namespace) -> int:
     if args.max_token_text_ratio is not None and args.max_token_text_ratio < 0:
         print("Error: --max-token-text-ratio must be >= 0", file=sys.stderr)
         return 2
+    if args.chunk_tokens is not None and args.chunk_tokens < 0:
+        print("Error: --chunk-tokens must be >= 0", file=sys.stderr)
+        return 2
     if (
         args.min_token_text_ratio is not None
         and args.max_token_text_ratio is not None
@@ -116,6 +122,76 @@ def validate_args(args: argparse.Namespace) -> int:
         return 2
 
     return 0
+
+
+def request_and_stream(base_url, api_key, body, response_format, output_path, play, timeout):
+    """Send streaming TTS request, play chunks in real-time, and save to file."""
+    import requests
+
+    url = base_url + "/audio/speech"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    resp = requests.post(url, headers=headers, json=body, stream=True, timeout=timeout)
+    resp.raise_for_status()
+
+    _play_stream = None
+    _pyaudio_instance = None
+    _all_data = bytearray()
+    _wav_header_buf = bytearray()
+
+    try:
+        _use_pyaudio = play and response_format == "wav"
+        if _use_pyaudio:
+            try:
+                import pyaudio as _pa
+            except ImportError:
+                print("Warning: pyaudio not installed. Install with: pip install pyaudio", file=sys.stderr)
+                _use_pyaudio = False
+            else:
+                _pyaudio_instance = _pa.PyAudio()
+
+        for chunk in resp.iter_content(chunk_size=None):
+            if not chunk:
+                continue
+            _all_data.extend(chunk)
+
+            if _use_pyaudio:
+                if _play_stream is None:
+                    _wav_header_buf.extend(chunk)
+                    if len(_wav_header_buf) >= 44:
+                        import struct
+                        channels = struct.unpack_from('<H', bytes(_wav_header_buf), 22)[0]
+                        sample_rate = struct.unpack_from('<I', bytes(_wav_header_buf), 24)[0]
+                        bps = struct.unpack_from('<H', bytes(_wav_header_buf), 34)[0]
+                        sw = bps // 8
+                        fmt = _pyaudio_instance.get_format_from_width(sw)
+                        _play_stream = _pyaudio_instance.open(
+                            format=fmt, channels=channels, rate=sample_rate, output=True
+                        )
+                        if len(_wav_header_buf) > 44:
+                            _play_stream.write(bytes(_wav_header_buf[44:]))
+                else:
+                    _play_stream.write(chunk)
+
+        output_path.write_bytes(bytes(_all_data))
+        print(f"Saved {len(_all_data)} bytes to {output_path}")
+    finally:
+        if _play_stream:
+            _play_stream.stop_stream()
+            _play_stream.close()
+        if _pyaudio_instance:
+            _pyaudio_instance.terminate()
+
+
+def request_and_save(client, kwargs, response_format, output_path):
+    """Non-streaming request via OpenAI SDK."""
+    audio = client.audio.speech.create(**kwargs)
+    audio_bytes = audio.read()
+    output_path.write_bytes(audio_bytes)
+    return len(audio_bytes)
 
 
 def main() -> int:
@@ -165,9 +241,13 @@ def main() -> int:
         extension_body["min_token_text_ratio"] = args.min_token_text_ratio
     if args.max_token_text_ratio is not None:
         extension_body["max_token_text_ratio"] = args.max_token_text_ratio
+    if args.stream:
+        extension_body["stream"] = True
+    if args.chunk_tokens is not None:
+        extension_body["chunk_tokens"] = args.chunk_tokens
     if extension_body:
         request_kwargs["extra_body"] = extension_body
-    # Determine response_format: explicit arg > infer from output extension > default 'wav'
+
     response_format = args.response_format
     if response_format is None:
         if args.output:
@@ -185,16 +265,11 @@ def main() -> int:
     output_path = pathlib.Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    play = args.stream and not args.no_play
+
     total_bytes = 0
     saved_files = []
     for i in range(args.requests):
-        try:
-            audio = client.audio.speech.create(**request_kwargs)
-            audio_bytes = audio.read()
-        except Exception as exc:
-            print(f"Request failed (#{i + 1}): {exc}", file=sys.stderr)
-            return 1
-
         if args.requests == 1:
             curr_path = output_path
         else:
@@ -202,11 +277,29 @@ def main() -> int:
                 f"{output_path.stem}_{i + 1:03d}{output_path.suffix}"
             )
 
-        curr_path.write_bytes(audio_bytes)
-        total_bytes += len(audio_bytes)
-        saved_files.append(curr_path)
-
-        print(f"Saved {len(audio_bytes)} bytes to {curr_path}")
+        try:
+            if args.stream:
+                # Build the full request body (kwargs + extra_body)
+                body = {k: v for k, v in request_kwargs.items() if k != "extra_body"}
+                if "extra_body" in request_kwargs:
+                    body.update(request_kwargs["extra_body"])
+                request_and_stream(
+                    base_url=base_url,
+                    api_key=api_key,
+                    body=body,
+                    response_format=response_format,
+                    output_path=curr_path,
+                    play=play,
+                    timeout=args.timeout,
+                )
+            else:
+                total = request_and_save(client, request_kwargs, response_format, curr_path)
+                total_bytes += total
+                saved_files.append(curr_path)
+                print(f"Saved {total} bytes to {curr_path}")
+        except Exception as exc:
+            print(f"Request failed (#{i + 1}): {exc}", file=sys.stderr)
+            return 1
 
     if args.requests > 1:
         print(f"Saved {len(saved_files)} files, total {total_bytes} bytes")

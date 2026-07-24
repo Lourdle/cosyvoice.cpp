@@ -487,6 +487,123 @@ std::string supported_response_formats_to_string(const server_runtime& runtime)
 }
 
 // ---------------------------------------------------------------------------
+// Streaming audio helpers
+// ---------------------------------------------------------------------------
+
+bool build_wav_header(std::string* output, uint32_t sample_rate)
+{
+    constexpr uint16_t num_channels   = 1;
+    constexpr uint16_t bits_per_sample = 16;
+    const uint32_t byte_rate  = sample_rate * num_channels * bits_per_sample / 8;
+    const uint16_t block_align = num_channels * bits_per_sample / 8;
+
+    // Use 0x7FFFFFFF as the data size placeholder (most players treat
+    // this as "until EOF", which is correct for streaming).
+    const uint32_t subchunk2_size = 0x7FFFFFFF;
+    const uint32_t chunk_size = 4 + (8 + 16) + (8 + subchunk2_size);
+
+    output->clear();
+    output->reserve(44);
+
+    // RIFF header
+    output->append("RIFF", 4);
+    output->append(reinterpret_cast<const char*>(&chunk_size), 4);
+    output->append("WAVE", 4);
+
+    // fmt subchunk
+    output->append("fmt ", 4);
+    const uint32_t fmt_subchunk_size = 16;
+    output->append(reinterpret_cast<const char*>(&fmt_subchunk_size), 4);
+    const uint16_t audio_format = 1; // PCM
+    output->append(reinterpret_cast<const char*>(&audio_format), 2);
+    output->append(reinterpret_cast<const char*>(&num_channels), 2);
+    output->append(reinterpret_cast<const char*>(&sample_rate), 4);
+    output->append(reinterpret_cast<const char*>(&byte_rate), 4);
+    output->append(reinterpret_cast<const char*>(&block_align), 2);
+    output->append(reinterpret_cast<const char*>(&bits_per_sample), 2);
+
+    // data subchunk header
+    output->append("data", 4);
+    output->append(reinterpret_cast<const char*>(&subchunk2_size), 4);
+
+    return true;
+}
+
+bool stream_audio_chunk(streaming_callback_context* ctx, const float* pcm, uint32_t n_samples)
+{
+    if (!ctx || !ctx->sink || !pcm || n_samples == 0)
+        return false;
+
+    constexpr size_t kBytesPerSample = sizeof(int16_t);
+    const size_t chunk_bytes = static_cast<size_t>(n_samples) * kBytesPerSample;
+
+    // PCM or WAV: convert float -> int16 and write raw PCM16
+    if (ctx->format == response_audio_format::pcm ||
+        ctx->format == response_audio_format::wav)
+    {
+        // WAV format: PCM16 data written after the header already sent
+        std::string buf;
+        buf.resize(chunk_bytes);
+        for (uint32_t i = 0; i < n_samples; ++i)
+        {
+            const auto sample = float_to_pcm16(pcm[i]);
+            buf[2 * i]     = static_cast<char>(sample & 0xFF);
+            buf[2 * i + 1] = static_cast<char>((sample >> 8) & 0xFF);
+        }
+
+        if (!ctx->sink->write(buf.data(), buf.size()))
+        {
+            if (ctx->aborted) *ctx->aborted = true;
+            return false;
+        }
+        return true;
+    }
+
+    // MP3, OPUS, AAC, FLAC, M4A: use the audio encoder
+#ifndef COSYVOICE_NO_AUDIO
+    if (ctx->encoder)
+    {
+        auto enc = static_cast<cosyvoice_audio_encoder_t>(ctx->encoder);
+        cosyvoice_audio_encoding_format_t enc_format;
+        switch (ctx->format)
+        {
+        case response_audio_format::mp3:  enc_format = COSYVOICE_AUDIO_ENCODING_FORMAT_MP3;  break;
+        case response_audio_format::opus: enc_format = COSYVOICE_AUDIO_ENCODING_FORMAT_OPUS; break;
+        case response_audio_format::aac:  enc_format = COSYVOICE_AUDIO_ENCODING_FORMAT_AAC;  break;
+        case response_audio_format::m4a:  enc_format = COSYVOICE_AUDIO_ENCODING_FORMAT_M4A;  break;
+        case response_audio_format::flac: enc_format = COSYVOICE_AUDIO_ENCODING_FORMAT_FLAC; break;
+        default:
+            if (ctx->error_out) *ctx->error_out = "Unsupported format for streaming.";
+            return false;
+        }
+
+        if (!cosyvoice_audio_encoder_encode(enc, pcm, n_samples, enc_format))
+        {
+            if (ctx->error_out) *ctx->error_out = "Audio encoder failed on streaming chunk.";
+            return false;
+        }
+
+        const uint8_t* encoded = nullptr;
+        uint32_t encoded_length = 0;
+        cosyvoice_audio_encoder_get_encoded_data(enc, &encoded, &encoded_length);
+
+        if (encoded && encoded_length > 0)
+        {
+            if (!ctx->sink->write(reinterpret_cast<const char*>(encoded), encoded_length))
+            {
+                if (ctx->aborted) *ctx->aborted = true;
+                return false;
+            }
+        }
+        return true;
+    }
+#endif
+
+    if (ctx->error_out) *ctx->error_out = "No encoder available for this format.";
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 // String join
 // ---------------------------------------------------------------------------
 

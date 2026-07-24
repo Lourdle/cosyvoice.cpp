@@ -1,7 +1,8 @@
 #include "cosyvoice-model.h"
 #include "cosyvoice-loader.h"
-#include "cosyvoice-llm-kv-cache.h"
+#include "cosyvoice-kv-cache.h"
 
+#include <tuple>
 #include <algorithm>
 #include <cstring>
 #include <limits>
@@ -449,32 +450,32 @@ void CosyVoice3LM::OnLoad(const gguf_loader& loader, const std::string& prefix, 
     }
 }
 
-static ggml_type cosyvoice_llm_kv_cache_type_to_ggml(cosyvoice_llm_kv_cache_type_t t)
+static ggml_type cosyvoice_kv_cache_type_to_ggml(cosyvoice_kv_cache_type_t t)
 {
     switch (t)
     {
-    case COSYVOICE_LLM_KV_CACHE_TYPE_F32: return GGML_TYPE_F32;
-    case COSYVOICE_LLM_KV_CACHE_TYPE_F16: return GGML_TYPE_F16;
-    case COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0: return GGML_TYPE_Q8_0;
-    case COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1: return GGML_TYPE_Q5_1;
-    case COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0: return GGML_TYPE_Q5_0;
-    case COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1: return GGML_TYPE_Q4_1;
-    case COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0: return GGML_TYPE_Q4_0;
+    case COSYVOICE_KV_CACHE_TYPE_F32: return GGML_TYPE_F32;
+    case COSYVOICE_KV_CACHE_TYPE_F16: return GGML_TYPE_F16;
+    case COSYVOICE_KV_CACHE_TYPE_Q8_0: return GGML_TYPE_Q8_0;
+    case COSYVOICE_KV_CACHE_TYPE_Q5_1: return GGML_TYPE_Q5_1;
+    case COSYVOICE_KV_CACHE_TYPE_Q5_0: return GGML_TYPE_Q5_0;
+    case COSYVOICE_KV_CACHE_TYPE_Q4_1: return GGML_TYPE_Q4_1;
+    case COSYVOICE_KV_CACHE_TYPE_Q4_0: return GGML_TYPE_Q4_0;
     default: GGML_ABORT("unexpected kv cache type");
     }
 }
 
-static cosyvoice_llm_kv_cache_type_t cosyvoice_ggml_to_llm_kv_cache_type(ggml_type t)
+static cosyvoice_kv_cache_type_t cosyvoice_ggml_to_kv_cache_type(ggml_type t)
 {
     switch (t)
     {
-    case GGML_TYPE_F32: return COSYVOICE_LLM_KV_CACHE_TYPE_F32;
-    case GGML_TYPE_F16: return COSYVOICE_LLM_KV_CACHE_TYPE_F16;
-    case GGML_TYPE_Q8_0: return COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0;
-    case GGML_TYPE_Q5_1: return COSYVOICE_LLM_KV_CACHE_TYPE_Q5_1;
-    case GGML_TYPE_Q5_0: return COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0;
-    case GGML_TYPE_Q4_1: return COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1;
-    case GGML_TYPE_Q4_0: return COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0;
+    case GGML_TYPE_F32: return COSYVOICE_KV_CACHE_TYPE_F32;
+    case GGML_TYPE_F16: return COSYVOICE_KV_CACHE_TYPE_F16;
+    case GGML_TYPE_Q8_0: return COSYVOICE_KV_CACHE_TYPE_Q8_0;
+    case GGML_TYPE_Q5_1: return COSYVOICE_KV_CACHE_TYPE_Q5_1;
+    case GGML_TYPE_Q5_0: return COSYVOICE_KV_CACHE_TYPE_Q5_0;
+    case GGML_TYPE_Q4_1: return COSYVOICE_KV_CACHE_TYPE_Q4_1;
+    case GGML_TYPE_Q4_0: return COSYVOICE_KV_CACHE_TYPE_Q4_0;
     default: GGML_ABORT("unexpected ggml type for kv cache");
     }
 }
@@ -493,11 +494,219 @@ static ggml_type cosyvoice_get_kv_fallback_type(ggml_type t)
     }
 }
 
+union kv_cache_type_union
+{
+    struct
+    {
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) || defined(_BYTE_ORDER) && (_BYTE_ORDER == _BIG_ENDIAN) || defined(__BIG_ENDIAN__) && !defined(__LITTLE_ENDIAN__) || defined(__ARMEB__) || defined(__MIPSEB__) || defined(__sparc__)
+        uint32_t                    kv_cache_separate_buffers : 1;
+        cosyvoice_kv_cache_type_t : 16;
+        cosyvoice_kv_cache_type_t   kv_cache_fallback : 5;
+        cosyvoice_kv_cache_type_t   v_cache_type : 5;
+        cosyvoice_kv_cache_type_t   k_cache_type : 5;
+#else
+        cosyvoice_kv_cache_type_t   k_cache_type : 5;
+        cosyvoice_kv_cache_type_t   v_cache_type : 5;
+        cosyvoice_kv_cache_type_t   kv_cache_fallback : 5;
+        cosyvoice_kv_cache_type_t : 16;
+        uint32_t                    kv_cache_separate_buffers : 1;
+#endif
+    };
+    cosyvoice_kv_cache_type_t       kv_cache_type;
+};
+
+static std::tuple<ggml_type, ggml_type> cosyvoice_check_kv_cache_types(
+    ggml_context* ctx, ggml_backend_t backend,
+    bool& fattn, int num_attn_heads, int num_kv_heads,
+    const Linear& q_proj, const Linear& k_proj, const Linear& v_proj,
+    bool kv_fallback, kv_cache_type_union& kv_type_union)
+{
+    ggml_type k_type, v_type;
+
+    if (fattn)
+    {
+        auto fattn_check = [&](ggml_type check_k, ggml_type check_v) -> bool
+        {
+            auto q = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, q_proj.weight->ne[1] / num_attn_heads, 1, num_attn_heads);
+            auto k = ggml_new_tensor_3d(ctx, check_k, k_proj.weight->ne[1] / num_kv_heads, 1, num_kv_heads);
+            auto v = ggml_new_tensor_3d(ctx, check_v, v_proj.weight->ne[1] / num_kv_heads, 1, num_kv_heads);
+            auto o = ggml_flash_attn_ext(ctx, q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
+            return ggml_backend_supports_op(backend, o);
+        };
+
+        fattn = fattn_check(GGML_TYPE_F32, GGML_TYPE_F32);
+        if (fattn)
+        {
+            if (kv_fallback)
+            {
+                ggml_type cur_type;
+
+                do
+                {
+                    if (kv_type_union.kv_cache_separate_buffers)
+                    {
+                        if (k_type = cosyvoice_kv_cache_type_to_ggml(kv_type_union.k_cache_type),
+                            v_type = cosyvoice_kv_cache_type_to_ggml(kv_type_union.v_cache_type);
+                            fattn_check(k_type, v_type))
+                        {
+                            kv_type_union.kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+                                kv_type_union.k_cache_type,
+                                kv_type_union.v_cache_type,
+                                kv_type_union.v_cache_type);
+                            break;
+                        }
+
+                        cur_type = cosyvoice_kv_cache_type_to_ggml(kv_type_union.kv_cache_fallback);
+                    }
+                    else
+                        cur_type = cosyvoice_kv_cache_type_to_ggml(kv_type_union.kv_cache_type);
+
+                    do
+                    {
+                        if (fattn_check(cur_type, cur_type))
+                        {
+                            k_type = cur_type;
+                            v_type = cur_type;
+                            kv_type_union.kv_cache_type = cosyvoice_ggml_to_kv_cache_type(cur_type);
+                            break;
+                        }
+
+                        cur_type = cosyvoice_get_kv_fallback_type(cur_type);
+                    } while (cur_type != GGML_TYPE_F32);
+
+                    if (kv_type_union.kv_cache_separate_buffers)
+                        kv_type_union.kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+                            cosyvoice_ggml_to_kv_cache_type(k_type),
+                            cosyvoice_ggml_to_kv_cache_type(v_type),
+                            cosyvoice_ggml_to_kv_cache_type(v_type));
+                } while (false);
+            }
+            else if (kv_type_union.kv_cache_separate_buffers)
+            {
+                k_type = cosyvoice_kv_cache_type_to_ggml(kv_type_union.k_cache_type);
+                v_type = cosyvoice_kv_cache_type_to_ggml(kv_type_union.v_cache_type);
+                fattn = fattn_check(k_type, v_type);
+                if (fattn)
+                    kv_type_union.kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+                        kv_type_union.k_cache_type,
+                        kv_type_union.v_cache_type,
+                        kv_type_union.v_cache_type);
+            }
+            else
+            {
+                k_type = cosyvoice_kv_cache_type_to_ggml(kv_type_union.kv_cache_type);
+                v_type = k_type;
+                fattn = fattn_check(k_type, v_type);
+            }
+        }
+    }
+
+    if (!fattn)
+    {
+        ggml_type cur_type;
+        auto attn_check = [&](ggml_type check_k, ggml_type check_v) -> bool
+        {
+            if (ggml_is_quantized(check_v)) return false;
+            auto q = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, q_proj.weight->ne[1] / num_attn_heads, 1, num_attn_heads);
+            auto k = ggml_new_tensor_3d(ctx, check_k, k_proj.weight->ne[1] / num_kv_heads, 1, num_kv_heads);
+            auto v = ggml_new_tensor_3d(ctx, check_v, 1, v_proj.weight->ne[1] / num_kv_heads, num_kv_heads);
+            auto s = ggml_mul_mat(ctx, k, q);
+            auto o = ggml_mul_mat(ctx, v, s);
+            return ggml_backend_supports_op(backend, o) && ggml_backend_supports_op(backend, s);
+        };
+
+        do
+        {
+            if (kv_type_union.kv_cache_separate_buffers)
+            {
+                if (k_type = cosyvoice_kv_cache_type_to_ggml(kv_type_union.k_cache_type),
+                    v_type = cosyvoice_kv_cache_type_to_ggml(kv_type_union.v_cache_type);
+                    attn_check(k_type, v_type))
+                {
+                    kv_type_union.kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+                        kv_type_union.k_cache_type,
+                        kv_type_union.v_cache_type,
+                        kv_type_union.v_cache_type);
+                    break;
+                }
+                else if (kv_fallback && attn_check(k_type, GGML_TYPE_F16))
+                {
+                    k_type = cosyvoice_kv_cache_type_to_ggml(kv_type_union.k_cache_type);
+                    v_type = GGML_TYPE_F16;
+                    kv_type_union.kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+                        kv_type_union.k_cache_type,
+                        COSYVOICE_KV_CACHE_TYPE_F16,
+                        COSYVOICE_KV_CACHE_TYPE_F16);
+                    break;
+                }
+                else
+                    cur_type = cosyvoice_kv_cache_type_to_ggml(kv_type_union.kv_cache_fallback);
+            }
+            else
+                cur_type = cosyvoice_kv_cache_type_to_ggml(kv_type_union.kv_cache_type);
+
+            if (kv_type_union.kv_cache_separate_buffers)
+            {
+                v_type = ggml_is_quantized(cur_type) ? GGML_TYPE_F16 : cur_type;
+                do
+                {
+                    if (attn_check(cur_type, v_type))
+                    {
+                        k_type = cur_type;
+                        break;
+                    }
+
+                    GGML_ASSERT(kv_fallback);
+                    cur_type = cosyvoice_get_kv_fallback_type(cur_type);
+                } while (cur_type != GGML_TYPE_F32);
+
+                kv_type_union.kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+                    cosyvoice_ggml_to_kv_cache_type(cur_type),
+                    cosyvoice_ggml_to_kv_cache_type(v_type),
+                    cosyvoice_ggml_to_kv_cache_type(v_type));
+
+                k_type = cur_type;
+            }
+            else
+            {
+                if (attn_check(cur_type, cur_type))
+                {
+                    k_type = cur_type;
+                    v_type = cur_type;
+                    kv_type_union.kv_cache_type = cosyvoice_ggml_to_kv_cache_type(cur_type);
+                    break;
+                }
+                else
+                {
+                    GGML_ASSERT(kv_fallback);
+                    cur_type = GGML_TYPE_F16;
+                }
+                k_type = cur_type;
+                v_type = cur_type;
+                kv_type_union.kv_cache_type = cosyvoice_ggml_to_kv_cache_type(cur_type);
+            }
+        } while (false);
+    }
+
+    return { k_type, v_type };
+}
+
 void cosyvoice_model_3::load(gguf_loader& loader)
 {
     auto& flow = cv3_shared->flow;
     auto& hift = cv3_shared->hift;
     auto& llm = cv3_shared->llm;
+
+    {
+        constexpr auto diffusion_steps = CausalConditionalCFM::diffusion_steps;
+        auto& n_fixed_slots = shared->params.dit_kv_fixed_slots;
+        auto& n_offloadable_slots = shared->params.dit_kv_offloadable_slots;
+        if (n_fixed_slots > diffusion_steps)
+            n_fixed_slots = diffusion_steps;
+        if (n_offloadable_slots + n_fixed_slots > diffusion_steps)
+            n_offloadable_slots = diffusion_steps - n_fixed_slots;
+    }
+
 
     flow.OnLoad(loader, {});
     hift.OnLoad(loader, {});
@@ -688,208 +897,57 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     for (uint32_t i = 0; i != shared->params.n_workers; ++i)
         workers[i].config = shared->config;
 
-    if (shared->params.llm_use_flash_attn)
-    {
-        auto fattn_check = [&](ggml_type check_k, ggml_type check_v) -> bool
-        {
-            auto q = ggml_new_tensor_3d(worker->ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attention_heads);
-            auto k = ggml_new_tensor_3d(worker->ctx0.get(), check_k, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
-            auto v = ggml_new_tensor_3d(worker->ctx0.get(), check_v, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
-            auto o = ggml_flash_attn_ext(worker->ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
-            return ggml_backend_supports_op(backend, o);
-        };
+    auto [llm_k_type, llm_v_type] = cosyvoice_check_kv_cache_types(worker->ctx0.get(), worker->backend.get(),
+        shared->params.flow_use_flash_attn, cv3_shared->llm.num_attention_heads, cv3_shared->llm.num_key_value_heads,
+        cv3_shared->llm.layers[0].self_attn.q_proj, cv3_shared->llm.layers[0].self_attn.k_proj, cv3_shared->llm.layers[0].self_attn.v_proj,
+        shared->params.llm_allow_kv_cache_fallback, reinterpret_cast<kv_cache_type_union&>(shared->params.llm_kv_cache_type));
 
-        shared->params.llm_use_flash_attn = fattn_check(GGML_TYPE_F32, GGML_TYPE_F32);
-        if (shared->params.llm_use_flash_attn)
-        {
-            if (shared->params.llm_allow_kv_cache_fallback)
-            {
-                ggml_type cur_type;
-
-                do
-                {
-                    if (shared->params.llm_kv_cache_separate_buffers)
-                    {
-                        if (auto k_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_k_cache_type),
-                            v_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_v_cache_type);
-                            fattn_check(k_type, v_type))
-                        {
-                            cv3_shared->k_type = k_type;
-                            cv3_shared->v_type = v_type;
-                            shared->params.llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
-                                shared->params.llm_k_cache_type,
-                                shared->params.llm_v_cache_type,
-                                shared->params.llm_v_cache_type);
-                            break;
-                        }
-
-                        cur_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_kv_cache_fallback);
-                    }
-                    else
-                        cur_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_kv_cache_type);
-
-                    do
-                    {
-                        if (fattn_check(cur_type, cur_type))
-                        {
-                            cv3_shared->k_type = cur_type;
-                            cv3_shared->v_type = cur_type;
-                            shared->params.llm_kv_cache_type = cosyvoice_ggml_to_llm_kv_cache_type(cur_type);
-                            break;
-                        }
-
-                        cur_type = cosyvoice_get_kv_fallback_type(cur_type);
-                    } while (cur_type != GGML_TYPE_F32);
-
-                    if (shared->params.llm_kv_cache_separate_buffers)
-                        shared->params.llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
-                            cosyvoice_ggml_to_llm_kv_cache_type(cv3_shared->k_type),
-                            cosyvoice_ggml_to_llm_kv_cache_type(cv3_shared->v_type),
-                            cosyvoice_ggml_to_llm_kv_cache_type(cv3_shared->v_type));
-                } while (false);
-            }
-            else if (shared->params.llm_kv_cache_separate_buffers)
-            {
-                auto k_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_k_cache_type);
-                auto v_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_v_cache_type);
-                shared->params.llm_use_flash_attn = fattn_check(k_type, v_type);
-                if (shared->params.llm_use_flash_attn)
-                {
-                    cv3_shared->k_type = k_type;
-                    cv3_shared->v_type = v_type;
-                    shared->params.llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
-                        shared->params.llm_k_cache_type,
-                        shared->params.llm_v_cache_type,
-                        shared->params.llm_v_cache_type);
-                }
-            }
-            else
-            {
-                auto kv_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_kv_cache_type);
-                shared->params.llm_use_flash_attn = fattn_check(kv_type, kv_type);
-            }
-        }
-    }
-
-    if (!shared->params.llm_use_flash_attn)
-    {
-        ggml_type cur_type;
-        auto attn_check = [&](ggml_type check_k, ggml_type check_v) -> bool
-        {
-            if (ggml_is_quantized(check_v)) return false;
-            auto q = ggml_new_tensor_3d(worker->ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attention_heads);
-            auto k = ggml_new_tensor_3d(worker->ctx0.get(), check_k, llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads, 1, llm.num_key_value_heads);
-            auto v = ggml_new_tensor_3d(worker->ctx0.get(), check_v, 1, llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads, llm.num_key_value_heads);
-            auto s = ggml_mul_mat(worker->ctx0.get(), k, q);
-            auto o = ggml_mul_mat(worker->ctx0.get(), v, s);
-            return ggml_backend_supports_op(backend, o) && ggml_backend_supports_op(backend, s);
-        };
-
-        do
-        {
-            if (shared->params.llm_kv_cache_separate_buffers)
-            {
-                if (auto k_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_k_cache_type),
-                    v_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_v_cache_type);
-                    attn_check(k_type, v_type))
-                {
-                    cv3_shared->k_type = k_type;
-                    cv3_shared->v_type = v_type;
-                    shared->params.llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
-                        shared->params.llm_k_cache_type,
-                        shared->params.llm_v_cache_type,
-                        shared->params.llm_v_cache_type);
-                    break;
-                }
-                else if (shared->params.llm_allow_kv_cache_fallback && attn_check(k_type, GGML_TYPE_F16))
-                {
-                    cv3_shared->k_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_k_cache_type);
-                    cv3_shared->v_type = GGML_TYPE_F16;
-                    shared->params.llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
-                        shared->params.llm_k_cache_type,
-                        COSYVOICE_LLM_KV_CACHE_TYPE_F16,
-                        COSYVOICE_LLM_KV_CACHE_TYPE_F16);
-                    break;
-                }
-                else
-                    cur_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_kv_cache_fallback);
-            }
-            else
-                cur_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_kv_cache_type);
-
-            if (shared->params.llm_kv_cache_separate_buffers)
-            {
-                auto v_type = ggml_is_quantized(cur_type) ? GGML_TYPE_F16 : cur_type;
-                do
-                {
-                    if (attn_check(cur_type, v_type))
-                    {
-                        cv3_shared->k_type = cur_type;
-                        cv3_shared->v_type = v_type;
-                        break;
-                    }
-
-                    GGML_ASSERT(shared->params.llm_allow_kv_cache_fallback);
-                    cur_type = cosyvoice_get_kv_fallback_type(cur_type);
-                } while (cur_type != GGML_TYPE_F32);
-
-                shared->params.llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
-                    cosyvoice_ggml_to_llm_kv_cache_type(cur_type),
-                    cosyvoice_ggml_to_llm_kv_cache_type(v_type),
-                    cosyvoice_ggml_to_llm_kv_cache_type(v_type));
-            }
-            else
-            {
-                if (attn_check(cur_type, cur_type))
-                {
-                    cv3_shared->k_type = cur_type;
-                    cv3_shared->v_type = cur_type;
-                    shared->params.llm_kv_cache_type = cosyvoice_ggml_to_llm_kv_cache_type(cur_type);
-                    break;
-                }
-                else
-                {
-                    GGML_ASSERT(shared->params.llm_allow_kv_cache_fallback);
-                    cur_type = GGML_TYPE_F16;
-                }
-                cv3_shared->k_type = cur_type;
-                cv3_shared->v_type = cur_type;
-                shared->params.llm_kv_cache_type = cosyvoice_ggml_to_llm_kv_cache_type(cur_type);
-            }
-        } while (false);
-    }
+    auto [dit_k_type, dit_v_type] = cosyvoice_check_kv_cache_types(worker->ctx0.get(), worker->backend.get(),
+        shared->params.flow_use_flash_attn, cv3_shared->flow.decoder.estimator.transformer_blocks[0].attn.heads, cv3_shared->flow.decoder.estimator.transformer_blocks[0].attn.heads,
+        cv3_shared->flow.decoder.estimator.transformer_blocks[0].attn.to_q, cv3_shared->flow.decoder.estimator.transformer_blocks[0].attn.to_k, cv3_shared->flow.decoder.estimator.transformer_blocks[0].attn.to_v,
+        shared->params.dit_allow_kv_cache_fallback, reinterpret_cast<kv_cache_type_union&>(shared->params.dit_kv_cache_type));
 
     for (auto& worker : std::span(workers, shared->params.n_workers))
     {
+        worker.chunk_size = 25 + cv3_shared->flow.pre_lookahead_layer.pre_lookahead_len;
         worker.nucleus_probs_capacity = static_cast<uint32_t>(sampling.top_k * 2);
         worker.nucleus_probs.reset(new float[worker.nucleus_probs_capacity]);
         worker.nucleus_probs_len = 0;
         worker.probs.reset(new float[llm.llm_decoder.weight->ne[1]]);
         worker.batch_buffer.reset(new char[shared->params.n_batch * std::max(llm.embed_tokens_weight->nb[1], llm.speech_embedding_weight->nb[1])]);
 
-        worker.kv_cache.build_kv_cache(
+        worker.llm_kv_cache.build_kv_cache(
             backend,
-            worker.kv_buffer,
+            worker.llm_kv_buffer,
             static_cast<int>(llm.layers.size()),
             static_cast<int>(llm.layers[0].self_attn.k_proj.weight->ne[1] / llm.num_key_value_heads),
             static_cast<int>(llm.layers[0].self_attn.v_proj.weight->ne[1] / llm.num_key_value_heads),
-            llm.num_attention_heads,
             llm.num_key_value_heads,
             shared->params.n_max_seq,
-            cv3_shared->k_type,
-            cv3_shared->v_type,
+            llm_k_type,
+            llm_v_type,
+            1,
+            1,
+            shared->params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED ? 0 : 1,
             shared->params.llm_use_flash_attn
         );
-    }
 
-    if (shared->params.flow_use_flash_attn)
-    {
-        int heads = flow.decoder.estimator.transformer_blocks[0].attn.heads;
-        auto q = ggml_new_tensor_4d(worker->ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_q.weight->ne[1] / heads, 1, heads, 2);
-        auto k = ggml_new_tensor_4d(worker->ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_k.weight->ne[1] / heads, 1, heads, 2);
-        auto v = ggml_new_tensor_4d(worker->ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator.transformer_blocks[0].attn.to_v.weight->ne[1] / heads, 1, heads, 2);
-        auto o = ggml_flash_attn_ext(worker->ctx0.get(), q, k, v, nullptr, 1.f / std::sqrt(static_cast<float>(k->ne[0])), 0.f, 0.f);
-        shared->params.flow_use_flash_attn = ggml_backend_supports_op(backend, o);
+        const auto dit_blocks = flow.decoder.estimator.transformer_blocks;
+        worker.dit_kv_cache.build_kv_cache(
+            backend,
+            worker.dit_kv_buffer,
+            static_cast<int>(dit_blocks.size()),
+            static_cast<int>(dit_blocks[0].attn.to_k.weight->ne[1] / dit_blocks[0].attn.heads),
+            static_cast<int>(dit_blocks[0].attn.to_v.weight->ne[1] / dit_blocks[0].attn.heads),
+            dit_blocks[0].attn.heads,
+            shared->params.dit_kv_cache_length,
+            dit_k_type,
+            dit_v_type,
+            2,
+            shared->params.dit_kv_fixed_slots,
+            shared->params.dit_kv_offloadable_slots,
+            shared->params.flow_use_flash_attn
+        );
     }
 
     {
@@ -910,7 +968,7 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         {
         case COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED:
         case COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED:
-            cv3_worker->token2wav_buffer.reset(worker->kv_buffer.get());
+            cv3_worker->token2wav_buffer.reset(worker->llm_kv_buffer.get());
         case COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED:
             break;
         default:
@@ -922,6 +980,7 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     auto arch = loader.get_string("general.architecture");
     shared->architecture.reset(new char[arch.size() + 1]);
     memcpy(shared->architecture.get(), arch.data(), arch.size() + 1);
+    cv3_shared->hift_overlap = hift.overlap_length();
 
     ggml_backend_synchronize(backend);
 }

@@ -7,6 +7,7 @@ export using Request = httplib::Request;
 export using Response = httplib::Response;
 export using ThreadPool = httplib::ThreadPool;
 export using HandlerResponse = httplib::Server::HandlerResponse;
+export using DataSink = httplib::DataSink;
 
 // NOTE: Do NOT export `using Server = httplib::Server;` directly!
 // Tested on MSVC: this triggers unresolved externals (e.g. `__tlregdtor`) when using C++20 modules,
@@ -21,7 +22,7 @@ public:
     Server() : new_task_queue(server.new_task_queue) {}
 
     decltype(httplib::Server::new_task_queue)& new_task_queue;
-    
+
     template<class Handler>
     void Get(const std::string& pattern, Handler handler)
     {
@@ -44,6 +45,12 @@ public:
     void Put(const std::string& pattern, Handler handler)
     {
         server.Put(pattern, std::move(handler));
+    }
+    
+    template<class Handler>
+    void Options(const std::string& pattern, Handler handler)
+    {
+        server.Options(pattern, std::move(handler));
     }
 
     template<class Handler>

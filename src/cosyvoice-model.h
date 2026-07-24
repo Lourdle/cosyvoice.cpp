@@ -3,25 +3,27 @@
 #include "cosyvoice-modules.h"
 #include "cosyvoice-lowlevel.h"
 #include "cosyvoice-interface.h"
-#include "cosyvoice-llm-kv-cache.h"
+#include "cosyvoice-kv-cache.h"
 
 #include <ggml-cpp.h>
 
 #include <set>
+#include <mutex>
+#include <condition_variable>
 #include <random>
 #include <memory>
 #include <shared_mutex>
 
 struct cosyvoice_model_shared
 {
-    cosyvoice_model_shared(const cosyvoice_context_params_v2_cpp& params);
+    cosyvoice_model_shared(const cosyvoice_context_params_v3_cpp& params);
 
     ggml_context_ptr ctx;
 
     ggml_backend_buffer_ptr buffer;
     ggml_backend_buffer_ptr cpu_buffer;
 
-    cosyvoice_context_params_v2_cpp params;
+    cosyvoice_context_params_v3_cpp params;
     ggml_backend_op_capabilities op_caps;
     bool backend_uma;
 
@@ -60,7 +62,8 @@ struct cosyvoice_worker_context
     std::unique_ptr<int[]> full_position_ids;
     std::unique_ptr<ggml_fp16_t[]> causal_mask_buffer;
 
-    cosyvoice_llm_kv_cache kv_cache;
+    cosyvoice_kv_cache llm_kv_cache;
+    cosyvoice_kv_cache dit_kv_cache;
 
     ggml_status status;
     uint32_t prompt_crc32;
@@ -70,26 +73,39 @@ struct cosyvoice_worker_context
     void* sampler_ctx;
     cosyvoice_builtin_sampler_rng_policy_t builtin_sampler_rng_policy;
 
+    uint32_t chunk_size;
+    std::vector<float> flow_cache;
+    std::vector<uint32_t> chunk_boundaries;
     std::unique_ptr<char[]> batch_buffer;
     std::unique_ptr<float[]> nucleus_probs;
     uint32_t nucleus_probs_capacity;
     int nucleus_probs_len;
     std::unique_ptr<float[]> probs;
-    ggml_backend_buffer_ptr kv_buffer;
+    ggml_backend_buffer_ptr llm_kv_buffer;
+    ggml_backend_buffer_ptr dit_kv_buffer;
+
+    std::atomic<bool> stop_flag{false};
+    std::atomic<int>  use_count{0};
+    std::mutex        cv_mutex;
+    std::condition_variable cv;
 };
 
 struct cosyvoice_model : virtual cosyvoice_model_context, virtual cosyvoice_object_ref_counter
 {
-    cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_v2_cpp& params);
+    cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_v3_cpp& params);
     ~cosyvoice_model();
 
     virtual void load(gguf_loader& loader) = 0;
 
     uint32_t get_worker_no();
     uint32_t get_n_workers();
+    void request_stop();
+    bool stop_requested();
 
     uint32_t llm_get_kv_cache_len();
     bool llm_set_kv_cache_len(uint32_t len);
+    void llm_offload_kv_cache();
+    void llm_load_kv_cache();
 
     int llm_sample_token();
     void llm_accept_token(int token);
@@ -123,6 +139,8 @@ struct cosyvoice_model : virtual cosyvoice_model_context, virtual cosyvoice_obje
     bool set_builtin_sampler_rng_policy(cosyvoice_builtin_sampler_rng_policy_t policy);
     bool set_sampler_seed(uint32_t seed);
     uint32_t get_sampler_seed();
+    uint32_t get_chunk_tokens();
+    void set_chunk_tokens(uint32_t n_tokens);
 
     void set_noise_callback(cosyvoice_noise_callback_t callback, void* callback_ctx);
     void get_noise_callback(cosyvoice_noise_callback_t* callback, void** callback_ctx);
@@ -138,11 +156,9 @@ struct cosyvoice_model_3_shared
     CausalHiFTGenerator hift;
     CosyVoice3LM llm;
 
-    ggml_type k_type;
-    ggml_type v_type;
-
     std::set<int> stop_tokens;
     std::set<int> silent_tokens;
+    int hift_overlap;
 };
 
 struct cosyvoice_3_worker_context
@@ -158,7 +174,7 @@ struct cosyvoice_3_worker_context
 
 struct cosyvoice_model_3 : cosyvoice_model
 {
-    cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_context_params_v2_cpp& params);
+    cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_context_params_v3_cpp& params);
     ~cosyvoice_model_3();
 
     void load(gguf_loader& loader);
@@ -180,7 +196,9 @@ struct cosyvoice_model_3 : cosyvoice_model
     void set_hift_rand_ini(const float* data);
 
     bool llm_job(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt);
+    bool llm_job_ext(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt, uint32_t max_new_tokens, bool* final);
     bool token2wav(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, cosyvoice_generated_speech_ptr result);
+    bool token2wav_ext(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, uint32_t* offset, bool streaming, bool finalize, cosyvoice_generated_speech_ptr result);
 
     void empty_buffer_cache();
     void get_memory_usage(cosyvoice_memory_usage_t* usage);

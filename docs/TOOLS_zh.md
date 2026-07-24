@@ -129,7 +129,7 @@ WebUI 是一个现代化的单页应用，提供以下功能：
 #### 模型管理
 - **运行时加载模型**：输入 `.gguf` 文件路径，选择后端和线程数，点击「Load Model」加载。
 - **卸载模型**：释放模型内存，无需重启服务端。
-- **参数配置**：KV cache 类型、buffer 策略、最大 LLM 长度——可在加载前配置。
+- **参数配置**：LLM/DiT KV cache 类型、buffer 策略、最大 LLM 长度、Flash Attention 开关、DiT KV cache 槽位数——可在加载前配置。
 - **动态后端选择**：启动时自动探测可用的 GGML 后端（Auto / CPU / CUDA / Vulkan / Metal）。
 
 #### 音色管理
@@ -143,12 +143,13 @@ WebUI 是一个现代化的单页应用，提供以下功能：
 
 #### TTS 生成
 - **文本输入**：可选择音色、模式（zero-shot / instruct / cross-lingual）和输出格式。
+- **流式 TTS**：开启流式模式后，音频块到达时即可渐进播放。可配置每个块的 token 数。
 - **高级采样控制**：temperature、top-k、top-p、重复惩罚窗口、tau-r、随机种子（支持锁定）。
 - **Instruct 模式**：输入指令控制说话风格（需要模型支持 instruct）。
-- **音频播放**：生成的音频直接在浏览器中播放，配有波形可视化。
+- **音频播放**：生成的音频直接在浏览器中播放，配有波形可视化。流式模式使用 MediaSource 实现真正的渐进式播放。
 - **下载**：保存生成的音频文件。
 - **历史记录**：最近最多 20 条生成记录，可点击回放或重新下载。
-- **多格式输出**：`wav`、`mp3`、`flac`、`opus`、`aac`、`m4a`、`pcm`（可用格式取决于 FFmpeg 运行时）。
+- **多格式输出**：`wav`、`mp3`、`flac`、`opus`、`aac`、`m4a`、`pcm`（可用格式取决于 FFmpeg 运行时）。通过 WebUI 浏览器播放流式音频需要 MP3、Opus、AAC 或 FLAC（MediaSource API 不支持 WAV 渐进播放；通过 API 的 WAV 流式可通过分块传输加占位头实现）。
 - **主题切换**：亮色/暗色模式，通过 `localStorage` 持久化。
 
 #### 拖拽支持
@@ -206,7 +207,15 @@ WebUI 是一个现代化的单页应用，提供以下功能：
 | `--threads, -j <value>` | CPU 线程数，默认 `0`（硬件并发数）。 |
 | `--concurrency, -c <value>` | 并发请求槽数，默认 `1`（仅 API 模式；WebUI 模式始终为单槽）。 |
 | `--inference-buffer-policy <shared\|balanced\|dedicated>` | 推理缓冲区策略，默认 `balanced`。 |
-| `--llm-kv-cache-type <f32\|f16\|q8_0\|q5_1\|q5_0\|q4_1\|q4_0\|k=<type>,v=<type>[,fallback=<type>]>` | KV cache 类型。单一类型（如 `q8_0`）为 K 和 V 使用相同格式。默认 `k=q8_0,v=q4_0,fallback=q8_0`。 |
+| `--llm-kv-cache-type <f32\|f16\|q8_0\|q5_1\|q5_0\|q4_1\|q4_0\|k=<type>,v=<type>[,fallback=<type>]>` | LLM KV cache 类型。单一类型（如 `q8_0`）为 K 和 V 使用相同格式。默认 `k=q8_0,v=q4_0,fallback=q8_0`。 |
+| `--dit-kv-cache-type <f32\|f16\|q8_0\|q5_1\|q5_0\|q4_1\|q4_0\|k=<type>,v=<type>[,fallback=<type>]>` | DiT（flow matching）KV cache 类型。格式同 LLM KV cache。默认 `k=q8_0,v=q4_0,fallback=q8_0`。 |
+| `--dit-kv-fixed-slots <value>` | 固定（不可卸载）DiT KV cache 槽位数，默认 `0`（自动）。 |
+| `--dit-kv-offloadable-slots <value>` | 可 CPU 卸载的 DiT KV cache 槽位数，默认 `0`（自动）。 |
+| `--dit-kv-cache-length <value>` | DiT KV cache 最大序列长度，默认 `0`（自动，为 `max-llm-len * 10`）。 |
+| `--llm-flash-attn <0\|1>` | 启用/禁用 LLM Flash Attention。默认 `1`（启用）。 |
+| `--flow-flash-attn <0\|1>` | 启用/禁用 Flow/DiT Flash Attention。默认 `1`（启用）。 |
+| `--stream` | 默认对所有请求启用流式 TTS（WebUI 和 API 模式均生效）。 |
+| `--chunk-tokens <value>` | 每个流式块的 token 数。chunk 越小，首包延迟越低，但上下文调度开销越大，RTF 越高；chunk 越大，RTF 越低，但首包延迟越高。默认：模型定义（因模型而异）。 |
 | `--seed <value>` | 默认随机种子（当请求未传 seed 时使用）。 |
 
 ### 采样默认值覆盖（服务级）
@@ -290,17 +299,19 @@ WebUI 暴露以下 REST 接口，由前端 JavaScript 调用：
 返回服务端状态 JSON：
 ```json
 {
-  “status”: “ok”,
-  “model_loaded”: true,
-  “model”: “cosyvoice-3”,
-  “sample_rate”: 24000,
-  “max_llm_len”: 2048,
-  “k_cache_type”: “Q8_0”,
-  “v_cache_type”: “Q4_0”,
-  “buffer_policy”: “balanced”,
-  “model_arch”: “cosyvoice3-2512”,
-  “frontend_available”: false,
-  “speakers”: [“alloy”, “nova”]
+  "status": "ok",
+  "model_loaded": true,
+  "model": "cosyvoice-3",
+  "sample_rate": 24000,
+  "max_llm_len": 2048,
+  "k_cache_type": "Q8_0",
+  "v_cache_type": "Q4_0",
+  "buffer_policy": "balanced",
+  "llm_use_flash_attn": true,
+  "flow_use_flash_attn": true,
+  "model_arch": "cosyvoice3-2512",
+  "frontend_available": false,
+  "speakers": ["alloy", "nova"]
 }
 ```
 
@@ -348,53 +359,80 @@ JSON 请求体：
 
 ```json
 {
-  “text”: “你好，这里是 CosyVoice”,
-  “voice”: “alloy”,
-  “mode”: “zero-shot”,
-  “response_format”: “wav”,
-  “speed”: 1.0,
-  “seed”: 12345,
-  “temperature”: 0.8,
-  “top_k”: 32,
-  “top_p”: 0.9,
-  “win_size”: 10,
-  “tau_r”: 0.2,
-  “min_token_text_ratio”: 1.0,
-  “max_token_text_ratio”: 5.0,
-  “instruction”: “语气温和、平稳。”,
-  “fadein”: true
+  "text": "你好，这里是 CosyVoice",
+  "voice": "alloy",
+  "mode": "zero-shot",
+  "response_format": "wav",
+  "speed": 1.0,
+  "seed": 12345,
+  "temperature": 0.8,
+  "top_k": 32,
+  "top_p": 0.9,
+  "win_size": 10,
+  "tau_r": 0.2,
+  "min_token_text_ratio": 1.0,
+  "max_token_text_ratio": 5.0,
+  "instruction": "语气温和、平稳。",
+  "fadein": true,
+  "stream": false,
+  "chunk_tokens": 0
 }
 ```
 
 返回原始音频字节，带对应 `Content-Type` 头（`audio/wav`、`audio/mpeg` 等）。
 
+当 `stream` 为 `true`（或服务端以 `--stream` 启动）时，响应以 HTTP 分块传输方式返回。音频块在生成过程中逐步传输。服务端层面对所有输出格式均支持流式。通过 WebUI 使用浏览器播放时，需要 MP3、Opus、AAC 或 FLAC（MediaSource API 不支持 WAV 渐进播放）。当 `stream` 为 `false`（默认）时，完整音频缓存后一次性返回。
+
 #### `GET /model/defaults`
 
-返回模型默认参数 JSON：
+返回模型默认参数 JSON（字段集因已加载模型而异）：
 ```json
 {
-  “max_llm_len”: 2048,
-  “temperature”: 1.0,
-  “top_k”: 50,
-  “top_p”: 0.9,
+  "max_llm_len": 2048,
+  "temperature": 1.0,
+  "top_k": 50,
+  "top_p": 0.9,
+  "chunk_tokens": 75,
+  "default_dit_k_cache_type": "q8_0",
+  "default_dit_v_cache_type": "q4_0",
+  "default_dit_kv_fixed_slots": 1,
+  "default_dit_kv_offloadable_slots": 0,
+  "default_dit_kv_cache_length": 20480,
   …
 }
 ```
+
+DiT KV cache 默认值从加载后的生效配置中获取。`chunk_tokens` 反映当前配置值（0 = 模型默认）。
 
 #### `POST /model/load`
 
 运行时加载模型。JSON 请求体：
 ```json
 {
-  “model_path”: “/data/models/cosyvoice-3.gguf”,
-  “backend”: “auto”,
-  “n_threads”: 8,
-  “max_llm_len”: 2048,
-  “buffer_policy”: “balanced”,
-  “k_cache_type”: “q8_0”,
-  “v_cache_type”: “q4_0”
+  "model_path": "/data/models/cosyvoice-3.gguf",
+  "backend": "auto",
+  "n_threads": 8,
+  "max_llm_len": 2048,
+  "buffer_policy": "balanced",
+  "k_cache_type": "q8_0",
+  "v_cache_type": "q4_0",
+  "llm_use_flash_attn": true,
+  "flow_use_flash_attn": true,
+  "dit_kv_cache_type": "k=q8_0,v=q4_0,fallback=q8_0",
+  "dit_kv_fixed_slots": 0,
+  "dit_kv_offloadable_slots": 0,
+  "dit_kv_cache_length": 0,
+  "chunk_tokens": 0
 }
 ```
+
+其他字段：
+- `llm_use_flash_attn`、`flow_use_flash_attn`：`true`/`false`，Flash Attention 开关。
+- `dit_kv_cache_type`：DiT KV cache 类型（格式同 `k_cache_type`）。
+- `dit_kv_fixed_slots`：固定 DiT KV cache 槽位数（0 = 自动）。
+- `dit_kv_offloadable_slots`：可 CPU 卸载的 DiT KV cache 槽位数（0 = 自动）。
+- `dit_kv_cache_length`：DiT KV cache 最大序列长度（0 = 自动，为 `max_llm_len * 10`）。
+- `chunk_tokens`：每个流式块的 token 数（0 = 模型默认）。
 
 #### `POST /model/unload`
 
@@ -433,7 +471,7 @@ JSON 请求体：
 #### 语音请求行为（`POST /v1/audio/speech`）：
 - 必填字段：`model`、`input`、`voice`。
 - 标准可选字段：`instructions`、`speed`、`response_format`。
-- 扩展可选字段：`seed`、`temperature`、`top_k`、`top_p`、`win_size`、`tau_r`、`min_token_text_ratio`、`max_token_text_ratio`。
+- 扩展可选字段：`seed`、`temperature`、`top_k`、`top_p`、`win_size`、`tau_r`、`min_token_text_ratio`、`max_token_text_ratio`、`stream`（布尔值）、`chunk_tokens`（uint32）。
 - seed 优先级：请求扩展字段 `seed` > 服务端 `--seed` > 随机 seed。
 - 模式自动判定：`instructions` 非空时走 instruct；否则走 zero-shot。
 - 支持 `response_format`：`wav`、`pcm`，以及 FFmpeg 后端提供的 `mp3`、`aac`、`flac`、`m4a`、`opus`。
@@ -441,6 +479,7 @@ JSON 请求体：
 - `wav` 通过音频编码器生成；关闭音频辅助 API 时回退到内部 PCM16 WAV 实现。
 - `pcm` 返回原始 16 位小端单声道 PCM 负载。
 - 格式不可用时返回错误。
+- **流式**：当 `stream` 为 `true`（或服务端以 `--stream` 启动）时，API 返回分块传输响应。每个块包含原始音频字节——无 SSE 帧格式。客户端需读取流直至结束。**API 流式无格式限制**——所有 `response_format` 均可用于流式。WAV 先发送占位头，之后发送原始 PCM16 块。
 
 OpenAI Python 客户端示例：
 ```python
@@ -461,29 +500,36 @@ with open(“out.mp3”, “wb”) as f:
 ```
 
 非标准扩展字段（OpenAI SDK `extra_body`）：
+- 标准 OpenAI Speech 请求通常使用：`model`、`input`、`voice`，可选 `instructions/speed/response_format`。
+- `cosyvoice-server` 额外支持请求级扩展字段：
+  - `seed`、`temperature`、`top_k`、`top_p`、`win_size`、`tau_r`、`min_token_text_ratio`、`max_token_text_ratio`
+  - `stream`（布尔值）：启用流式 TTS。
+  - `chunk_tokens`（uint32）：每个流式块的 token 数（0 = 模型默认）。
+
 ```python
 from openai import OpenAI
 
-client = OpenAI(base_url=”http://127.0.0.1:8080/v1”, api_key=”sk-local-demo”)
+client = OpenAI(base_url="http://127.0.0.1:8080/v1", api_key="sk-local-demo")
 
+# 非流式请求，带采样覆盖
 audio = client.audio.speech.create(
-    model=”cosyvoice-3”,
-    voice=”alloy”,
-    input=”你好，这里是 cosyvoice-server”,
-    response_format=”wav”,
+    model="cosyvoice-3",
+    voice="alloy",
+    input="你好，这里是 cosyvoice-server",
+    response_format="wav",
     extra_body={
-        “seed”: 123,
-        “temperature”: 0.8,
-        “top_k”: 32,
-        “top_p”: 0.9,
-        “win_size”: 10,
-        “tau_r”: 0.2,
-        “min_token_text_ratio”: 1.0,
-        “max_token_text_ratio”: 5.0,
+        "seed": 123,
+        "temperature": 0.8,
+        "top_k": 32,
+        "top_p": 0.9,
+        "win_size": 10,
+        "tau_r": 0.2,
+        "min_token_text_ratio": 1.0,
+        "max_token_text_ratio": 5.0,
     },
 )
 
-with open(“out.wav”, “wb”) as f:
+with open("out.wav", "wb") as f:
     f.write(audio.read())
 ```
 
@@ -496,6 +542,8 @@ with open(“out.wav”, “wb”) as f:
 - `tau_r`：`>= 0`
 - `min_token_text_ratio`：`>= 0`
 - `max_token_text_ratio`：`>= 0` 且同时设置时 `>= min_token_text_ratio`
+- `stream`：布尔值
+- `chunk_tokens`：uint32（`[0, 4294967295]`）
 
 校验失败时返回 OpenAI 风格 `400` 错误对象。
 
@@ -561,6 +609,22 @@ python tools/server/synthesize_via_api.py \
   --min-token-text-ratio 1.0 \
   --max-token-text-ratio 5.0
 ```
+
+流式请求（实时播放，需安装 pyaudio）：
+```bash
+python tools/server/synthesize_via_api.py \
+  --base-url http://127.0.0.1:8080 \
+  --model cosyvoice-3 \
+  --voice alloy \
+  --text "流式 TTS 演示" \
+  --response-format wav \
+  --stream
+```
+
+流式相关选项：
+- `--stream`：启用流式 TTS。WAV 格式通过 pyaudio 实时播放，其他格式渐进保存。
+- `--chunk-tokens <value>`：每个流式块的 token 数（0 = 模型默认）。
+- `--no-play`：即使启用 `--stream` 也禁用实时播放（用于将流式输出保存到文件）。
 
 #### `tools/server/batch_tts_stress_test.py`
 
@@ -629,6 +693,7 @@ cosyvoice-cli \
 在 `> ` 提示符下输入文本即可合成，或使用斜杠命令：
 
 - `/play [code]`：播放缓存音频（需要音频支持；`COSYVOICE_CLI_NO_PLAYBACK=ON` 时不可用）。按 `Ctrl+C` 可停止播放。
+- 在 TTS 生成过程中按 `Ctrl+C` 可通过 stop-request API 优雅地停止合成——终止点之前的输出仍然有效。
 - `/save <file> [code]`：保存缓存音频到文件。
 - `/list`：列出缓存音频。
 - `/query [code]`：查看音频详情。
@@ -636,6 +701,8 @@ cosyvoice-cli \
 - `/clear`：清空缓存。
 - `/seed [value]`：显示或设置下一次 seed。
 - `/seed-policy <fixed|random>`：显示或设置 seed 策略。
+- `/stream`：切换流式播放（生成过程中渐进播放音频）。
+- `/chunk-tokens [value]`：显示或设置每个流式块的 token 数。
 - `/help`：显示命令列表。
 - `/exit`：退出交互模式，`Ctrl+C` 也可以退出。
 
@@ -663,6 +730,14 @@ cosyvoice-cli \
 - `--inference-buffer-policy <shared|balanced|dedicated>`：推理缓冲区策略。仅在交互模式下生效；非交互模式始终使用 `shared` 以最小化内存占用并获得最快的单次合成速度。默认 `balanced`。
 - `--mode <zero-shot|instruct|cross-lingual>`：TTS 模式。默认按 `--instruction` 自动判定。
 - `--instruction, -i <text>`：instruct 模式指令文本。
+- `--dit-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>`：DiT KV cache 类型（仅交互模式）。格式同 `--llm-kv-cache-type`。默认 `k=q8_0,v=q4_0,fallback=q8_0`。
+- `--dit-kv-fixed-slots <value>`：固定（不可卸载）DiT KV cache 槽位数（仅交互模式）。默认 `0`（自动）。
+- `--dit-kv-offloadable-slots <value>`：可 CPU 卸载的 DiT KV cache 槽位数（仅交互模式）。默认 `0`（自动）。
+- `--dit-kv-cache-length <value>`：DiT KV cache 最大序列长度（仅交互模式）。默认 `0`（自动，为 `max-llm-len * 10`）。
+- `--stream`：在交互模式下启用流式播放（生成过程中渐进播放音频）。
+- `--chunk-tokens <value>`：每个流式块的 token 数（仅交互模式）。chunk 越小，首包延迟越低，但上下文调度开销越大，RTF 越高；chunk 越大，RTF 越低，但首包延迟越高。默认：模型定义。
+- `--llm-flash-attn <0|1>`：启用/禁用 LLM Flash Attention。默认 `1`（启用）。
+- `--flow-flash-attn <0|1>`：启用/禁用 Flow/DiT Flash Attention。默认 `1`（启用）。
 
 采样覆盖参数：
 - `--temperature <value>`：采样温度，必须 `> 0`。
@@ -744,6 +819,14 @@ cosyvoice-cli \
 | `--llm-kv-cache-type` | `k=q8_0,v=q4_0,fallback=q8_0` | CLI |
 | `--inference-buffer-policy` | `balanced`（交互模式）/ `shared`（非交互模式） | CLI |
 | `--seed` | 随机 | 运行时 |
+| `--stream` | `false` | CLI |
+| `--chunk-tokens` | 模型定义 | 模型 |
+| `--dit-kv-cache-type` | `k=q8_0,v=q4_0,fallback=q8_0` | CLI |
+| `--dit-kv-fixed-slots` | `0`（自动） | CLI |
+| `--dit-kv-offloadable-slots` | `0`（自动） | CLI |
+| `--dit-kv-cache-length` | `0`（自动，`max-llm-len * 10`） | CLI |
+| `--llm-flash-attn` | `1`（启用） | CLI |
+| `--flow-flash-attn` | `1`（启用） | CLI |
 | `temperature/top_k/top_p/win_size/tau_r/min/max_token_text_ratio` | 模型元数据 | 模型 |
 
 ### 常用命令模板

@@ -1,11 +1,10 @@
 #include "cosyvoice-internal.h"
 #include "cosyvoice-model.h"
-#include "cosyvoice-llm-kv-cache.h"
+#include "cosyvoice-kv-cache.h"
 #include "cosyvoice-text-chunk.h"
 #include "ggml-cpu-flag.h"
 
 #include <algorithm>
-#include <cfloat>
 #include <cmath>
 #include <cstring>
 #include <exception>
@@ -18,15 +17,26 @@ constexpr double COSYVOICE_TTS_FADE_IN_SECONDS = 0.02;
 
 bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt)
 {
+    llm_clear_accepted_tokens();
+    return llm_job_ext(text, text_len, prompt, UINT32_MAX, nullptr);
+}
+
+bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt, uint32_t max_new_tokens, bool* final)
+{
+    use_count_guard _guard(this);
     const auto& params = shared->params;
     auto& sched = worker->sched;
     const auto& llm = cv3_shared->llm;
     auto& batch_buffer = worker->batch_buffer;
     auto& prompt_crc32 = worker->prompt_crc32;
     auto last_prompt_crc32 = prompt_crc32;
+    bool stop_reached = false;
 
     if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
-        ggml_backend_sched_synchronize(sched.get());
+    {
+        ggml_backend_sched_reset(sched.get());
+        worker->llm_kv_cache.load_cache(worker->backend.get(), sched.get());
+    }
 
     try
     {
@@ -37,103 +47,117 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
         const auto token_emb = reinterpret_cast<const char*>(llm.embed_tokens_weight->data);
         const char* cur;
         uint32_t offset = 0;
-        if (speech_type == llm.embed_tokens_weight->type)
+
+        if (text != nullptr)
         {
-            auto prefill_embedding = [&](const char* data, int token_id)
+            if (speech_type == llm.embed_tokens_weight->type)
             {
-                if (offset == n_batch)
+                auto prefill_embedding = [&](const char* data, int token_id)
                 {
-                    if (!llm_prefill(speech_type, batch_buffer.get(), n_batch))
-                        throw std::runtime_error("Failed to prefill LLM KV cache.\n");
-                    offset = 0;
+                    if (offset == n_batch)
+                    {
+                        if (!llm_prefill(speech_type, batch_buffer.get(), n_batch))
+                            throw std::runtime_error("Failed to prefill LLM KV cache.\n");
+                        offset = 0;
+                    }
+
+                    memcpy(batch_buffer.get() + offset++ * speech_row_size, data + token_id * speech_row_size, speech_row_size);
+                };
+
+                if (llm_get_kv_cache_len() == 0)
+                {
+                    prefill_embedding(speech_emb, llm.sos_token_id);
+                    prompt_crc32 = 0;
                 }
+                // The first token is assumed to be the SOS token already stored in the KV cache.
+                if (prompt_crc32 != prompt->prompt_crc32)
+                {
+                    llm_set_kv_cache_len(1);
+                    for (const auto& i : prompt->prompt_text)
+                        prefill_embedding(token_emb, i);
+                    prompt_crc32 = prompt->prompt_crc32;
+                }
+                else llm_set_kv_cache_len(1 + static_cast<uint32_t>(prompt->prompt_text.size()));
 
-                memcpy(batch_buffer.get() + offset++ * speech_row_size, data + token_id * speech_row_size, speech_row_size);
-            };
+                for (uint32_t i = 0; i != text_len; ++i)
+                    prefill_embedding(token_emb, text[i]);
 
-            if (llm_get_kv_cache_len() == 0)
-            {
-                prefill_embedding(speech_emb, llm.sos_token_id);
-                prompt_crc32 = 0;
+                if (prompt->llm_prompt_speech_tokens.second != 0)
+                {
+                    prefill_embedding(speech_emb, llm.task_token_id);
+
+                    const auto end = prompt->llm_prompt_speech_tokens.second - 1;
+                    for (uint32_t i = 0; i != end; ++i)
+                        prefill_embedding(speech_emb, prompt->llm_prompt_speech_tokens.first[i]);
+                    cur = speech_emb + prompt->llm_prompt_speech_tokens.first[end] * speech_row_size;
+                }
+                else cur = speech_emb + llm.task_token_id * speech_row_size;
             }
-            // The first token is assumed to be the SOS token already stored in the KV cache.
-            if (prompt_crc32 != prompt->prompt_crc32)
+            else
             {
-                llm_set_kv_cache_len(1);
-                for (const auto& i : prompt->prompt_text)
-                    prefill_embedding(token_emb, i);
-                prompt_crc32 = prompt->prompt_crc32;
+                const auto token_type = llm.embed_tokens_weight->type;
+                const auto token_row_size = static_cast<uint32_t>(llm.embed_tokens_weight->nb[1]);
+
+                auto prefill_embedding = [&](const char* data, int token_id, uint32_t row_size, ggml_type type)
+                {
+                    if (offset == n_batch)
+                    {
+                        if (!llm_prefill(type, batch_buffer.get(), n_batch))
+                            throw std::runtime_error("Failed to prefill LLM KV cache.\n");
+                        offset = 0;
+                    }
+
+                    memcpy(batch_buffer.get() + offset++ * row_size, data + token_id * row_size, row_size);
+                };
+
+                if (llm_get_kv_cache_len() == 0)
+                    llm_prefill(speech_type, speech_emb + llm.sos_token_id * speech_row_size, 1);
+                // The first token is assumed to be the SOS token already stored in the KV cache.
+                if (prompt_crc32 != prompt->prompt_crc32)
+                {
+                    llm_set_kv_cache_len(1);
+                    for (const auto& i : prompt->prompt_text)
+                        prefill_embedding(token_emb, i, token_row_size, token_type);
+                    prompt_crc32 = prompt->prompt_crc32;
+                }
+                else llm_set_kv_cache_len(1 + static_cast<uint32_t>(prompt->prompt_text.size()));
+
+                for (uint32_t i = 0; i != text_len; ++i)
+                    prefill_embedding(token_emb, text[i], token_row_size, token_type);
+
+                if (offset != 0 && !llm_prefill(token_type, batch_buffer.get(), offset))
+                    throw std::runtime_error("Failed to prefill LLM KV cache.\n");
+                offset = 0;
+
+                if (prompt->llm_prompt_speech_tokens.second != 0)
+                {
+                    prefill_embedding(speech_emb, llm.task_token_id, speech_row_size, speech_type);
+
+                    const auto end = prompt->llm_prompt_speech_tokens.second - 1;
+                    for (uint32_t i = 0; i != end; ++i)
+                        prefill_embedding(speech_emb, prompt->llm_prompt_speech_tokens.first[i], speech_row_size, speech_type);
+                    cur = speech_emb + prompt->llm_prompt_speech_tokens.first[end] * speech_row_size;
+                }
+                else cur = speech_emb + llm.task_token_id * speech_row_size;
             }
-            else llm_set_kv_cache_len(1 + static_cast<uint32_t>(prompt->prompt_text.size()));
 
-            for (uint32_t i = 0; i != text_len; ++i)
-                prefill_embedding(token_emb, text[i]);
-
-            if (prompt->llm_prompt_speech_tokens.second != 0)
-            {
-                prefill_embedding(speech_emb, llm.task_token_id);
-
-                const auto end = prompt->llm_prompt_speech_tokens.second - 1;
-                for (uint32_t i = 0; i != end; ++i)
-                    prefill_embedding(speech_emb, prompt->llm_prompt_speech_tokens.first[i]);
-                cur = speech_emb + prompt->llm_prompt_speech_tokens.first[end] * speech_row_size;
-            }
-            else cur = speech_emb + llm.task_token_id * speech_row_size;
+            if (offset != 0 && !llm_prefill(speech_type, batch_buffer.get(), offset))
+                throw std::runtime_error("Failed to prefill LLM KV cache.\n");
         }
         else
         {
-            const auto token_type = llm.embed_tokens_weight->type;
-            const auto token_row_size = static_cast<uint32_t>(llm.embed_tokens_weight->nb[1]);
-
-            auto prefill_embedding = [&](const char* data, int token_id, uint32_t row_size, ggml_type type)
-            {
-                if (offset == n_batch)
-                {
-                    if (!llm_prefill(type, batch_buffer.get(), n_batch))
-                        throw std::runtime_error("Failed to prefill LLM KV cache.\n");
-                    offset = 0;
-                }
-
-                memcpy(batch_buffer.get() + offset++ * row_size, data + token_id * row_size, row_size);
-            };
-
-            if (llm_get_kv_cache_len() == 0)
-                llm_prefill(speech_type, speech_emb + llm.sos_token_id * speech_row_size, 1);
-            // The first token is assumed to be the SOS token already stored in the KV cache.
-            if (prompt_crc32 != prompt->prompt_crc32)
-            {
-                llm_set_kv_cache_len(1);
-                for (const auto& i : prompt->prompt_text)
-                    prefill_embedding(token_emb, i, token_row_size, token_type);
-                prompt_crc32 = prompt->prompt_crc32;
-            }
-            else llm_set_kv_cache_len(1 + static_cast<uint32_t>(prompt->prompt_text.size()));
-
-            for (uint32_t i = 0; i != text_len; ++i)
-                prefill_embedding(token_emb, text[i], token_row_size, token_type);
-
-            if (offset != 0 && !llm_prefill(token_type, batch_buffer.get(), offset))
-                throw std::runtime_error("Failed to prefill LLM KV cache.\n");
-            offset = 0;
-
-            if (prompt->llm_prompt_speech_tokens.second != 0)
-            {
-                prefill_embedding(speech_emb, llm.task_token_id, speech_row_size, speech_type);
-
-                const auto end = prompt->llm_prompt_speech_tokens.second - 1;
-                for (uint32_t i = 0; i != end; ++i)
-                    prefill_embedding(speech_emb, prompt->llm_prompt_speech_tokens.first[i], speech_row_size, speech_type);
-                cur = speech_emb + prompt->llm_prompt_speech_tokens.first[end] * speech_row_size;
-            }
-            else cur = speech_emb + llm.task_token_id * speech_row_size;
+            // Continue from existing KV cache — get last accepted token's embedding
+            const auto n_acc = llm_get_n_accepted_tokens();
+            if (n_acc == 0)
+                throw std::runtime_error("llm_job_ext: cannot continue generation with empty token history.\n");
+            const auto last_token_id = llm_get_accepted_tokens()[n_acc - 1];
+            cur = speech_emb + last_token_id * speech_row_size;
         }
 
-        if (offset != 0 && !llm_prefill(speech_type, batch_buffer.get(), offset))
-            throw std::runtime_error("Failed to prefill LLM KV cache.\n");
-
+        // First call: min/max from text input
         const auto min_len = static_cast<uint32_t>(text_len * worker->config.min_token_text_ratio);
         const auto max_len = static_cast<uint32_t>(text_len * worker->config.max_token_text_ratio);
-        llm_clear_accepted_tokens();
+        const auto limit = std::min(llm_get_n_accepted_tokens() + max_new_tokens, max_len);
 
         // FSQ silent/breath token filtering: allow up to 5 consecutive silent tokens,
         // then drop any further consecutive ones to avoid generating long silence.
@@ -142,8 +166,18 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
         constexpr uint32_t max_silent_token_num = 5;
         const auto& silent_tokens = cv3_shared->silent_tokens;
 
-        for (uint32_t n = 0; n != max_len; ++n)
+        for (uint32_t n = llm_get_n_accepted_tokens(); n != limit; ++n)
         {
+            if (worker->stop_flag.load(std::memory_order_acquire))
+            {
+                worker->stop_flag.store(false, std::memory_order_release);
+                worker->llm_input = nullptr;
+                cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, "LLM generation stopped by user.\n");
+                if (params.builtin_sampler_rng_policy == COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION)
+                    reset_builtin_sampler_rng();
+                return false;
+            }
+
             if (!llm_decode(speech_type, cur))
                 throw std::runtime_error("Failed to decode LLM output.\n");
 
@@ -152,7 +186,10 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
             if (token_id == -1)
                 throw std::runtime_error("Failed to sample token from LLM output. This might be wrong with the model or caused by an issue with the sampling parameters.\n");
             if (n > min_len && llm_is_stop_token(token_id))
+            {
+                stop_reached = true;
                 break;
+            }
 
             if (silent_tokens.count(token_id))
             {
@@ -164,6 +201,7 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
                     // model state consistent, but skip llm_accept_token so
                     // it does not appear in the output.
                     cur = speech_emb + token_id * speech_row_size;
+                    --n;
                     continue;
                 }
             }
@@ -176,18 +214,25 @@ bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_pr
     }
     catch (const std::exception& e)
     {
+        worker->llm_input = nullptr;
         cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR, e.what());
         if (params.builtin_sampler_rng_policy == COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION)
             reset_builtin_sampler_rng();
         return false;
     }
 
-    if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED && last_prompt_crc32 != prompt_crc32)
+    worker->llm_input = nullptr;
+    if (final)
+        *final = stop_reached;
+
+    if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED && text != nullptr && max_new_tokens == UINT32_MAX && last_prompt_crc32 != prompt_crc32)
     {
-        ggml_backend_sched_reset(sched.get());
-        worker->kv_cache.offload_cache(worker->backend.get(), sched.get(), 1 + static_cast<uint32_t>(prompt->prompt_text.size()));
+        llm_set_kv_cache_len(1 + static_cast<uint32_t>(prompt->prompt_text.size()));
+        llm_offload_kv_cache();
     }
-    if (params.builtin_sampler_rng_policy == COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION)
+
+    // Reset RNG on stop (matches non-streaming behavior)
+    if (stop_reached && params.builtin_sampler_rng_policy == COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION)
         reset_builtin_sampler_rng();
 
     return true;
@@ -280,6 +325,88 @@ static void set_graph_backends(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml
 
 bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, cosyvoice_generated_speech_ptr result)
 {
+    return token2wav_ext(token_ids, n_tokens, speed, prompt, nullptr, false, true, result);
+}
+
+template<int n>
+struct dit_sched_config
+{
+    struct graph_config_t
+    {
+        bool rebuild;
+        bool cache_kv;
+        bool load;
+        bool offload;
+        bool slide;
+        bool slice;
+        bool mask;
+        int64_t cut_len;
+    };
+
+    graph_config_t graph_config[n];
+
+    const auto& operator[](int i) const { return graph_config[i]; }
+
+    dit_sched_config(const cosyvoice_context_params_v3_cpp& params, int64_t cut_len, uint32_t offset, bool streaming, bool kv_slidable)
+    {
+        if (!streaming)
+        {
+            for (int i = 0; i != n; ++i)
+            {
+                graph_config[i].rebuild = false;
+                graph_config[i].cache_kv = false;
+                graph_config[i].load = false;
+                graph_config[i].offload = false;
+                graph_config[i].slide = false;
+                graph_config[i].slice = false;
+                graph_config[i].mask = false;
+                graph_config[i].cut_len = 0;
+            }
+
+            graph_config[0].rebuild = true;
+            graph_config[1].rebuild = true;
+            graph_config[n - 1].rebuild = true;
+            graph_config[n - 1].cut_len = cut_len;
+        }
+        else
+        {
+            if (offset != 0) cut_len = 0;
+
+            const auto n_offloadable_steps = params.dit_kv_offloadable_slots;
+            const auto n_fixed_steps = params.dit_kv_fixed_slots;
+            const auto n_no_cache_steps = static_cast<uint32_t>(n) - n_offloadable_steps - n_fixed_steps;
+
+            for (int i = 0; i != n; ++i)
+            {
+                graph_config[i].rebuild = i == 0
+                    || i == 1
+                    || offset != 0 && i == n_no_cache_steps - 1
+                    || i == n_no_cache_steps
+                    || i == n - 1 && cut_len != 0
+                    || !kv_slidable && i >= n_no_cache_steps;
+                graph_config[i].cache_kv = i >= n_no_cache_steps;
+                graph_config[i].offload = i >= n_no_cache_steps && i < n_no_cache_steps + n_offloadable_steps;
+                graph_config[i].load = graph_config[i].offload && offset != 0;
+                graph_config[i].mask = i < n_no_cache_steps && offset != 0;
+                graph_config[i].cut_len = i == n - 1 && offset == 0 ? cut_len : 0;
+                if (i == n_no_cache_steps - 1 && offset != 0)
+                    graph_config[i].cut_len = offset;
+                graph_config[i].slice = offset != 0 && i == n_no_cache_steps;
+                graph_config[i].slide = kv_slidable && graph_config[i].cache_kv && !graph_config[i].offload && i != n - 1;
+            }
+        }
+    }
+};
+
+bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, uint32_t* offset, bool streaming, bool finalize, cosyvoice_generated_speech_ptr result)
+{
+    use_count_guard _guard(this);
+    if (streaming && offset && *offset == 0)
+    {
+        worker->flow_cache.clear();
+        worker->chunk_boundaries.clear();
+    }
+
     const auto& params = shared->params;
     auto& sched = worker->sched;
     auto& flow = cv3_shared->flow;
@@ -295,17 +422,18 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
 
     ggml_reset(ctx0.get());
     ggml_reset(ctx1.get());
-    if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
-        ggml_backend_sched_synchronize(sched.get());
     ggml_backend_sched_reset(sched.get());
 
     ggml_tensor* token = ggml_new_tensor_1d(ctx0.get(), GGML_TYPE_I32, n_tokens);
     ggml_tensor* prompt_token = ggml_new_tensor_1d(ctx0.get(), GGML_TYPE_I32, prompt->flow_prompt_speech_tokens.second);
     ggml_tensor* prompt_feat = ggml_new_tensor_2d(ctx0.get(), GGML_TYPE_F32, prompt->prompt_speech_feat.shape[1], prompt->prompt_speech_feat.shape[0]);
     ggml_tensor* embedding = ggml_new_tensor_2d(ctx0.get(), GGML_TYPE_F32, prompt->flow_embedding.shape[1], prompt->flow_embedding.shape[0]);
+    auto kv_cache = &worker->dit_kv_cache;
 
+    // Phase 1: Flow encode
     ggml_cgraph* gf = new_cgraph(ctx0.get());
-    auto [mu, spks, conds, cut_len] = flow.build_cgraph_encode(ctx0.get(), token, prompt_token, prompt_feat, embedding, op_caps);
+    auto [mu, spks, conds, cut_len] = flow.build_cgraph_encode(ctx0.get(), token, prompt_token, prompt_feat, embedding, op_caps, (flow.decoder.diffusion_steps - params.dit_kv_fixed_slots - params.dit_kv_offloadable_slots) == 0 && offset ? *offset : 0, streaming);
+    const auto seq_len = mu->ne[1];
     auto ditctx = flow.decoder.prepare_context(ctx1.get(), mu, spks, conds);
     do
     {
@@ -329,24 +457,67 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
         }
     } while (false);
 
+    dit_sched_config<flow.decoder.diffusion_steps> config(params, cut_len, offset ? *offset : 0, streaming, kv_cache->can_reuse());
+    if (offset)
+        if (flow.decoder.diffusion_steps == params.dit_kv_fixed_slots + params.dit_kv_offloadable_slots)
+            *offset += seq_len;
+        else
+            *offset = seq_len;
+
+    if (streaming && offset)
+        worker->chunk_boundaries.push_back(*offset);
+
+    if (offset)
+    {
+        const auto chunk_len = *offset - (worker->chunk_boundaries.size() > 1 ? worker->chunk_boundaries.rbegin()[1] : 0);
+        if (kv_cache->cur_len + chunk_len >= params.dit_kv_cache_length)
+            kv_cache->cur_len = params.dit_kv_cache_length - chunk_len;
+    }
+
     uint32_t noise_len = static_cast<uint32_t>(ggml_nelements(ditctx.x));
     float* noise_buffer = shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_FLOW, noise_len, nullptr, shared->noise_callback_ctx);
     ggml_backend_tensor_set_async(backend.get(), ditctx.x, noise_buffer, 0, ggml_nbytes(ditctx.x));
 
+    // Phase 2: Flow decode steps
     ggml_tensor* t_leaf;
     ggml_tensor* position_ids;
-    auto feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 1, op_caps, cut_len, t_leaf, position_ids);
+    ggml_tensor* attn_mask;
+    if (config[0].cache_kv) kv_cache->bind_slot(0);
+    auto feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 1, op_caps, config[0].cut_len, t_leaf, position_ids, gf, config[0].cache_kv ? kv_cache : nullptr, config[0].mask ? &attn_mask : nullptr);
     ggml_build_forward_expand(gf, feat);
     set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps);
     ggml_backend_sched_synchronize(sched.get());
     ggml_backend_sched_alloc_graph(sched.get(), gf);
-    if (!op_caps.fill) ggml_set_zero(t_leaf);
-    for (int64_t i = 0; i < position_ids->ne[1]; ++i)
+
+    auto post_process = [&](int step)
     {
-        auto cur_row = reinterpret_cast<int32_t*>(position_ids->data) + i * position_ids->ne[0];
-        for (int32_t j = 0; j < position_ids->ne[0]; ++j)
-            cur_row[j] = j;
-    }
+        if (!op_caps.fill) ggml_set_zero(t_leaf);
+
+        const auto base = config[step].cache_kv ? kv_cache->cur_len : 0;
+        for (int64_t i = 0; i < position_ids->ne[1]; ++i)
+        {
+            auto cur_row = reinterpret_cast<int32_t*>(position_ids->data) + i * position_ids->ne[0];
+            for (int32_t j = 0; j < position_ids->ne[0]; ++j)
+                cur_row[j] = j + base;
+        }
+
+        if (config[step].mask)
+        {
+            const auto& bounds = worker->chunk_boundaries;
+            for (int64_t i = 0; i < attn_mask->ne[0]; ++i)
+            {
+                auto it = std::upper_bound(bounds.begin(), bounds.end(), static_cast<uint32_t>(i));
+                int64_t block_end = it != bounds.end()
+                    ? static_cast<int64_t>(*it)
+                    : attn_mask->ne[0];
+                auto row = reinterpret_cast<ggml_fp16_t*>(attn_mask->data) + i * attn_mask->ne[1];
+                for (int64_t j = 0; j < attn_mask->ne[1]; ++j)
+                    row[j] = j < block_end ? 0 : 0xFC00;
+            }
+        }
+    };
+
+    post_process(0);
 
     ggml_backend_tensor_set_async(backend.get(), token, token_ids, 0, token->nb[1]);
     ggml_backend_tensor_set_async(backend.get(), prompt_token, prompt->flow_prompt_speech_tokens.first.get(), 0, prompt_token->nb[1]);
@@ -356,7 +527,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
     worker->status = ggml_backend_sched_graph_compute(sched.get(), gf);
     shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_FLOW, noise_len, noise_buffer, shared->noise_callback_ctx);
     if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED)
-        llm_set_kv_cache_len(0); // Reset the visible KV length when sharing the buffer.
+        llm_set_kv_cache_len(0);
     if (worker->status != GGML_STATUS_SUCCESS)
         return false;
 
@@ -368,78 +539,137 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
         memset(tensor->src, 0, sizeof(tensor->src));
     }
 
-    ggml_backend_tensor_copy_async(backend.get(), backend.get(), feat, ditctx.x);
-
-    ggml_reset(ctx0.get());
-    ggml_backend_sched_reset(sched.get());
-    gf = new_cgraph(ctx0.get());
-    feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 2, op_caps, cut_len, t_leaf, position_ids);
-
-    ggml_build_forward_expand(gf, feat);
-    set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps);
-
-    ggml_backend_sched_alloc_graph(sched.get(), gf);
-    if (!op_caps.fill) ggml_set_zero(t_leaf);
-    for (int64_t i = 0; i < position_ids->ne[1]; ++i)
+    int offload_slot = 0;
+    int kv_slot = config[0].cache_kv && !config[0].offload;
+    for (int step = 1; step != flow.decoder.diffusion_steps; ++step)
     {
-        auto cur_row = reinterpret_cast<int32_t*>(position_ids->data) + i * position_ids->ne[0];
-        for (int32_t j = 0; j < position_ids->ne[0]; ++j)
-            cur_row[j] = j;
-    }
-    worker->status = ggml_backend_sched_graph_compute(sched.get(), gf);
-    if (worker->status != GGML_STATUS_SUCCESS) return false;
+        if (worker->stop_flag.load(std::memory_order_acquire))
+        {
+            worker->stop_flag.store(false, std::memory_order_release);
+            ggml_reset(ctx0.get());
+            ggml_backend_sched_reset(sched.get());
+            cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, "token2wav stopped during DiT steps.\n");
+            return false;
+        }
 
-    auto scale_node = feat->src[1];
-    GGML_ASSERT(scale_node->op == GGML_OP_SCALE);
+        if (config[step].slice)
+        {
+            const auto cut_len = config[step - 1].cut_len;
+            reinterpret_cast<char*&>(ditctx.cond_in->data) += static_cast<size_t>(ditctx.cond_in->nb[1]) * cut_len;
+            ditctx.cond_in->ne[1] -= cut_len;
+            reinterpret_cast<char*&>(ditctx.mu_in->data) += static_cast<size_t>(ditctx.mu_in->nb[1]) * cut_len;
+            ditctx.mu_in->ne[1] -= cut_len;
 
-    for (int step = 3; step != flow.decoder.t_span.size() - 1; ++step)
-    {
+            memcpy(ditctx.x->ne, feat->ne, sizeof(ditctx.x->ne));
+            memcpy(ditctx.x->nb, feat->nb, sizeof(ditctx.x->nb));
+        }
         ggml_backend_tensor_copy_async(backend.get(), backend.get(), feat, ditctx.x);
 
-        auto [t, dt] = flow.decoder.get_t_and_dt(ctx0.get(), step);
-        reinterpret_cast<float*>(t_leaf->op_params)[op_caps.fill ? 0 : 1] = t;
-        reinterpret_cast<float*>(scale_node->op_params)[0] = dt;
+        if (config[step].rebuild)
+        {
+            if (config[step].cache_kv && !config[step].offload)
+                kv_cache->bind_slot(kv_slot++);
+            ggml_reset(ctx0.get());
+            ggml_backend_sched_reset(sched.get());
+
+            if (config[step].load)
+            {
+                kv_cache->load_slot(backend.get(), sched.get(), offload_slot);
+                ggml_backend_sched_reset(sched.get());
+            }
+
+            gf = new_cgraph(ctx0.get());
+            feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, step + 1, op_caps, config[step].cut_len, t_leaf, position_ids, gf, config[step].cache_kv ? kv_cache : nullptr, config[step].mask ? &attn_mask : nullptr);
+            ggml_build_forward_expand(gf, feat);
+            set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps);
+            ggml_backend_sched_alloc_graph(sched.get(), gf);
+            post_process(step);
+        }
+        else
+        {
+            auto scale_node = feat->src[1];
+            GGML_ASSERT(scale_node->op == GGML_OP_SCALE);
+            auto [t, dt] = flow.decoder.get_t_and_dt(ctx0.get(), step);
+            reinterpret_cast<float*>(t_leaf->op_params)[op_caps.fill ? 0 : 1] = t;
+            reinterpret_cast<float*>(scale_node->op_params)[0] = dt;
+
+            if (config[step].load)
+                kv_cache->load_slot(backend.get(), sched.get(), offload_slot);
+        }
 
         worker->status = ggml_backend_sched_graph_compute(sched.get(), gf);
         if (worker->status != GGML_STATUS_SUCCESS)
             return false;
+
+        if (config[step].offload)
+        {
+            if (step != flow.decoder.diffusion_steps - 1 && config[step + 1].rebuild)
+                ggml_backend_sched_reset(sched.get());
+            kv_cache->offload_slot(backend.get(), sched.get(), offload_slot++, kv_cache->cur_len + static_cast<uint32_t>(position_ids->ne[0]));
+        }
+        if (config[step].slide)
+            kv_cache->slide_kv_slot();
     }
 
-    ggml_backend_tensor_copy_async(backend.get(), backend.get(), feat, ditctx.x);
-    ggml_reset(ctx0.get());
-    ggml_backend_sched_reset(sched.get());
-    gf = new_cgraph(ctx0.get());
-    feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, static_cast<int>(flow.decoder.t_span.size() - 1), op_caps, cut_len, t_leaf, position_ids);
-
-    ggml_build_forward_expand(gf, feat);
-    set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps);
-
-    ggml_backend_sched_alloc_graph(sched.get(), gf);
-    if (!op_caps.fill) ggml_set_zero(t_leaf);
-    for (int64_t i = 0; i < position_ids->ne[1]; ++i)
-    {
-        auto cur_row = reinterpret_cast<int32_t*>(position_ids->data) + i * position_ids->ne[0];
-        for (int32_t j = 0; j < position_ids->ne[0]; ++j)
-            cur_row[j] = j;
-    }
-    worker->status = ggml_backend_sched_graph_compute(sched.get(), gf);
-    if (worker->status != GGML_STATUS_SUCCESS) return false;
-
+    // Phase 3: Copy flow output to speech_feat (persistent buffer)
     ggml_reset(ctx1.get());
-    ggml_tensor* speech_feat = ggml_new_tensor(ctx1.get(), feat->type, GGML_MAX_DIMS, feat->ne);
-    ggml_backend_tensor_alloc(token2wav_buffer.get(), speech_feat, ggml_backend_buffer_get_base(token2wav_buffer.get()));
-    ggml_backend_tensor_copy_async(backend.get(), backend.get(), feat, speech_feat);
+    const auto cache_length = streaming && offset ? static_cast<int64_t>(worker->flow_cache.size() / feat->ne[0]) : 0;
+    ggml_tensor* speech_feat = ggml_new_tensor_2d(ctx1.get(), feat->type, feat->ne[0], feat->ne[1] + cache_length);
+    if (cache_length != 0)
+    {
+        auto buft = ggml_backend_get_default_buffer_type(backend.get());
+        auto size = ggml_backend_buft_get_alloc_size(buft, speech_feat);
+        if (size > ggml_backend_buffer_get_size(token2wav_buffer.get()))
+            reset_shared_buffer(ggml_backend_alloc_ctx_tensors_from_buft(ctx1.get(), buft));
+        else
+            ggml_backend_tensor_alloc(token2wav_buffer.get(), speech_feat,
+                ggml_backend_buffer_get_base(token2wav_buffer.get()));
 
+        ggml_backend_tensor_set_async(backend.get(), speech_feat, worker->flow_cache.data(), 0, speech_feat->nb[2] - feat->nb[2]);
+        ggml_backend_tensor_copy_async(backend.get(), backend.get(), feat,
+            ggml_view_2d(ctx0.get(), speech_feat, speech_feat->ne[0], feat->ne[1], speech_feat->nb[1], speech_feat->nb[1] * cache_length));
+    }
+    else
+    {
+        ggml_backend_tensor_alloc(token2wav_buffer.get(), speech_feat,
+            ggml_backend_buffer_get_base(token2wav_buffer.get()));
+        ggml_backend_tensor_copy_async(backend.get(), backend.get(), feat, speech_feat);
+    }
+
+    if (!finalize)
+    {
+        const auto overlap = static_cast<int64_t>(cv3_shared->hift_overlap);
+        const auto n_feat_frames = feat->ne[1];
+        const auto frames_to_keep = std::min(overlap, n_feat_frames);
+        const auto elements_to_keep = static_cast<size_t>(frames_to_keep * feat->ne[0]);
+
+        worker->flow_cache.resize(elements_to_keep);
+        if (frames_to_keep > 0)
+        {
+            const auto byte_offset = static_cast<size_t>((n_feat_frames - frames_to_keep) * feat->nb[1]);
+            const auto byte_size = static_cast<size_t>(frames_to_keep * feat->nb[1]);
+            ggml_backend_tensor_get_async(backend.get(), feat, worker->flow_cache.data(), byte_offset, byte_size);
+        }
+    }
+
+    if (config[flow.decoder.diffusion_steps - 1].cache_kv)
+        if (finalize)
+            kv_cache->cur_len = 0;
+        else
+            kv_cache->cur_len += static_cast<uint32_t>(position_ids->ne[0]);
     ggml_reset(ctx0.get());
     ggml_backend_sched_reset(sched.get());
     gf = new_cgraph(ctx0.get());
 
+    speech_feat = ggml_permute(ctx0.get(), speech_feat, 1, 0, 2, 3);
     if (auto ne0 = static_cast<int64_t>(speech_feat->ne[0] / speed); ne0 != speech_feat->ne[0])
         speech_feat = ggml_interpolate(ctx0.get(), speech_feat,
             ne0, speech_feat->ne[1], speech_feat->ne[2], speech_feat->ne[3],
             GGML_SCALE_MODE_BILINEAR);
+    else
+        speech_feat = ggml_cont(ctx0.get(), speech_feat);
 
-    auto [generated_speech, noise] = hift.build_cgraph(ctx0.get(), speech_feat);
+    auto [generated_speech, noise] = hift.build_cgraph(ctx0.get(), speech_feat, finalize);
     ggml_build_forward_expand(gf, generated_speech);
     set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps);
 
@@ -457,11 +687,7 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
     result->length = static_cast<uint32_t>(generated_speech->ne[0]);
     worker->status = ggml_backend_sched_graph_compute(sched.get(), gf);
     shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_HIFT, noise_len, noise_buffer, shared->noise_callback_ctx);
-    if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
-    {
-        ggml_backend_sched_reset(sched.get());
-        worker->kv_cache.load_cache(backend.get(), sched.get());
-    }
+
     return worker->status == GGML_STATUS_SUCCESS;
 }
 
@@ -486,7 +712,7 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
         else prefix_len = 0;
     }
 
-    bool tts_job(const char* text, const char* instruction, float speed, cosyvoice_inference_mode mode, cosyvoice_generated_speech_ptr result)
+    bool tts_job(const char* text, const char* instruction, float speed, cosyvoice_inference_mode mode, cosyvoice_generated_speech_ptr result, cosyvoice_tts_audio_callback_t callback, void* user_data)
     {
         instruction_cache.resize(prefix_len);
         if (instruction)
@@ -509,14 +735,16 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
         if (!(flags & COSYVOICE_TTS_FLAG_SPLIT_TEXT))
         {
             ctx->tokenize(effective_text, this, true);
-            return cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result);
+            return result ? cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result)
+                : cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data);
         }
 
         const auto fragments = cosyvoice_internal::split_into_fragments(effective_text);
         if (fragments.size() <= 1)
         {
             ctx->tokenize(effective_text, this, true);
-            return cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result);
+            return result ? cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result)
+                : cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data);
         }
 
         // Compute the maximum text-token budget per chunk:
@@ -540,7 +768,8 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
         if (params.n_max_seq <= o + 1u || !(r > 0.0f))
         {
             ctx->tokenize(effective_text, this, true);
-            return cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result);
+            return result ? cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result)
+                : cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data);
         }
         const auto max_text_tokens = static_cast<std::size_t>(
             static_cast<float>(params.n_max_seq - o - 1u) / (1.0f + r));
@@ -548,7 +777,8 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
         if (max_text_tokens == 0)
         {
             ctx->tokenize(effective_text, this, true);
-            return cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result);
+            return result ? cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result)
+                : cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data);
         }
 
         // Fast-split path: tokenize each fragment once and merge token-ID vectors,
@@ -573,13 +803,82 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
             {
                 const auto& t = chunk_token_list.empty() ? fragment_tokens[0] : chunk_token_list[0];
                 tokens = t;
-                return cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result);
+                return result ? cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result)
+                    : cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data);
             }
 
-            combined_pcm.clear();
+            if (result)
+            {
+                combined_pcm.clear();
+                for (auto& chunk_tokens : chunk_token_list)
+                {
+                    if (ctx->stop_requested())
+                    {
+                        result->data = nullptr;
+                        result->length = 0;
+                        return false;
+                    }
+                    tokens = std::move(chunk_tokens);
+                    cosyvoice_generated_speech part = {};
+                    if (!cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, &part)
+                        || !part.data || part.length == 0)
+                    {
+                        result->data = nullptr;
+                        result->length = 0;
+                        return false;
+                    }
+                    combined_pcm.insert(combined_pcm.end(), part.data, part.data + part.length);
+                }
+                result->data = combined_pcm.data();
+                result->length = static_cast<uint32_t>(combined_pcm.size());
+                return true;
+            }
+
             for (auto& chunk_tokens : chunk_token_list)
             {
+                if (ctx->stop_requested())
+                    return false;
                 tokens = std::move(chunk_tokens);
+                if (!cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data))
+                    return false;
+            }
+            return true;
+        }
+
+        // Slow-split path: tokenize each fragment only for counting,
+        // reassemble text chunks, then re-tokenize each chunk.
+        cosyvoice_tokenization_result_impl tokens_scratch;
+        const auto token_count = [&](std::string_view fragment) -> std::size_t
+            {
+                tokens_scratch.tokens.clear();
+                ctx->tokenize(fragment.data(), static_cast<uint32_t>(fragment.size()), &tokens_scratch, true);
+                return tokens_scratch.get_n_tokens();
+            };
+        const auto chunks = cosyvoice_internal::reassemble_by_token_budget(
+            fragments, max_text_tokens, token_count);
+
+        if (chunks.size() <= 1)
+        {
+            ctx->tokenize(effective_text, this, true);
+            return result ? cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result)
+                : cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data);
+        }
+
+        // Multi-chunk path: synthesize each chunk and copy its PCM into a context-owned buffer.
+        // cosyvoice_tts() points result->data at an internal token2wav buffer that is overwritten
+        // on the next call, so the copy must happen before the following synthesis begins.
+        combined_pcm.clear();
+        if (result)
+        {
+            for (const auto& chunk : chunks)
+            {
+                if (ctx->stop_requested())
+                {
+                    result->data = nullptr;
+                    result->length = 0;
+                    return false;
+                }
+                ctx->tokenize(chunk.c_str(), this, true);
                 cosyvoice_generated_speech part = {};
                 if (!cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, &part)
                     || !part.data || part.length == 0)
@@ -592,47 +891,53 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
             }
             result->data = combined_pcm.data();
             result->length = static_cast<uint32_t>(combined_pcm.size());
-            return true;
         }
-
-        // Slow-split path: tokenize each fragment only for counting,
-        // reassemble text chunks, then re-tokenize each chunk.
-        cosyvoice_tokenization_result_impl tokens_scratch;
-        const auto token_count = [&](std::string_view fragment) -> std::size_t
-        {
-            tokens_scratch.tokens.clear();
-            ctx->tokenize(fragment.data(), static_cast<uint32_t>(fragment.size()), &tokens_scratch, true);
-            return tokens_scratch.get_n_tokens();
-        };
-        const auto chunks = cosyvoice_internal::reassemble_by_token_budget(
-            fragments, max_text_tokens, token_count);
-
-        if (chunks.size() <= 1)
-        {
-            ctx->tokenize(effective_text, this, true);
-            return cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result);
-        }
-
-        // Multi-chunk path: synthesize each chunk and copy its PCM into a context-owned buffer.
-        // cosyvoice_tts() points result->data at an internal token2wav buffer that is overwritten
-        // on the next call, so the copy must happen before the following synthesis begins.
-        combined_pcm.clear();
-        for (const auto& chunk : chunks)
-        {
-            ctx->tokenize(chunk.c_str(), this, true);
-            cosyvoice_generated_speech part = {};
-            if (!cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, &part)
-                || !part.data || part.length == 0)
+        else
+            for (const auto& chunk : chunks)
             {
-                result->data = nullptr;
-                result->length = 0;
-                return false;
+                if (ctx->stop_requested())
+                    return false;
+                ctx->tokenize(chunk.c_str(), this, true);
+                if (!cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data))
+                    return false;
             }
-            combined_pcm.insert(combined_pcm.end(), part.data, part.data + part.length);
-        }
-        result->data = combined_pcm.data();
-        result->length = static_cast<uint32_t>(combined_pcm.size());
         return true;
+    }
+
+    bool cosyvoice_tts_stream_with_postprocess(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_tts_audio_callback_t callback, void* user_data)
+    {
+        bool ok;
+        if (flags & COSYVOICE_TTS_FLAG_FADE_IN)
+            ok = cosyvoice_tts_stream(ctx, token_ids, n_tokens, speed, this, callback, user_data);
+        else
+        {
+            struct callback_wrapper_context
+            {
+                cosyvoice_tts_audio_callback_t callback;
+                void* user_data;
+                uint32_t fade_samples;
+                uint32_t processed_samples = 0;
+            } cb_ctx{ callback, user_data, fade_samples };
+
+            auto callback_wrapper = [](const float* data, uint32_t length, void* user_data) -> bool
+            {
+                auto ctx = static_cast<callback_wrapper_context*>(user_data);
+                if (ctx->processed_samples < ctx->fade_samples)
+                {
+                    const uint32_t fade_len = std::min<uint32_t>(ctx->fade_samples - ctx->processed_samples, length);
+                    for (uint32_t i = 0; i < fade_len; ++i)
+                    {
+                        const float ramp = static_cast<float>(ctx->processed_samples + i + 1) / static_cast<float>(ctx->fade_samples + 1);
+                        const_cast<float*>(data)[i] *= ramp;
+                    }
+                    ctx->processed_samples += fade_len;
+                }
+                return ctx->callback(data, length, ctx->user_data);
+            };
+            ok = cosyvoice_tts_stream(ctx, token_ids, n_tokens, speed, this, callback_wrapper, &cb_ctx);
+        }
+
+        return ok;
     }
 
     bool cosyvoice_tts_with_postprocess(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_generated_speech_ptr result)
@@ -735,15 +1040,30 @@ uint32_t cosyvoice_tts_context_set_flags(cosyvoice_tts_context_t ctx, uint32_t f
 
 bool cosyvoice_tts_zero_shot(cosyvoice_tts_context_t ctx, const char* text, float speed, cosyvoice_generated_speech_ptr result)
 {
-    return ctx->tts_job(text, nullptr, speed, COSYVOICE_INFERENCE_MODE_ZERO_SHOT, result);
+    return ctx->tts_job(text, nullptr, speed, COSYVOICE_INFERENCE_MODE_ZERO_SHOT, result, nullptr, nullptr);
 }
 
 bool cosyvoice_tts_instruct(cosyvoice_tts_context_t ctx, const char* text, const char* instruction, float speed, cosyvoice_generated_speech_ptr result)
 {
-    return ctx->tts_job(text, instruction, speed, COSYVOICE_INFERENCE_MODE_INSTRUCT, result);
+    return ctx->tts_job(text, instruction, speed, COSYVOICE_INFERENCE_MODE_INSTRUCT, result, nullptr, nullptr);
 }
 
 bool cosyvoice_tts_cross_lingual(cosyvoice_tts_context_t ctx, const char* text, float speed, cosyvoice_generated_speech_ptr result)
 {
-    return ctx->tts_job(text, nullptr, speed, COSYVOICE_INFERENCE_MODE_CROSS_LINGUAL, result);
+    return ctx->tts_job(text, nullptr, speed, COSYVOICE_INFERENCE_MODE_CROSS_LINGUAL, result, nullptr, nullptr);
+}
+
+bool cosyvoice_tts_zero_shot_stream(cosyvoice_tts_context_t ctx, const char* text, float speed, cosyvoice_tts_audio_callback_t callback, void* user_data)
+{
+    return ctx->tts_job(text, nullptr, speed, COSYVOICE_INFERENCE_MODE_ZERO_SHOT, nullptr, callback, user_data);
+}
+
+bool cosyvoice_tts_instruct_stream(cosyvoice_tts_context_t ctx, const char* text, const char* instruction, float speed, cosyvoice_tts_audio_callback_t callback, void* user_data)
+{
+    return ctx->tts_job(text, instruction, speed, COSYVOICE_INFERENCE_MODE_INSTRUCT, nullptr, callback, user_data);
+}
+
+bool cosyvoice_tts_cross_lingual_stream(cosyvoice_tts_context_t ctx, const char* text, float speed, cosyvoice_tts_audio_callback_t callback, void* user_data)
+{
+    return ctx->tts_job(text, nullptr, speed, COSYVOICE_INFERENCE_MODE_CROSS_LINGUAL, nullptr, callback, user_data);
 }

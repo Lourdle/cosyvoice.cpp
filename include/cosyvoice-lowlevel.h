@@ -70,6 +70,7 @@ typedef float* (*cosyvoice_noise_callback_t)(
 
 #define COSYVOICE_CONTEXT_PARAMS_VERSION     (0ul)
 #define COSYVOICE_CONTEXT_PARAMS_V2_VERSION  (1ul)
+#define COSYVOICE_CONTEXT_PARAMS_V3_VERSION  (2ul)
 
 // ----------------------------------------------------------------------------
 // Logging Utilities
@@ -117,7 +118,7 @@ struct _is_same<T, T> { static constexpr bool value = true; };
  * @note This overload is only available in C++ and requires the full definition of all context parameter types.
  */
 template<typename params_t>
-inline cosyvoice_context_t cosyvoice_load_from_file_ext(
+constexpr cosyvoice_context_t cosyvoice_load_from_file_ext(
     const char*                       filename,
     const params_t*                   params,
     ggml_backend_t                    backend,
@@ -130,10 +131,15 @@ inline cosyvoice_context_t cosyvoice_load_from_file_ext(
         return cosyvoice_load_from_file_ext(filename, params, backend, n_threads, COSYVOICE_CONTEXT_PARAMS_VERSION);
     else if constexpr (_is_same<params_t, cosyvoice_context_params_v2_t>::value)
         return cosyvoice_load_from_file_ext(filename, &params->base_params, backend, n_threads, COSYVOICE_CONTEXT_PARAMS_V2_VERSION);
+    else if constexpr (_is_same<params_t, cosyvoice_context_params_v3_t>::value)
+        return cosyvoice_load_from_file_ext(filename, &params->base_params.base_params, backend, n_threads, COSYVOICE_CONTEXT_PARAMS_V3_VERSION);
     else
     {
-        static_assert(_is_same<params_t, cosyvoice_context_params_v2_cpp>::value, "Unsupported context parameter type");
-        return cosyvoice_load_from_file_ext(filename, params, backend, n_threads, COSYVOICE_CONTEXT_PARAMS_V2_VERSION);
+        static_assert(_is_same<params_t, cosyvoice_context_params_v2_cpp>::value || _is_same<params_t, cosyvoice_context_params_v3_cpp>::value, "Unsupported context parameter type");
+        constexpr auto version = _is_same<params_t, cosyvoice_context_params_v3_cpp>::value
+            ? COSYVOICE_CONTEXT_PARAMS_V3_VERSION
+            : COSYVOICE_CONTEXT_PARAMS_V2_VERSION;
+        return cosyvoice_load_from_file_ext(filename, reinterpret_cast<const cosyvoice_context_params_t*>(params), backend, n_threads, version);
     }
 }
 
@@ -217,6 +223,16 @@ COSYVOICE_API uint32_t cosyvoice_llm_get_kv_cache_len(cosyvoice_context_t ctx);
  */
 COSYVOICE_API bool cosyvoice_llm_set_kv_cache_len(cosyvoice_context_t ctx, uint32_t len);
 
+/**
+* @brief Offload the KV cache to CPU memory.
+*/
+COSYVOICE_API void cosyvoice_llm_offload_kv_cache(cosyvoice_context_t ctx);
+
+/**
+* @brief Load the KV cache from CPU memory back to the backend.
+*/
+COSYVOICE_API void cosyvoice_llm_load_kv_cache(cosyvoice_context_t ctx);
+
 // ----------------------------------------------------------------------------
 // Sampling and Token Management
 // ----------------------------------------------------------------------------
@@ -267,6 +283,20 @@ COSYVOICE_API bool cosyvoice_llm_job(
 );
 
 /**
+* @brief Run the LLM with the given input tokens and prompt, with additional options.
+ * @param max_new_tokens Maximum number of new tokens to generate. If 0, no new tokens are generated.
+ * @param final Output parameter indicating whether the generation is complete (true) or more tokens can be generated (false).
+ */
+COSYVOICE_API bool cosyvoice_llm_job_ext(
+    cosyvoice_context_t ctx,
+    const int*          text,
+    uint32_t            text_len,
+    cosyvoice_prompt_t  prompt,
+    uint32_t            max_new_tokens,
+    bool*               final
+);
+
+/**
  * @brief Convert generated speech tokens to waveform data.
  */
 COSYVOICE_API bool cosyvoice_token2wav(
@@ -276,6 +306,21 @@ COSYVOICE_API bool cosyvoice_token2wav(
     float                          speed,
     cosyvoice_prompt_t             prompt,
     cosyvoice_generated_speech_ptr generated_speech
+);
+
+/**
+* @brief Convert generated speech tokens to waveform data with additional options.
+*/
+COSYVOICE_API bool cosyvoice_token2wav_ext(
+    cosyvoice_context_t            ctx,
+    const int*                     token_ids,
+    uint32_t                       n_tokens,
+    float                          speed,
+    cosyvoice_prompt_t             prompt,
+    uint32_t*                      offset,
+    bool                           streaming,
+    bool                           finalize,
+    cosyvoice_generated_speech_ptr result
 );
 
 /**
@@ -289,6 +334,31 @@ COSYVOICE_API bool cosyvoice_tts(
     cosyvoice_prompt_t             prompt,
     cosyvoice_generated_speech_ptr result
 );
+
+/**
+ * @brief Run the full TTS pipeline from input tokens to waveform output with streaming support.
+ * @param callback Callback function to receive generated audio chunks.
+ * @param user_data User-defined data passed to the callback.
+ */
+COSYVOICE_API bool cosyvoice_tts_stream(
+    cosyvoice_context_t            ctx,
+    const int*                     text,
+    uint32_t                       text_len,
+    float                          speed,
+    cosyvoice_prompt_t             prompt,
+    cosyvoice_tts_audio_callback_t callback,
+    void*                          user_data
+);
+
+/**
+* @brief Get the number of tokens processed in each chunk during streaming inference.
+*/
+COSYVOICE_API uint32_t cosyvoice_get_chunk_tokens(cosyvoice_context_t ctx);
+
+/**
+* @brief Set the number of tokens processed in each chunk during streaming inference.
+ */
+COSYVOICE_API void cosyvoice_set_chunk_tokens(cosyvoice_context_t ctx, uint32_t n_tokens);
 
 // ----------------------------------------------------------------------------
 // Tokenizer Operations
@@ -386,6 +456,26 @@ COSYVOICE_API uint32_t cosyvoice_get_hift_rand_ini_len(cosyvoice_context_t ctx);
  * @brief Override the shared HiFT initialization-noise buffer.
  */
 COSYVOICE_API void     cosyvoice_set_hift_rand_ini(cosyvoice_context_t ctx, const float* data);
+
+// ----------------------------------------------------------------------------
+// Stop-Request API
+// ----------------------------------------------------------------------------
+
+/**
+ * @brief Request that the current worker's job stop as soon as possible.
+ * @param ctx Model context.
+ */
+COSYVOICE_API void cosyvoice_request_stop(cosyvoice_context_t ctx);
+
+/**
+ * @brief Check and atomically clear the stop-requested flag for the current worker.
+ * @param ctx Model context.
+ * @return True if a stop was requested, false otherwise.
+ * @note Used internally by hot paths (llm_job_ext, token2wav_ext, tts) to
+ *       detect stop requests. The flag is atomically reset so subsequent calls
+ *       return false.
+ */
+COSYVOICE_API bool cosyvoice_stop_requested(cosyvoice_context_t ctx);
 
 // ----------------------------------------------------------------------------
 // Prompt Utilities

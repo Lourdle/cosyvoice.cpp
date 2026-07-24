@@ -15,6 +15,8 @@ C++/GGML port of the Python CosyVoice inference pipeline released by the origina
 
 This repository ships independent engineering work and does not contain official support commitments.
 
+Supports **zero-shot**, **instruct**, and **cross-lingual** TTS modes with both synchronous and **streaming** output. The frontend pipeline (speech tokenizer + speaker embedding) handles reference audio processing, or pre-encoded `prompt_speech` can be reused across sessions to skip the ONNX frontend entirely.
+
 This project provides:
 - A core C/C++ inference library (`cosyvoice`)
 - A CLI synthesis tool (`cosyvoice-cli`)
@@ -51,6 +53,10 @@ This project provides:
 | **Interactive REPL** | CLI interactive mode with slash commands for play, save, list, query, and seed control |
 | **Concurrent Serving** | Server `--concurrency` for parallel request handling |
 | **Model Quantization** | Quantize GGUF models to smaller formats (Q2_K through F16) with the built-in `quantize` tool |
+| **Streaming TTS** | Real-time speech generation with low-latency audio delivery via callback — delivers audio chunks as they are synthesized, before the full utterance completes |
+| **DiT KV Cache** | Avoid redundant attention recomputation across diffusion steps during streaming — configurable with fixed (device), offloadable (CPU), and uncached slot categories to trade memory vs. speed |
+| **Flash Attention** | LLM and Flow flash attention support (`--llm-flash-attn`, `--flow-flash-attn`) for reduced memory and faster inference when the backend supports it |
+| **Chunk Tokens Control** | Tune streaming latency vs. overhead tradeoff via `--chunk-tokens` — smaller chunks reduce first-chunk latency, larger chunks reduce RTF |
 | **KV Cache Quantization** | Reduce LLM memory usage via `--llm-kv-cache-type` (f32 / f16 / q8_0 / q5_1 / q4_0 / ...). Supports asymmetric quantization with separate K/V types (e.g. `k=q8_0,v=q4_0`). |
 | **Prompt Speech Reuse** | Pre-encode reference voice once, reuse across multiple synthesis runs — no ONNX overhead |
 | **Audio Backend Plugins** | Choose MINIAUDIO (default) or FFMPEG for multi-format encoding (WAV, MP3, AAC, FLAC, OPUS, M4A) |
@@ -59,6 +65,41 @@ This project provides:
 | **Text Splitting & Fade-in** | Smart text splitting for long inputs and configurable output fade-in postprocessing |
 | **Multiple Backends** | CPU, CUDA, Metal, SYCL (see [Backend Test Status](#backend-test-status)) |
 | **Cross-Platform** | Windows (x64), Linux (x86_64), macOS (arm64) — all tested in CI |
+
+## Streaming TTS & DiT KV Cache
+
+Streaming TTS delivers audio chunks incrementally via a callback function as they are synthesized, without waiting for the full utterance to complete. This enables real-time playback and lower perceived latency.
+
+The streaming pipeline introduces a **DiT KV cache** to avoid redundant computation. During non-streaming inference, the DiT module runs 10 diffusion steps, each computing self-attention over the full audio sequence — resulting in 10× attention recomputation. The KV cache stores intermediate key/value tensors across steps so that each position is computed only once.
+
+### Slot Organization
+
+The DiT KV cache is organized into **slots**, where each slot holds the KV cache for one diffusion step. With the default 10 steps, there can be at most 10 slots.
+
+Slots fall into three categories:
+
+| Category | Memory | Behavior |
+|----------|--------|----------|
+| **Fixed** | Stays on device (GPU) | Fastest; never offloaded |
+| **Offloadable** | Offloaded to CPU when not in use | Saves device memory at the cost of transfer latency |
+| **Uncached** | Not stored at all | Full attention recomputation every step, no extra memory |
+
+Total slots = `fixed + offloadable`. Remaining steps (10 − total) use full recomputation.
+
+The cache is large, so the default is 0 slots (all 10 steps fully recomputed). When enabled and the sequence exceeds the configured cache length, some positions are discarded — inference continues normally but output quality may degrade.
+
+> The DiT KV cache is **only used during streaming TTS**; non-streaming calls ignore it and always perform full recomputation.
+
+### Configuration
+
+DiT KV cache parameters are configured via `cosyvoice_context_params_v3_t` (C API) or the respective CLI/server `--dit-kv-*` flags:
+
+- `--dit-kv-type` / `dit_kv_cache_type`: Storage format (f32/f16/q8_0/...) for the DiT KV cache.
+- `--dit-kv-fixed-slots` / `dit_kv_fixed_slots`: Number of device-resident slots.
+- `--dit-kv-offloadable-slots` / `dit_kv_offloadable_slots`: Number of CPU-offloadable slots.
+- `--dit-kv-cache-length` / `dit_kv_cache_length`: Maximum sequence positions kept in the cache.
+
+Streaming is enabled via `--stream` flag on CLI/server. Chunk granularity is controlled by `--chunk-tokens` (default: 128 tokens per chunk).
 
 ## Pre-converted Models
 

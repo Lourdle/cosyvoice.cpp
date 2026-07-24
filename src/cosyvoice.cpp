@@ -25,6 +25,20 @@ uint32_t cosyvoice_generate_random_seed()
     return dist(gen);
 }
 
+use_count_guard::use_count_guard(cosyvoice_model* model) : worker(model->worker)
+{
+    worker->use_count.fetch_add(1, std::memory_order_relaxed);
+}
+
+use_count_guard::use_count_guard(cosyvoice_context* ctx)
+    : use_count_guard(dynamic_cast<cosyvoice_model*>(ctx)) {}
+
+use_count_guard::~use_count_guard()
+{
+    if (worker->use_count.fetch_sub(1, std::memory_order_release) == 1)
+        worker->cv.notify_all();
+}
+
 #ifdef _WIN32
     #define NOMINMAX
     #include <Windows.h>
@@ -60,7 +74,7 @@ struct cosyvoice_internal_context : cosyvoice_context
 
 struct cosyvoice_context_3 : cosyvoice_internal_context, cosyvoice_tokenizer, cosyvoice_model_3
 {
-    cosyvoice_context_3(const cosyvoice_context_params_v2_cpp& params, ggml_backend_t backend) :
+    cosyvoice_context_3(const cosyvoice_context_params_v3_cpp& params, ggml_backend_t backend) :
         cosyvoice_model_3(backend, params) {}
 };
 
@@ -126,13 +140,41 @@ cosyvoice_context_t cosyvoice_load_ext(const void* data, size_t size, const cosy
     gguf_loader loader(parser, data, size);
     if (!loader) return nullptr;
 
-    cosyvoice_context_params_v2_t params_v2{ .base_params = *params };
-    if (version == COSYVOICE_CONTEXT_PARAMS_V2_VERSION)
-        params_v2.n_workers = std::max(1u, reinterpret_cast<const cosyvoice_context_params_v2_t*>(params)->n_workers);
-    else
-        params_v2.n_workers = 1;
+    cosyvoice_context_params_v3_cpp params_v3 = {};
+    params_v3.cosyvoice_context_params_t::operator=(*params);
 
-    auto ctx = new cosyvoice_context_3(reinterpret_cast<const cosyvoice_context_params_v2_cpp&>(params_v2),
+    if (version >= COSYVOICE_CONTEXT_PARAMS_V2_VERSION)
+        params_v3.n_workers = std::max(1u, reinterpret_cast<const cosyvoice_context_params_v2_t*>(params)->n_workers);
+    else
+        params_v3.n_workers = 1;
+
+    if (version >= COSYVOICE_CONTEXT_PARAMS_V3_VERSION)
+    {
+        auto* p_v3 = reinterpret_cast<const cosyvoice_context_params_v3_t*>(params);
+        if (params_v3.dit_kv_fixed_slots == 0 && params_v3.dit_kv_offloadable_slots != 0)
+        {
+            params_v3.dit_kv_fixed_slots = 1;
+            --params_v3.dit_kv_offloadable_slots;
+        }
+
+        params_v3.dit_kv_cache_type = p_v3->dit_kv_cache_type;
+        params_v3.dit_kv_fixed_slots = p_v3->dit_kv_fixed_slots;
+        params_v3.dit_kv_offloadable_slots = p_v3->dit_kv_offloadable_slots;
+        params_v3.dit_allow_kv_cache_fallback = p_v3->dit_allow_kv_cache_fallback;
+        params_v3.dit_kv_cache_length = p_v3->dit_kv_cache_length;
+        if (params_v3.dit_kv_cache_length == 0)
+            params_v3.dit_kv_cache_length = params->n_max_seq * 10;
+    }
+    else
+    {
+        params_v3.dit_kv_fixed_slots = 0;
+        params_v3.dit_kv_offloadable_slots = 0;
+        params_v3.dit_kv_cache_length = params->n_max_seq * 10;
+        params_v3.dit_allow_kv_cache_fallback = true;
+        params_v3.dit_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(COSYVOICE_KV_CACHE_TYPE_Q8_0, COSYVOICE_KV_CACHE_TYPE_Q4_0, COSYVOICE_KV_CACHE_TYPE_Q8_0);
+    }
+
+    auto ctx = new cosyvoice_context_3(params_v3,
         backend ? backend : ggml_backend_init_best()
     );
     ctx->cosyvoice_model_3::load(loader);
@@ -140,7 +182,7 @@ cosyvoice_context_t cosyvoice_load_ext(const void* data, size_t size, const cosy
 
     auto ggml_backend_set_n_threads = reinterpret_cast<ggml_backend_set_n_threads_t>(ggml_backend_reg_get_proc_address(ggml_backend_dev_backend_reg(ggml_backend_get_device(ctx->worker->cpu_backend.get())), "ggml_backend_set_n_threads"));
     if (n_threads == 0)
-        n_threads = std::max<uint32_t>(1, std::thread::hardware_concurrency() / params_v2.n_workers);
+        n_threads = std::max<uint32_t>(1, std::thread::hardware_concurrency() / params_v3.n_workers);
     if (n_threads != 0)
         ggml_backend_set_n_threads(ctx->worker->cpu_backend.get(), n_threads);
 
@@ -171,6 +213,11 @@ cosyvoice_context_t cosyvoice_load_from_file_with_params(const char* filename, c
 }
 
 cosyvoice_context_t cosyvoice_load_from_file_with_params_v2(const char* filename, const cosyvoice_context_params_v2_t* params)
+{
+    return cosyvoice_load_from_file_ext(filename, params, nullptr, 0);
+}
+
+cosyvoice_context_t cosyvoice_load_from_file_with_params_v3(const char* filename, const cosyvoice_context_params_v3_t* params)
 {
     return cosyvoice_load_from_file_ext(filename, params, nullptr, 0);
 }
@@ -247,6 +294,16 @@ bool cosyvoice_llm_set_kv_cache_len(cosyvoice_context_t ctx, uint32_t len)
     return ctx->llm_set_kv_cache_len(len);
 }
 
+void cosyvoice_llm_offload_kv_cache(cosyvoice_context_t ctx)
+{
+    ctx->llm_offload_kv_cache();
+}
+
+void cosyvoice_llm_load_kv_cache(cosyvoice_context_t ctx)
+{
+    ctx->llm_load_kv_cache();
+}
+
 int cosyvoice_llm_sample_token(cosyvoice_context_t ctx)
 {
     return ctx->llm_sample_token();
@@ -282,12 +339,22 @@ bool cosyvoice_llm_job(cosyvoice_context_t ctx, const int* text, uint32_t text_l
     return ctx->llm_job(text, text_len, prompt);
 }
 
+bool cosyvoice_llm_job_ext(cosyvoice_context_t ctx, const int* text, uint32_t text_len, cosyvoice_prompt_t prompt, uint32_t max_new_tokens, bool* final)
+{
+    return ctx->llm_job_ext(text, text_len, prompt, max_new_tokens, final);
+}
+
 bool cosyvoice_token2wav(cosyvoice_context_t ctx, const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, cosyvoice_generated_speech_ptr generated_speech)
 {
     return ctx->token2wav(token_ids, n_tokens, speed, prompt, generated_speech);
 }
 
-bool cosyvoice_tts(cosyvoice_context_t ctx, const int* text, uint32_t text_len, float speed, cosyvoice_prompt_t prompt, cosyvoice_generated_speech_ptr result)
+bool cosyvoice_token2wav_ext(cosyvoice_context_t ctx, const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, uint32_t* offset, bool streaming, bool finalize, cosyvoice_generated_speech_ptr result)
+{
+    return ctx->token2wav_ext(token_ids, n_tokens, speed, prompt, offset, streaming, finalize, result);
+}
+
+static bool check_length(cosyvoice_prompt_t prompt, uint32_t text_len, uint32_t n_max_seq)
 {
     // Defensive guard: bail out before llm_prefill / llm_decode would refuse the request because
     // the prefill layout exceeds n_max_seq. Without this, llm_job throws and emits an error log
@@ -297,27 +364,100 @@ bool cosyvoice_tts(cosyvoice_context_t ctx, const int* text, uint32_t text_len, 
     // length. llm_job internally truncates the cache back to either SOS or SOS+prompt_text
     // before re-prefilling, so a large residual cache from a previous call (e.g. when callers
     // synthesize chunked text via tts_job) is not a real budget consumer.
-    cosyvoice_context_params_t params;
-    ctx->get_context_params(&params);
     const uint32_t prompt_text_len = static_cast<uint32_t>(prompt->prompt_text.size());
     const uint32_t prompt_speech_len = prompt->llm_prompt_speech_tokens.second;
     // Worst-case prefill: SOS(1) + prompt_text + text + (task_token(1) + prompt_speech_tokens) when present.
     uint64_t prefill_len = 1ull + prompt_text_len + text_len;
     if (prompt_speech_len != 0)
         prefill_len += 1ull + prompt_speech_len;
-    if (prefill_len + 1 > params.n_max_seq)
-    {
-        result->data = nullptr;
-        result->length = 0;
+    if (prefill_len + 1 > n_max_seq)
         return false;
+    return true;
+}
+
+bool cosyvoice_tts(cosyvoice_context_t ctx, const int* text, uint32_t text_len, float speed, cosyvoice_prompt_t prompt, cosyvoice_generated_speech_ptr result)
+{
+    use_count_guard guard(ctx);
+
+    {
+        cosyvoice_context_params_t params;
+        ctx->get_context_params(&params);
+        if (!check_length(prompt, text_len, params.n_max_seq))
+        {
+            result->data = nullptr;
+            result->length = 0;
+            return false;
+        }
     }
 
-    if(ctx->llm_job(text, text_len, prompt)
+    if (ctx->llm_job(text, text_len, prompt)
         && ctx->token2wav(ctx->llm_get_accepted_tokens(), ctx->llm_get_n_accepted_tokens(), speed, prompt, result))
+    {
+        // Check if stop was requested during token2wav
+        if (ctx->stop_requested())
+        {
+            result->data = nullptr;
+            result->length = 0;
+            return false;
+        }
         return true;
+    }
+    // Clear stop flag if generation failed due to stop request
+    ctx->stop_requested();
     result->data = nullptr;
     result->length = 0;
     return false;
+}
+
+bool cosyvoice_tts_stream(cosyvoice_context_t ctx, const int* text, uint32_t text_len, float speed, cosyvoice_prompt_t prompt, cosyvoice_tts_audio_callback_t callback, void* user_data)
+{
+    use_count_guard guard(ctx);
+
+    cosyvoice_context_params_t params;
+    ctx->get_context_params(&params);
+    if (!check_length(prompt, text_len, params.n_max_seq))
+        return false;
+
+    const auto chunk_tokens = ctx->get_chunk_tokens();
+
+    ctx->llm_clear_accepted_tokens();
+    uint32_t offset = 0;
+    uint32_t n_tokens = 0;
+    bool final = false;
+    do
+    {
+        if (ctx->stop_requested())
+            return false;
+
+        if (!final)
+            if (!ctx->llm_job_ext(text, text_len, prompt, chunk_tokens + 1, &final))
+                return false;
+
+        n_tokens = std::min(n_tokens + chunk_tokens, ctx->llm_get_n_accepted_tokens());
+        text = nullptr;
+        if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
+            ctx->llm_offload_kv_cache();
+
+        cosyvoice_generated_speech result = {};
+        if (!ctx->token2wav_ext(ctx->llm_get_accepted_tokens(), n_tokens, speed, prompt, &offset, true, ctx->llm_get_n_accepted_tokens() == n_tokens, &result))
+            return false;
+
+        if (result.data && result.length > 0
+            && !callback(result.data, result.length, user_data))
+            return false;
+    } while (n_tokens != ctx->llm_get_n_accepted_tokens());
+
+    return true;
+}
+
+uint32_t cosyvoice_get_chunk_tokens(cosyvoice_context_t ctx)
+{
+    return ctx->get_chunk_tokens();
+}
+
+void cosyvoice_set_chunk_tokens(cosyvoice_context_t ctx, uint32_t n_tokens)
+{
+    return ctx->set_chunk_tokens(n_tokens);
 }
 
 ggml_status cosyvoice_get_last_status(cosyvoice_context_t ctx)
@@ -338,6 +478,16 @@ void cosyvoice_get_total_memory_usage(cosyvoice_context_t ctx, cosyvoice_memory_
 void cosyvoice_empty_buffer_cache(cosyvoice_context_t ctx)
 {
     ctx->empty_buffer_cache();
+}
+
+void cosyvoice_request_stop(cosyvoice_context_t ctx)
+{
+    ctx->request_stop();
+}
+
+bool cosyvoice_stop_requested(cosyvoice_context_t ctx)
+{
+    return ctx->stop_requested();
 }
 
 void cosyvoice_set_noise_callback(cosyvoice_context_t ctx, cosyvoice_noise_callback_t callback, void* callback_ctx)

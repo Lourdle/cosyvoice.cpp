@@ -1,4 +1,4 @@
-﻿#ifdef _MSC_VER
+#ifdef _MSC_VER
     #define _CRT_SECURE_NO_WARNINGS
 #endif
 
@@ -18,11 +18,13 @@
 
 #include <cstdarg>
 #include <cctype>
-#include <atomic>
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <atomic>
+#include <chrono>
+
+#include <mutex>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -75,12 +77,23 @@ struct cli_options
     seed_policy_mode seed_policy = seed_policy_mode::auto_mode;
     uint32_t n_threads = 0;
     bool has_llm_kv_cache_type = false;
-    cosyvoice_llm_kv_cache_type_t llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
-        COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0,
-        COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0,
-        COSYVOICE_LLM_KV_CACHE_TYPE_Q8_0);
+    cosyvoice_kv_cache_type_t llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+        COSYVOICE_KV_CACHE_TYPE_Q8_0,
+        COSYVOICE_KV_CACHE_TYPE_Q4_0,
+        COSYVOICE_KV_CACHE_TYPE_Q8_0);
+    bool has_dit_kv_cache_type = false;
+    cosyvoice_kv_cache_type_t dit_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+        COSYVOICE_KV_CACHE_TYPE_Q8_0,
+        COSYVOICE_KV_CACHE_TYPE_Q4_0,
+        COSYVOICE_KV_CACHE_TYPE_Q8_0);
+    uint32_t dit_kv_fixed_slots = 0;
+    uint32_t dit_kv_offloadable_slots = 0;
+    uint32_t dit_kv_cache_length = 0;
     bool has_inference_buffer_policy = false;
     cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
+    bool stream = false;
+    uint32_t chunk_tokens = 0;
+    bool has_chunk_tokens = false;
     bool verbose = false;
     bool quiet = false;
     bool has_temperature = false;
@@ -97,6 +110,10 @@ struct cli_options
     float min_token_text_ratio = 0.0f;
     bool has_max_token_text_ratio = false;
     float max_token_text_ratio = 0.0f;
+    bool has_llm_flash_attn = false;
+    bool llm_flash_attn = true;
+    bool has_flow_flash_attn = false;
+    bool flow_flash_attn = true;
 };
 
 enum class cli_log_level
@@ -107,6 +124,7 @@ enum class cli_log_level
 };
 
 static bool g_quiet_logs = false;
+static std::atomic_bool g_stop_requested = false;
 inline std::atomic_bool g_interactive_exit_requested = false;
 static constexpr const char* ANSI_RESET = "\033[0m";
 static constexpr const char* ANSI_RED = "\033[31m";
@@ -122,6 +140,7 @@ static BOOL WINAPI handle_console_ctrl(DWORD ctrl_type)
     {
         g_interactive_exit_requested.store(true, std::memory_order_relaxed);
         interrupt_playback();
+        g_stop_requested.store(true, std::memory_order_release);
 
         // Unregister self: next Ctrl+C triggers default handler (process termination)
         SetConsoleCtrlHandler(handle_console_ctrl, FALSE);
@@ -136,6 +155,7 @@ static void handle_sigint(int)
 {
     g_interactive_exit_requested.store(true, std::memory_order_relaxed);
     interrupt_playback();
+    g_stop_requested.store(true, std::memory_order_release);
 
     // Restore default handler: next Ctrl+C terminates the process immediately
     signal(SIGINT, SIG_DFL);
@@ -162,6 +182,7 @@ public:
     void _register()
     {
         g_interactive_exit_requested.store(false, std::memory_order_relaxed);
+        g_stop_requested.store(false, std::memory_order_release);
 #ifndef COSYVOICE_CLI_NO_PLAYBACK
         g_playback_interrupted.store(false, std::memory_order_relaxed);
 #endif
@@ -178,6 +199,58 @@ private:
     using sig_handler_t = void (*)(int);
     sig_handler_t previous_sigint_handler = SIG_DFL;
 #endif
+};
+
+// RAII: spawns a monitoring thread during TTS generation that calls
+// cosyvoice_request_stop() when Ctrl+C is detected (g_stop_requested).
+// The destructor signals the thread to exit and joins it.
+class stop_monitor
+{
+public:
+    stop_monitor(cosyvoice_context_t ctx)
+    {
+        worker = std::thread([this, ctx]()
+        {
+            for (;;)
+            {
+                if (g_stop_requested.load(std::memory_order_acquire))
+                {
+                    if (ctx)
+                    {
+                        cosyvoice_request_stop(ctx);
+                        triggered = true;
+                    }
+                    break;
+                }
+                if (stop_thread_flag.load(std::memory_order_acquire))
+                    break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        });
+    }
+
+    ~stop_monitor()
+    {
+        stop_thread_flag.store(true, std::memory_order_release);
+        if (worker.joinable())
+            worker.join();
+    }
+
+    // True if cosyvoice_request_stop() was actually called.
+    bool was_stop_requested()
+    {
+        if (worker.joinable())
+        {
+            stop_thread_flag.store(true, std::memory_order_release);
+            worker.join();
+        }
+        return triggered;
+    }
+
+private:
+    bool triggered{false};
+    std::atomic<bool> stop_thread_flag{false};
+    std::thread worker;
 };
 
 static bool has_generation_overrides(const cli_options& options)
@@ -263,6 +336,8 @@ static void print_interactive_commands()
     printf("  /seed [value]                Show or set next seed.\n");
     printf("  /seed-policy <fixed|random>  Show or set seed policy.\n");
     printf("  /help                        Show command list.\n");
+    printf("  /stream                      Toggle streaming playback.\n");
+    printf("  /chunk-tokens [value]        Show or set tokens per streaming chunk.\n");
     printf("  /exit                        Exit interactive mode. Ctrl+C also exits.\n");
 }
 
@@ -302,6 +377,16 @@ static void print_usage(const char* argv0)
     printf("                                              Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
     printf("  --inference-buffer-policy <shared|balanced|dedicated>\n");
     printf("                                              Inference buffer policy (interactive only). Default: balanced.\n");
+    printf("  --dit-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>\n");
+    printf("                                              DiT KV cache type (interactive only).\n");
+    printf("                                              Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
+    printf("  --dit-kv-fixed-slots <value>                Number of fixed (non-offloadable) DiT KV slots (interactive only). Default: 0.\n");
+    printf("  --dit-kv-offloadable-slots <value>          Number of offloadable DiT KV slots (interactive only). Default: 0.\n");
+    printf("  --dit-kv-cache-length <value>               DiT KV cache max seq length (interactive only). Default: max-llm-len * 10.\n");
+    printf("  --stream                                    Enable streaming playback in interactive mode.\n");
+    printf("  --chunk-tokens <value>                      Tokens per streaming chunk (interactive only). Default: model-defined.\n");
+    printf("  --llm-flash-attn <0|1>                      Enable/disable LLM flash attention. Default: 1.\n");
+    printf("  --flow-flash-attn <0|1>                     Enable/disable Flow/DiT flash attention. Default: 1.\n");
     printf("  --seed <value>                              Fixed seed for sampling.\n");
     printf("  --seed-policy <auto|fixed|random>           Seed strategy. Default: auto (fixed if --seed is set).\n");
 
@@ -750,18 +835,29 @@ static void print_tts_runtime_info(
     {
         char buf[256];
         snprintf(buf, sizeof(buf), "requested: %s, actual: %s (%s)",
-            llm_kv_cache_type_to_string(options.llm_kv_cache_type).c_str(),
-            llm_kv_cache_type_to_string(context_params.llm_kv_cache_type).c_str(),
+            kv_cache_type_to_string(options.llm_kv_cache_type).c_str(),
+            kv_cache_type_to_string(context_params.llm_kv_cache_type).c_str(),
             options.has_llm_kv_cache_type ? "cli override" : "default");
         print_kv_line_string("llm_kv_cache_type", buf);
     }
+    if (options.interactive)
+    {
+        {
+            char buf[256];
+            snprintf(buf, sizeof(buf), "requested: %s (%s)",
+                kv_cache_type_to_string(options.dit_kv_cache_type).c_str(),
+                options.has_dit_kv_cache_type ? "cli override" : "default");
+            print_kv_line_string("dit_kv_cache_type", buf);
+        }
+        print_kv_line_u32("chunk_tokens", cosyvoice_get_chunk_tokens(ctx));
+    }
     print_kv_line_string("buffer_policy", inference_buffer_policy_to_string(context_params.inference_buffer_policy));
+    print_kv_line_string("llm_use_flash_attn", enabled_to_string(context_params.llm_use_flash_attn));
+    print_kv_line_string("flow_use_flash_attn", enabled_to_string(context_params.flow_use_flash_attn));
     if (log_level == cli_log_level::verbose)
     {
         print_kv_line_u32("n_batch", context_params.n_batch);
         print_kv_line_u32("n_max_seq", context_params.n_max_seq);
-        print_kv_line_string("llm_use_flash_attn", enabled_to_string(context_params.llm_use_flash_attn));
-        print_kv_line_string("flow_use_flash_attn", enabled_to_string(context_params.flow_use_flash_attn));
         print_kv_line_string("llm_kv_fallback", enabled_to_string(context_params.llm_allow_kv_cache_fallback));
     }
 
@@ -848,6 +944,7 @@ static void run_interactive_loop(
     uint32_t sample_rate)
 {
     audio_cache cache;
+    bool streaming = options.stream;
     std::string line;
     if (seed_state && !seed_state->has_next_seed)
     {
@@ -856,9 +953,9 @@ static void run_interactive_loop(
     }
     printf("\nInteractive mode. Type text to synthesize, /exit to quit, or press Ctrl+C to quit"
 #ifndef COSYVOICE_CLI_NO_PLAYBACK
-           " (during playback, Ctrl+C stops playback)"
+        " (during playback, Ctrl+C stops playback)"
 #endif
-           ".\n");
+        ".\n");
     print_interactive_commands();
     interactive_ctrl_c_guard ctrl_c_guard;
 
@@ -1010,6 +1107,25 @@ static void run_interactive_loop(
                 printf("Saved audio %u to %s\n", id, path.c_str());
             }
 #ifndef COSYVOICE_CLI_NO_PLAYBACK
+            else if (cmd == "/stream")
+            {
+                streaming = !streaming;
+                printf("Streaming playback %s.\n", streaming ? "enabled" : "disabled");
+            }
+            else if (cmd == "/chunk-tokens")
+            {
+                if (tokens.size() > 1)
+                {
+                    uint32_t v;
+                    if (!parse_uint32_arg(tokens[1], &v))
+                    {
+                        print_error_log("Error: invalid chunk-tokens value.\n");
+                        continue;
+                    }
+                    cosyvoice_set_chunk_tokens(ctx, v);
+                }
+                printf("chunk_tokens: %u\n", cosyvoice_get_chunk_tokens(ctx));
+            }
             else if (cmd == "/play")
             {
                 bool id_ok = false;
@@ -1046,23 +1162,112 @@ static void run_interactive_loop(
         uint32_t used_seed = 0;
         update_tts_seed(ctx, seed_state, &used_seed);
 
-        std::string error;
-        auto pcm = generate_tts_audio(tts_ctx, options, trimmed, &error);
-        if (!pcm.data)
-        {
-            if (!error.empty())
-                print_error_log("Error: %s\n", error.c_str());
-            continue;
-        }
         cached_audio entry;
         entry.seed = used_seed;
         entry.text = trimmed;
-        entry.pcm.insert(entry.pcm.end(), pcm.data, pcm.data + pcm.length);
+
+        std::chrono::steady_clock::time_point gen_start;
+        std::chrono::steady_clock::time_point gen_end;
+
+        if (streaming)
+        {
+            struct stream_play_state
+            {
+                cached_audio* entry;
+                uint32_t sample_rate;
+                uint32_t cursor = 0;
+                std::mutex mutex;
+            };
+            stream_play_state play_state{ &entry, sample_rate };
+
+            auto stream_callback = [](const float* audio, uint32_t n_samples, void* user_data)
+            {
+                auto state = static_cast<stream_play_state*>(user_data);
+                std::lock_guard<std::mutex> lock(state->mutex);
+                state->entry->pcm.insert(state->entry->pcm.end(), audio, audio + n_samples);
+                return !is_playback_interrupted();
+            };
+
+            std::atomic_bool inferencing_done = false;
+            std::string error_string;
+            std::thread playback_thread(cli_audio_play_pcm_streaming, sample_rate, &error_string,
+                streaming_callback_t([&](float* data, uint32_t n_samples)
+                {
+                    std::lock_guard<std::mutex> lock(play_state.mutex);
+                    if (play_state.cursor >= play_state.entry->pcm.size())
+                        if (inferencing_done)
+                            return false;
+                        else
+                            memset(data, 0, n_samples * sizeof(float));
+                    else
+                    {
+                        uint32_t available = static_cast<uint32_t>(play_state.entry->pcm.size()) - play_state.cursor;
+                        uint32_t to_copy = std::min(n_samples, available);
+                        memcpy(data, play_state.entry->pcm.data() + play_state.cursor, to_copy * sizeof(float));
+                        if (to_copy < n_samples)
+                            memset(data + to_copy, 0, (n_samples - to_copy) * sizeof(float));
+                        play_state.cursor += n_samples;
+                    }
+                    return true;
+                }));
+
+            gen_start = std::chrono::steady_clock::now();
+            bool ok;
+            stop_monitor sm(ctx);
+            if (options.mode == "cross-lingual")
+                ok = cosyvoice_tts_cross_lingual_stream(tts_ctx, trimmed.c_str(), options.speed, stream_callback, &play_state);
+            else if (options.mode == "zero-shot")
+                ok = cosyvoice_tts_zero_shot_stream(tts_ctx, trimmed.c_str(), options.speed, stream_callback, &play_state);
+            else
+                ok = cosyvoice_tts_instruct_stream(tts_ctx, trimmed.c_str(), options.instruction.c_str(), options.speed, stream_callback, &play_state);
+
+            inferencing_done = true;
+            gen_end = std::chrono::steady_clock::now();
+            playback_thread.join();
+            ctrl_c_guard._register();
+
+            if (!ok)
+            {
+                if (sm.was_stop_requested())
+                    printf("Generation cancelled.\n");
+                else
+                    print_error_log("Error: TTS streaming generation failed.\n");
+                continue;
+            }
+        }
+        else
+        {
+            gen_start = std::chrono::steady_clock::now();
+            std::string error;
+            cosyvoice_generated_speech pcm{};
+            {
+                stop_monitor sm(ctx);
+                pcm = generate_tts_audio(tts_ctx, options, trimmed, &error);
+                if (!pcm.data && !sm.was_stop_requested() && error.empty())
+                    error = "TTS generation failed.";
+            }
+            if (!pcm.data)
+            {
+                if (g_stop_requested.load(std::memory_order_acquire))
+                {
+                    ctrl_c_guard._register();
+                    printf("Generation cancelled.\n");
+                }
+                else if (!error.empty())
+                    print_error_log("Error: %s\n", error.c_str());
+                continue;
+            }
+            entry.pcm.insert(entry.pcm.end(), pcm.data, pcm.data + pcm.length);
+            gen_end = std::chrono::steady_clock::now();
+        }
+
         const auto id = cache.next_id++;
         cache.last_success_id = id;
         const auto duration = pcm_length_seconds(sample_rate, entry.pcm.size());
         cache.items.emplace(id, std::move(entry));
-        printf("Generated audio %u (%.2fs), seed=%u.\n", cache.last_success_id, duration, used_seed);
+        const double elapsed_sec = elapsed_ms(gen_start, gen_end) / 1000.0;
+        const double rtf = (duration > 0.0) ? (elapsed_sec / duration) : 0.0;
+        printf("Generated audio %u (%.2fs, rtf=%.2f), seed=%u.\n", cache.last_success_id, duration, rtf, used_seed);
     }
 }
 
@@ -1279,11 +1484,22 @@ static bool validate_options(cli_options& options)
 
     if (options.has_llm_kv_cache_type
         && !COSYVOICE_IS_SEPARATE_KV_CACHE(options.llm_kv_cache_type)
-        && (options.llm_kv_cache_type < 0 || options.llm_kv_cache_type >= COSYVOICE_LLM_KV_CACHE_TYPE_COUNT))
+        && (options.llm_kv_cache_type < 0 || options.llm_kv_cache_type >= COSYVOICE_KV_CACHE_TYPE_COUNT))
     {
         print_error_log("Error: invalid --llm-kv-cache-type. Allowed values: f32, f16, q8_0, q5_1, q5_0, q4_1, q4_0 or k=<type>,v=<type>.\n");
         ok = false;
     }
+
+    if (options.has_dit_kv_cache_type
+        && !COSYVOICE_IS_SEPARATE_KV_CACHE(options.dit_kv_cache_type)
+        && (options.dit_kv_cache_type < 0 || options.dit_kv_cache_type >= COSYVOICE_KV_CACHE_TYPE_COUNT))
+    {
+        print_error_log("Error: invalid --dit-kv-cache-type. Allowed values: f32, f16, q8_0, q5_1, q5_0, q4_1, q4_0 or k=<type>,v=<type>.\n");
+        ok = false;
+    }
+
+    if (options.dit_kv_cache_length == 0)
+        options.dit_kv_cache_length = options.max_llm_len * 10;
 
     if (options.has_win_size && options.win_size <= 0)
     {
@@ -1409,14 +1625,73 @@ int tool_entry(int argc, char** argv)
         else if (str_casecmp(arg, "--llm-kv-cache-type") == 0)
         {
             auto value = get_arg_value();
-            cosyvoice_llm_kv_cache_type_t type;
-            if (!parse_llm_kv_cache_type_arg(value, &type))
+            cosyvoice_kv_cache_type_t type;
+            if (!parse_kv_cache_type_arg(value, &type))
             {
                 print_error_log("Error: invalid --llm-kv-cache-type value \"%s\".\n", value);
                 return 1;
             }
             options.llm_kv_cache_type = type;
             options.has_llm_kv_cache_type = true;
+        }
+        else if (str_casecmp(arg, "--dit-kv-cache-type") == 0)
+        {
+            auto value = get_arg_value();
+            cosyvoice_kv_cache_type_t type;
+            if (!parse_kv_cache_type_arg(value, &type))
+            {
+                print_error_log("Error: invalid --dit-kv-cache-type value \"%s\".\n", value);
+                return 1;
+            }
+            options.dit_kv_cache_type = type;
+            options.has_dit_kv_cache_type = true;
+        }
+        else if (str_casecmp(arg, "--dit-kv-fixed-slots") == 0)
+        {
+            auto value = get_arg_value();
+            uint32_t v;
+            if (!parse_uint32_arg(value, &v))
+            {
+                print_error_log("Error: invalid --dit-kv-fixed-slots value \"%s\".\n", value);
+                return 1;
+            }
+            options.dit_kv_fixed_slots = v;
+        }
+        else if (str_casecmp(arg, "--dit-kv-offloadable-slots") == 0)
+        {
+            auto value = get_arg_value();
+            uint32_t v;
+            if (!parse_uint32_arg(value, &v))
+            {
+                print_error_log("Error: invalid --dit-kv-offloadable-slots value \"%s\".\n", value);
+                return 1;
+            }
+            options.dit_kv_offloadable_slots = v;
+        }
+        else if (str_casecmp(arg, "--dit-kv-cache-length") == 0)
+        {
+            auto value = get_arg_value();
+            uint32_t v;
+            if (!parse_uint32_arg(value, &v))
+            {
+                print_error_log("Error: invalid --dit-kv-cache-length value \"%s\".\n", value);
+                return 1;
+            }
+            options.dit_kv_cache_length = v;
+        }
+        else if (str_casecmp(arg, "--stream") == 0)
+            options.stream = true;
+        else if (str_casecmp(arg, "--chunk-tokens") == 0)
+        {
+            auto value = get_arg_value();
+            uint32_t v;
+            if (!parse_uint32_arg(value, &v))
+            {
+                print_error_log("Error: invalid --chunk-tokens value \"%s\".\n", value);
+                return 1;
+            }
+            options.chunk_tokens = v;
+            options.has_chunk_tokens = true;
         }
         else if (str_casecmp(arg, "--inference-buffer-policy") == 0)
         {
@@ -1475,6 +1750,44 @@ int tool_entry(int argc, char** argv)
             options.fast_split_text_enabled = false;
         else if (str_casecmp(arg, "--disable-fade-in") == 0)
             options.fade_in_enabled = false;
+        else if (str_casecmp(arg, "--llm-flash-attn") == 0)
+        {
+            const auto v = to_lower(get_arg_value());
+            if (v == "1" || v == "yes" || v == "true" || v == "on")
+            {
+                options.llm_flash_attn = true;
+                options.has_llm_flash_attn = true;
+            }
+            else if (v == "0" || v == "no" || v == "false" || v == "off")
+            {
+                options.llm_flash_attn = false;
+                options.has_llm_flash_attn = true;
+            }
+            else
+            {
+                print_error_log("Error: invalid --llm-flash-attn value \"%s\". Use 0/1, yes/no, true/false, on/off.\n", v.c_str());
+                return 1;
+            }
+        }
+        else if (str_casecmp(arg, "--flow-flash-attn") == 0)
+        {
+            const auto v = to_lower(get_arg_value());
+            if (v == "1" || v == "yes" || v == "true" || v == "on")
+            {
+                options.flow_flash_attn = true;
+                options.has_flow_flash_attn = true;
+            }
+            else if (v == "0" || v == "no" || v == "false" || v == "off")
+            {
+                options.flow_flash_attn = false;
+                options.has_flow_flash_attn = true;
+            }
+            else
+            {
+                print_error_log("Error: invalid --flow-flash-attn value \"%s\". Use 0/1, yes/no, true/false, on/off.\n", v.c_str());
+                return 1;
+            }
+        }
         else if (str_casecmp(arg, "--speed") == 0 || str_casecmp(arg, "-s") == 0)
         {
             auto value = get_arg_value();
@@ -1754,17 +2067,30 @@ int tool_entry(int argc, char** argv)
     cosyvoice_init_backend_from_path(options.backend_path.empty() ? nullptr : options.backend_path.c_str());
     timing.backend_init_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
 
-    cosyvoice_context_params_t params;
-    cosyvoice_init_default_context_params(&params);
+    cosyvoice_context_params_v3_t params = {};
+    cosyvoice_init_default_context_params(&params.base_params.base_params);
+    params.base_params.base_params.n_max_seq = options.max_llm_len;
+    params.base_params.base_params.llm_kv_cache_type = options.llm_kv_cache_type;
+    if (options.has_llm_flash_attn)
+        params.base_params.base_params.llm_use_flash_attn = options.llm_flash_attn;
+    if (options.has_flow_flash_attn)
+        params.base_params.base_params.flow_use_flash_attn = options.flow_flash_attn;
+    params.base_params.n_workers = 1;
     if (options.interactive)
     {
         if (options.has_inference_buffer_policy)
-            params.inference_buffer_policy = options.inference_buffer_policy;
+            params.base_params.base_params.inference_buffer_policy = options.inference_buffer_policy;
     }
     else
-        params.inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED;
-    params.n_max_seq = options.max_llm_len;
-    params.llm_kv_cache_type = options.llm_kv_cache_type;
+        params.base_params.base_params.inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED;
+    if (options.interactive)
+    {
+        params.dit_kv_cache_type = options.dit_kv_cache_type;
+        params.dit_kv_fixed_slots = options.dit_kv_fixed_slots;
+        params.dit_kv_offloadable_slots = options.dit_kv_offloadable_slots;
+        params.dit_kv_cache_length = options.dit_kv_cache_length;
+        params.dit_allow_kv_cache_fallback = true;
+    }
     tts_seed_state seed_state;
     const bool has_seed_value = !options.seed.empty();
     const cli_options::seed_policy_mode policy = resolve_seed_policy_mode(options);
@@ -1777,14 +2103,14 @@ int tool_entry(int argc, char** argv)
             print_error_log("Error: invalid --seed value \"%s\". It should be a non-negative integer between 0 and %u.\n", options.seed.c_str(), UINT32_MAX);
             return 1;
         }
-        params.seed = seed_value;
+        params.base_params.base_params.seed = seed_value;
         seed_state.next_seed = seed_value;
         seed_state.has_next_seed = true;
     }
     else if (seed_state.fixed)
     {
         const uint32_t seed_value = cosyvoice_generate_random_seed();
-        params.seed = seed_value;
+        params.base_params.base_params.seed = seed_value;
         seed_state.next_seed = seed_value;
         seed_state.has_next_seed = true;
     }
@@ -1832,6 +2158,8 @@ int tool_entry(int argc, char** argv)
     cosyvoice_tts_context_set_split_text_enabled(tts_ctx.get(), options.split_text_enabled);
     cosyvoice_tts_context_set_fast_split_text_enabled(tts_ctx.get(), options.fast_split_text_enabled);
     cosyvoice_tts_context_set_fade_in_enabled(tts_ctx.get(), options.fade_in_enabled);
+    if (options.interactive && options.has_chunk_tokens)
+        cosyvoice_set_chunk_tokens(ctx.get(), options.chunk_tokens);
     cosyvoice_context_params_t effective_params;
     cosyvoice_get_context_params(ctx.get(), &effective_params);
     cosyvoice_generation_config_t generation_config;
@@ -1883,8 +2211,24 @@ int tool_entry(int argc, char** argv)
 
     stage_start = std::chrono::steady_clock::now();
     std::string tts_error;
-    auto pcm = generate_tts_audio(tts_ctx.get(), options, options.text, &tts_error);
-    timing.tts_generate_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
+    cosyvoice_generated_speech pcm = {};
+    {
+        stop_monitor sm(ctx.get());
+        // Install a signal handler for non-interactive mode so Ctrl+C stops generation
+        interactive_ctrl_c_guard ctrl_c_guard;
+        pcm = generate_tts_audio(tts_ctx.get(), options, options.text, &tts_error);
+        timing.tts_generate_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
+        if (!pcm.data)
+        {
+            if (sm.was_stop_requested())
+            {
+                if (tts_error.empty())
+                    tts_error = "TTS generation cancelled.";
+            }
+            else if (tts_error.empty())
+                tts_error = "TTS generation failed.";
+        }
+    }
 
     if (!pcm.data)
     {

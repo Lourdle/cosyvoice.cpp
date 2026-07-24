@@ -102,25 +102,54 @@
 
             <details>
                 <summary>Advanced Model Config</summary>
-                <div class="params">
-                    <div><label>K Cache Type</label>
-                        <select id="model-kv-k">
-                            <option value="q8_0">Q8_0</option><option value="f32">F32</option><option value="f16">F16</option>
-                            <option value="q5_1">Q5_1</option><option value="q5_0">Q5_0</option>
-                            <option value="q4_1">Q4_1</option><option value="q4_0">Q4_0</option>
-                        </select></div>
-                    <div><label>V Cache Type</label>
-                        <select id="model-kv-v">
-                            <option value="q4_0">Q4_0</option><option value="f32">F32</option><option value="f16">F16</option>
-                            <option value="q5_1">Q5_1</option><option value="q5_0">Q5_0</option>
-                            <option value="q4_1">Q4_1</option><option value="q8_0">Q8_0</option>
-                        </select></div>
-                    <div><label>Buffer Policy</label>
-                        <select id="model-buffer-policy">
-                            <option value="">Default (Balanced)</option>
-                            <option value="shared">Shared</option><option value="balanced">Balanced</option><option value="dedicated">Dedicated</option>
-                        </select></div>
-                    <div><label>Max LLM Length</label><input type="number" id="model-max-llm" min="0"></div>
+                <div class="config-section">
+                    <div class="config-section-title">LLM</div>
+                    <div class="params">
+                        <div><label>K Cache Type</label>
+                            <select id="model-kv-k">
+                                <option value="q8_0">Q8_0</option><option value="f32">F32</option><option value="f16">F16</option>
+                                <option value="q5_1">Q5_1</option><option value="q5_0">Q5_0</option>
+                                <option value="q4_1">Q4_1</option><option value="q4_0">Q4_0</option>
+                            </select></div>
+                        <div><label>V Cache Type</label>
+                            <select id="model-kv-v">
+                                <option value="q4_0">Q4_0</option><option value="f32">F32</option><option value="f16">F16</option>
+                                <option value="q5_1">Q5_1</option><option value="q5_0">Q5_0</option>
+                                <option value="q4_1">Q4_1</option><option value="q8_0">Q8_0</option>
+                            </select></div>
+                        <div><label>Buffer Policy</label>
+                            <select id="model-buffer-policy">
+                                <option value="">Default (Balanced)</option>
+                                <option value="shared">Shared</option><option value="balanced">Balanced</option><option value="dedicated">Dedicated</option>
+                            </select></div>
+                        <div><label>Max LLM Length</label><input type="number" id="model-max-llm" min="0"></div>
+                    </div>
+                    <div class="flag-grid" style="margin-top:10px">
+                        <label class="flag-item"><input type="checkbox" id="model-llm-flash-attn" checked><span>LLM Flash Attention</span></label>
+                    </div>
+                </div>
+                <div class="config-section" style="margin-top:14px">
+                    <div class="config-section-title">DiT</div>
+                    <div class="params">
+                        <div><label>K Cache Type</label>
+                            <select id="model-dit-kv-k">
+                                <option value="q8_0">Q8_0</option><option value="f32">F32</option><option value="f16">F16</option>
+                                <option value="q5_1">Q5_1</option><option value="q5_0">Q5_0</option>
+                                <option value="q4_1">Q4_1</option><option value="q4_0">Q4_0</option>
+                            </select></div>
+                        <div><label>V Cache Type</label>
+                            <select id="model-dit-kv-v">
+                                <option value="q4_0">Q4_0</option><option value="f32">F32</option><option value="f16">F16</option>
+                                <option value="q5_1">Q5_1</option><option value="q5_0">Q5_0</option>
+                                <option value="q4_1">Q4_1</option><option value="q8_0">Q8_0</option>
+                            </select></div>
+                        <div><label>Fixed Slots</label><input type="number" id="model-dit-fixed-slots" value="0" min="0"></div>
+                        <div><label>Offloadable Slots</label><input type="number" id="model-dit-offloadable-slots" value="0" min="0"></div>
+                        <div><label>KV Cache Length</label><input type="number" id="model-dit-cache-length" value="0" min="0"></div>
+                    </div>
+                    <div class="flag-grid" style="margin-top:10px">
+                        <label class="flag-item"><input type="checkbox" id="model-flow-flash-attn" checked><span>Flow Flash Attention</span></label>
+                    </div>
                 </div>
                 <div style="margin-top:12px"><button class="btn btn-sm" id="btn-reset-model-config" style="width:100%">Reset Model Config to Defaults</button></div>
             </details>
@@ -282,7 +311,16 @@
                     <label class="flag-item"><input type="checkbox" id="tts-split" checked><span>Text Splitting</span></label>
                     <label class="flag-item"><input type="checkbox" id="tts-fastsplit" checked><span>Fast Split</span></label>
                 </div>
-                <div style="margin-top:10px"><button class="btn btn-sm" id="btn-reset-gen-config" style="width:100%">Reset Generation Params to Defaults</button></div>
+            </div>
+            <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+                <label style="font-size:13px;color:var(--text-dim);margin-bottom:4px;display:block">Streaming Config</label>
+                <div class="row">
+                    <div><label class="flag-item" style="display:flex;align-items:center;gap:6px;padding:6px 0"><input type="checkbox" id="tts-stream"><span>Streaming</span></label></div>
+                    <div><label>Chunk Tokens <span class="hint">(0 = model default)</span></label>
+                        <input type="number" id="tts-chunk-tokens" min="0" value="0" style="width:100%;box-sizing:border-box"></div>
+                </div>
+            </div>
+            <div style="margin-top:14px"><button class="btn btn-sm" id="btn-reset-gen-config" style="width:100%">Reset Generation Params to Defaults</button></div>
             </div>
         </details>
 

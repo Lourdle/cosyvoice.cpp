@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cosyvoice-internal.h"
+#include "cosyvoice-kv-cache.h"
 #include "ggml-fft.h"
 
 #include <array>
@@ -130,7 +131,7 @@ struct Attention : Module
 
     void OnLoad(const gguf_loader& loader, const std::string& prefix);
 
-    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* position_ids, int64_t cut_len) const;
+    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* position_ids, int64_t cut_len, cosyvoice_kv_cache* kv_cache, ggml_cgraph* gf, ggml_tensor* attn_mask, int layer_idx) const;
 };
 
 struct FeedForward : Module
@@ -153,7 +154,7 @@ struct DiTBlock : Module
 
     void OnLoad(const gguf_loader& loader, const std::string& prefix);
 
-    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* time_emb, ggml_tensor* position_ids, int64_t cut_len) const;
+    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* time_emb, ggml_tensor* position_ids, int64_t cut_len, cosyvoice_kv_cache* kv_cache, ggml_cgraph* gf, ggml_tensor* attn_mask, int layer_idx) const;
 };
 
 struct AdaLayerNorm_Final : Module
@@ -178,15 +179,17 @@ struct DiT : Module
     Linear proj_out;
 
     int mel_dim;
+    constexpr static int static_chunk_size = 50;
 
     void OnLoad(const gguf_loader& loader, const std::string& prefix);
 
-    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* mu, ggml_tensor* t, ggml_tensor* spks, ggml_tensor* cond, int64_t cut_len, ggml_tensor*& position_ids, ggml_backend_op_capabilities capabilities) const;
+    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, ggml_tensor* mu, ggml_tensor* t, ggml_tensor* spks, ggml_tensor* cond, int64_t cut_len, ggml_tensor*& position_ids, ggml_backend_op_capabilities capabilities, cosyvoice_kv_cache* kv_cache, ggml_tensor** ref_attn_mask, ggml_cgraph* gf) const;
 };
 
 struct CausalConditionalCFM : Module
 {
-    std::array<float, 11> t_span;
+    constexpr static int diffusion_steps = 10;
+    std::array<float, diffusion_steps + 1> t_span;
     float inference_cfg_rate;
 
     DiT estimator;
@@ -204,7 +207,7 @@ struct CausalConditionalCFM : Module
 
     DiTContext prepare_context(ggml_context* ctx, ggml_tensor* mu, ggml_tensor* spks, ggml_tensor* cond) const;
     std::array<float, 2> get_t_and_dt(ggml_context* ctx, int step) const;
-    ggml_tensor* build_cgraph_one_step(ggml_context* ctx, const DiTContext& ditctx, int step, ggml_backend_op_capabilities capabilities, int64_t cut_len, ggml_tensor*& t_tensor, ggml_tensor*& position_ids) const;
+    ggml_tensor* build_cgraph_one_step(ggml_context* ctx, const DiTContext& ditctx, int step, ggml_backend_op_capabilities capabilities, int64_t cut_len, ggml_tensor*& t_tensor, ggml_tensor*& position_ids, ggml_cgraph* gf, cosyvoice_kv_cache* kv_cache, ggml_tensor** attn_mask) const;
 };
 
 struct PreLookaheadLayer : Module
@@ -216,7 +219,7 @@ struct PreLookaheadLayer : Module
 
     void OnLoad(const gguf_loader& loader, const std::string& prefix);
 
-    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* inputs) const;
+    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* inputs, bool streaming, uint32_t cut_len) const;
 };
 
 struct CausalMaskedDiffWithDiT : Module
@@ -238,7 +241,7 @@ struct CausalMaskedDiffWithDiT : Module
         int64_t cut_len;
     };
 
-    EncodeResult build_cgraph_encode(ggml_context* ctx, ggml_tensor* token, ggml_tensor* prompt_token, ggml_tensor* prompt_feat, ggml_tensor* embedding, ggml_backend_op_capabilities capabilities) const;
+    EncodeResult build_cgraph_encode(ggml_context* ctx, ggml_tensor* token, ggml_tensor* prompt_token, ggml_tensor* prompt_feat, ggml_tensor* embedding, ggml_backend_op_capabilities capabilities, uint32_t cut_len = 0, bool streaming = false) const;
 };
 
 struct CausalConv1dBase : Conv1d
@@ -258,7 +261,8 @@ struct CausalConv1d : CausalConv1dBase
 
     int causal_padding() const;
 
-    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x) const;
+    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x) const { return build_cgraph(ctx, x, true); }
+    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, bool finalize) const;
 };
 
 struct CausalConvRNNF0Predictor : Module
@@ -275,7 +279,7 @@ struct CausalConvRNNF0Predictor : Module
 
     Linear classifier;
 
-    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x) const;
+    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, bool finalize) const;
 };
 
 struct SineGen2 : Module
@@ -339,8 +343,9 @@ struct CausalHiFTGenerator : Module
     std::vector<ResBlock> resblocks;
     CausalConv1d conv_post;
 
-    std::array<ggml_tensor*, 2> build_cgraph(ggml_context* ctx, ggml_tensor* speech_feat) const;
+    std::array<ggml_tensor*, 2> build_cgraph(ggml_context* ctx, ggml_tensor* speech_feat, bool finalize) const;
 
+    int overlap_length() const;
     void set_rand_ini(const float* data) const;
 
     float lrelu_slope;
