@@ -345,6 +345,7 @@ struct CausalHiFTGenerator : Module
 
     std::array<ggml_tensor*, 2> build_cgraph(ggml_context* ctx, ggml_tensor* speech_feat, bool finalize) const;
 
+    int overlap_length() const;
     void set_rand_ini(const float* data) const;
 
     float lrelu_slope;

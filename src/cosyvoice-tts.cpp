@@ -638,9 +638,18 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
 
     if (!finalize)
     {
-        auto n_cached_elements = cache_length * feat->ne[0];
-        worker->flow_cache.resize(n_cached_elements + static_cast<size_t>(ggml_nelements(feat)));
-        ggml_backend_tensor_get_async(backend.get(), feat, worker->flow_cache.data() + n_cached_elements, 0, feat->nb[2]);
+        const auto overlap = static_cast<int64_t>(cv3_shared->hift_overlap);
+        const auto n_feat_frames = feat->ne[1];
+        const auto frames_to_keep = std::min(overlap, n_feat_frames);
+        const auto elements_to_keep = static_cast<size_t>(frames_to_keep * feat->ne[0]);
+
+        worker->flow_cache.resize(elements_to_keep);
+        if (frames_to_keep > 0)
+        {
+            const auto byte_offset = static_cast<size_t>((n_feat_frames - frames_to_keep) * feat->nb[1]);
+            const auto byte_size = static_cast<size_t>(frames_to_keep * feat->nb[1]);
+            ggml_backend_tensor_get_async(backend.get(), feat, worker->flow_cache.data(), byte_offset, byte_size);
+        }
     }
 
     if (config[flow.decoder.diffusion_steps - 1].cache_kv)

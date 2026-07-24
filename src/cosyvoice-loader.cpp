@@ -980,6 +980,7 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     auto arch = loader.get_string("general.architecture");
     shared->architecture.reset(new char[arch.size() + 1]);
     memcpy(shared->architecture.get(), arch.data(), arch.size() + 1);
+    cv3_shared->hift_overlap = hift.overlap_length();
 
     ggml_backend_synchronize(backend);
 }

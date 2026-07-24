@@ -158,6 +158,7 @@ struct cosyvoice_model_3_shared
 
     std::set<int> stop_tokens;
     std::set<int> silent_tokens;
+    int hift_overlap;
 };
 
 struct cosyvoice_3_worker_context

@@ -423,7 +423,6 @@ bool cosyvoice_tts_stream(cosyvoice_context_t ctx, const int* text, uint32_t tex
     ctx->llm_clear_accepted_tokens();
     uint32_t offset = 0;
     uint32_t n_tokens = 0;
-    uint32_t last_length = 0;
     bool final = false;
     do
     {
@@ -443,10 +442,9 @@ bool cosyvoice_tts_stream(cosyvoice_context_t ctx, const int* text, uint32_t tex
         if (!ctx->token2wav_ext(ctx->llm_get_accepted_tokens(), n_tokens, speed, prompt, &offset, true, ctx->llm_get_n_accepted_tokens() == n_tokens, &result))
             return false;
 
-        if (result.data && result.length > last_length
-            && !callback(result.data + last_length, result.length - last_length, user_data))
+        if (result.data && result.length > 0
+            && !callback(result.data, result.length, user_data))
             return false;
-        last_length = result.length;
     } while (n_tokens != ctx->llm_get_n_accepted_tokens());
 
     return true;

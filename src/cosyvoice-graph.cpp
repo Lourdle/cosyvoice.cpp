@@ -805,6 +805,14 @@ std::array<ggml_tensor*, 2> CausalHiFTGenerator::build_cgraph(ggml_context* ctx,
     }
 }
 
+int CausalHiFTGenerator::overlap_length() const
+{
+    const int c0 = f0_predictor.condnet_0.causal_padding();
+    const int cp = conv_pre.causal_padding();
+    const int stft_overlap = (nfft + scale_factor - 1) / scale_factor;
+    return std::max(c0 + cp + 1, stft_overlap);
+}
+
 ggml_tensor* Qwen2MLP::build_cgraph(ggml_context* ctx, ggml_tensor* x) const
 {
     auto gate = gate_proj.build_cgraph(ctx, x);
