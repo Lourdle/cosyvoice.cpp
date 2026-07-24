@@ -213,8 +213,6 @@ public:
         {
             for (;;)
             {
-                if (stop_thread_flag.load(std::memory_order_acquire))
-                    break;
                 if (g_stop_requested.load(std::memory_order_acquire))
                 {
                     if (ctx)
@@ -224,6 +222,8 @@ public:
                     }
                     break;
                 }
+                if (stop_thread_flag.load(std::memory_order_acquire))
+                    break;
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
         });
@@ -240,7 +240,10 @@ public:
     bool was_stop_requested()
     {
         if (worker.joinable())
+        {
+            stop_thread_flag.store(true, std::memory_order_release);
             worker.join();
+        }
         return triggered;
     }
 
