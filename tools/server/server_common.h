@@ -50,6 +50,20 @@ void print_error_log(const char* format, ...);
 // Level-gated info - no timestamp, no trailing newline (for startup banners).
 void print_info_log(server_log_level level, const char* format, ...);
 
+#ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
+// Startup-banner lines reporting the CPU DSP SIMD state, shared by both modes.
+inline void print_cosyvoice_simd_banner(server_log_level log_level)
+{
+    cosyvoice_simd_info_t info;
+    cosyvoice_get_simd_info(&info);
+    print_info_log(log_level, "  cpu_dsp_simd       : %s (level: %s)\n",
+        simd_caps_to_string(info.current).c_str(), simd_level_to_string(info.level));
+    if (log_level == server_log_level::verbose)
+        print_info_log(log_level, "  cpu_dsp_simd_hw    : %s\n",
+            simd_caps_to_string(info.supported).c_str());
+}
+#endif
+
 // ---------------------------------------------------------------------------
 // Float-to-PCM16 conversion helper
 // ---------------------------------------------------------------------------

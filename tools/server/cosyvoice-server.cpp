@@ -48,6 +48,10 @@ struct server_options
 
     bool has_seed = false;
     uint32_t seed = 0;
+#ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
+    bool has_simd_level = false;
+    cosyvoice_simd_level_t simd_level = COSYVOICE_SIMD_LEVEL_AUTO;
+#endif
 
     bool has_llm_kv_cache_type = false;
     cosyvoice_kv_cache_type_t llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
@@ -111,6 +115,10 @@ static void print_usage(const char* argv0)
     printf("  --backend <name>                            GGML backend name. Default: auto (best available).\n");
     printf("  --cpu                                       Use CPU backend (equivalent to --backend cpu).\n");
     printf("  --cuda                                      Use CUDA backend (equivalent to --backend cuda0).\n");
+#ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
+    printf("  --simd-level <auto|scalar|sse42|avx|avx2|avx10-256|avx512>\n");
+    printf("                                              CPU DSP SIMD tier cap (x86-64). Default: auto (or the COSYVOICE_SIMD_LEVEL env var).\n");
+#endif
     printf("  --served-model-name <name>                  Exposed model name for API requests.\n");
     printf("  --host <host>                               Listen host. Default: 127.0.0.1.\n");
     printf("  --port <port>                               Listen port. Default: 8080.\n");
@@ -648,6 +656,18 @@ int tool_entry(int argc, char** argv)
                 }
                 options.backend = "cuda0";
             }
+#ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
+            else if (str_casecmp(arg, "--simd-level") == 0)
+            {
+                const auto value = get_arg_value();
+                if (!parse_simd_level_arg(value, &options.simd_level))
+                {
+                    fprintf(stderr, "Error: invalid --simd-level value \"%s\" (expected auto|scalar|sse42|avx|avx2|avx10-256|avx512).\n", value);
+                    return 1;
+                }
+                options.has_simd_level = true;
+            }
+#endif
             else if (str_casecmp(arg, "--served-model-name") == 0)
             {
                 options.served_model_name = get_arg_value();
@@ -965,6 +985,12 @@ int tool_entry(int argc, char** argv)
                 return 1;
             }
         }
+
+#ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
+        // Overrides the COSYVOICE_SIMD_LEVEL env var the library applied at load.
+        if (options.has_simd_level)
+            cosyvoice_set_simd_level(options.simd_level);
+#endif
 
         // ---- Determine effective mode ----
 #ifdef COSYVOICE_SERVER_NO_WEBUI

@@ -1451,6 +1451,9 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         const auto speakers_str = join_strings(runtime.voice_names, ", ");
         print_info_log(runtime.log_level, "  speakers           : %s\n", speakers_str.empty() ? "-" : speakers_str.c_str());
     }
+#ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
+    print_cosyvoice_simd_banner(runtime.log_level);
+#endif
     if (!runtime.model_slots.empty())
     {
         cosyvoice_context_params_t ap;

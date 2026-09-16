@@ -764,6 +764,9 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
     const auto voices_str = join_strings(runtime.voice_names, ", ");
     print_info_log(runtime.log_level, "  voices             : %s\n", voices_str.empty() ? "-" : voices_str.c_str());
     print_info_log(runtime.log_level, "  buffer_policy      : %s\n", inference_buffer_policy_to_string(runtime.inference_buffer_policy));
+#ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
+    print_cosyvoice_simd_banner(runtime.log_level);
+#endif
     {
         char kv_buf[256];
         snprintf(kv_buf, sizeof(kv_buf), "requested: %s, actual: %s (%s)",
