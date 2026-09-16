@@ -124,11 +124,23 @@ if(NOT COSYVOICE_NO_FRONTEND)
         list(APPEND OBJECT_LIBS cosyvoice-frontend)
 endif()
 
-# simd_detect.cpp is the only definition of g_simd_caps, referenced solely by
-# x86 dispatch -- drop it from the sources when it can never be used (the old
-# in-function REMOVE_ITEM was dead: add_library() had already consumed the list).
+# simd_detect.cpp is the only definition of g_simd_hw_caps/g_simd_caps (and
+# the COSYVOICE_SIMD_LEVEL env initializer), referenced solely by x86 dispatch
+# and the SIMD control API -- drop it from the sources when they can never be
+# used (the old in-function REMOVE_ITEM was dead: add_library() had already
+# consumed the list).
 if(COSYVOICE_NO_SIMD OR NOT COSYVOICE_TARGET_IS_X86)
     list(REMOVE_ITEM COSYVOICE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/simd_detect.cpp")
+endif()
+
+# cosyvoice-simd.cpp implements the x86-only SIMD detection/control C API (the
+# public header declares those symbols only on x86); on non-x86 it is an empty
+# TU -- exclude it. Note: it must STAY on x86 even under COSYVOICE_NO_SIMD,
+# where it exports the static scalar-only reporting picture. The
+# COSYVOICE_TARGET_IS_X86 probe mirrors exactly the header's
+# __x86_64__/_M_X64 gate, so declarations and exports can never disagree.
+if(NOT COSYVOICE_TARGET_IS_X86)
+    list(REMOVE_ITEM COSYVOICE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/cosyvoice-simd.cpp")
 endif()
 
 add_library(cosyvoice ${COSYVOICE_SOURCES})

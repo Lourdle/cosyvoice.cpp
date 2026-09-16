@@ -1,16 +1,17 @@
 #include "simd-dispatch.h"
 
+#include <cctype>
+#include <cstdlib>
+
 #ifdef _DEBUG
     #include <format>
     #include "cosyvoice-internal.h"
 #endif
 
-#if defined(__x86_64__) || defined(_M_X64)
-    #if defined(_MSC_VER)
-        #include <intrin.h>
-    #else
-        #include <cpuid.h>
-    #endif
+#if defined(_MSC_VER)
+    #include <intrin.h>
+#else
+    #include <cpuid.h>
 #endif
 
 inline
@@ -163,4 +164,67 @@ static simd_caps simd_detect()
     return caps;
 }
 
-const simd_caps g_simd_caps = simd_detect();
+const simd_caps g_simd_hw_caps = simd_detect();
+std::atomic<simd_caps> g_simd_caps{ g_simd_hw_caps };
+
+// --- COSYVOICE_SIMD_LEVEL environment variable ---
+// Read once, at library load. Everything below is defined in the SAME TU as
+// the detection result, so dynamic-initialization order is definitional:
+// g_simd_hw_caps is fully initialized before the env override is applied
+// (no cross-TU static-init hazard). The canonical names/aliases must stay in
+// sync with tools/common/tool_common_cosyvoice.h (parse_simd_level_arg).
+namespace
+{
+    bool simd_streq_ci(const char* lhs, const char* rhs)
+    {
+        for (; *lhs && *rhs; ++lhs, ++rhs)
+        {
+            if (std::tolower(static_cast<unsigned char>(*lhs)) !=
+                std::tolower(static_cast<unsigned char>(*rhs)))
+                return false;
+        }
+        return *lhs == *rhs;
+    }
+
+    bool simd_level_from_name(const char* name, simd_level* level)
+    {
+        if (!name || !*name)
+            return false;
+        if (simd_streq_ci(name, "auto"))
+            *level = simd_level::auto_;
+        else if (simd_streq_ci(name, "scalar") || simd_streq_ci(name, "none"))
+            *level = simd_level::scalar;
+        else if (simd_streq_ci(name, "sse42") || simd_streq_ci(name, "sse4.2"))
+            *level = simd_level::sse42;
+        else if (simd_streq_ci(name, "avx"))
+            *level = simd_level::avx;
+        else if (simd_streq_ci(name, "avx2"))
+            *level = simd_level::avx2;
+        else if (simd_streq_ci(name, "avx10-256") || simd_streq_ci(name, "avx10_256") ||
+                 simd_streq_ci(name, "avx10.1-256") || simd_streq_ci(name, "avx10_1_256"))
+            *level = simd_level::avx10_1_256;
+        else if (simd_streq_ci(name, "avx512") || simd_streq_ci(name, "avx-512"))
+            *level = simd_level::avx512;
+        else
+            return false;
+        return true;
+    }
+
+    // Invalid values are ignored silently: the ggml log callback's global
+    // state may not be usable yet at library-load time.
+    struct simd_env_initializer
+    {
+        simd_env_initializer()
+        {
+            const char* env = std::getenv("COSYVOICE_SIMD_LEVEL");
+            simd_level level;
+            if (env && simd_level_from_name(env, &level))
+            {
+                g_simd_caps.store(simd_caps_for_level(g_simd_hw_caps, level), std::memory_order_relaxed);
+                g_simd_level.store(static_cast<uint32_t>(level), std::memory_order_relaxed);
+            }
+        }
+    };
+
+    simd_env_initializer g_simd_env_initializer;
+}

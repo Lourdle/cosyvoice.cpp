@@ -54,6 +54,8 @@
 // the legacy widths.
 // ---------------------------------------------------------------------------
 
+#include <atomic>
+#include <cstdint>
 #include <stdexcept>
 #include <utility>
 
@@ -91,11 +93,63 @@ constexpr simd_caps simd_avx512     { .sse42=true,  .avx=true,  .fma3=true,  .av
 // 10.1 -- 10.2 adds no instruction any kernel uses.
 constexpr simd_caps simd_avx10_1_256 { .sse42=false, .avx=false, .fma3=true,  .avx2=false, .avx512=false, .avx10_1_256=true, .avx10_1_512=false };
 
-// g_simd_caps is defined by simd_detect.cpp, which is built only on x86 (and
-// only when SIMD is not disabled). The extern is declared under the same
+// Detection and runtime state are split: g_simd_hw_caps is the immutable
+// CPUID/XCR0 detection result; g_simd_caps is the mutable tier selection the
+// dispatch actually reads (initialized to the hardware truth; the C API
+// setter and the COSYVOICE_SIMD_LEVEL env-var initializer store capped copies
+// into it). Both are defined by simd_detect.cpp -- x86-64 only, and skipped
+// entirely under COSYVOICE_NO_SIMD -- and are extern-declared under the same
 // conditions so non-x86 callers never reference a missing symbol.
 #if !defined(COSYVOICE_NO_SIMD) && (defined(__x86_64__) || defined(_M_X64))
-extern const simd_caps g_simd_caps;
+extern const simd_caps g_simd_hw_caps;
+extern std::atomic<simd_caps> g_simd_caps;
+#endif
+
+// Runtime tier capping. The level enum is shared everywhere (the API TU
+// static_asserts it against cosyvoice_simd_level_t); the mutable state below
+// exists only where the SIMD dispatch itself exists -- under COSYVOICE_NO_SIMD
+// and on non-x86 targets the dispatch is static and nothing reads it. The cap
+// is applied ONCE at set time (simd_caps_for_level, called only by the C API
+// setter and the env-var initializer), so the dispatch hot path is a single
+// relaxed atomic load of g_simd_caps with no masking overhead. g_simd_level
+// is read-back-only metadata (a caps value alone cannot unambiguously report
+// which level was requested) and never feeds the dispatch. The inline
+// per-process instance is shared by all caller-ish TUs; the writers live in
+// simd_detect.cpp and cosyvoice-simd.cpp.
+// WARNING: the numeric values are part of the public C ABI -- they must stay
+// identical to the cosyvoice_simd_level_t enum in include/cosyvoice.h
+// (AUTO=0, SCALAR=1, SSE42=2, AVX=3, AVX2=4, AVX10_1_256=5, AVX512=6).
+enum class simd_level : uint32_t
+{
+    auto_       = 0,
+    scalar      = 1,
+    sse42       = 2,
+    avx         = 3,
+    avx2        = 4,
+    avx10_1_256 = 5,
+    avx512      = 6,
+};
+
+// Apply a tier cap to a capability set: keeps the classes at or below the
+// requested level, mirroring what each preset enumerates -- sse42 clears FMA
+// too (the SSE4.2 tier does not use it), avx2 keeps FMA, and the AVX10-256
+// level only removes the two 512-bit enumeration sources (the AVX-512 tier
+// serves both). Called once per level change, never per dispatch.
+inline simd_caps simd_caps_for_level(simd_caps caps, simd_level lvl)
+{
+    if (lvl == simd_level::auto_ || lvl >= simd_level::avx512)
+        return caps;
+    caps.avx512      = false;
+    caps.avx10_1_512 = false;
+    if (lvl < simd_level::avx10_1_256) caps.avx10_1_256 = false;
+    if (lvl < simd_level::avx2)        { caps.avx2 = false; caps.fma3 = false; }
+    if (lvl < simd_level::avx)         caps.avx = false;
+    if (lvl < simd_level::sse42)       caps.sse42 = false;
+    return caps;
+}
+
+#if !defined(COSYVOICE_NO_SIMD) && (defined(__x86_64__) || defined(_M_X64))
+inline std::atomic<uint32_t> g_simd_level{ static_cast<uint32_t>(simd_level::auto_) };
 #endif
 
 template<template<simd_caps> class Kernel, typename... Args>
@@ -108,32 +162,35 @@ auto simd_dispatch(Args&&... args)
     // non-x86: SSE4.2+FMA3 emulated via SIMDe/NEON (in the sse42 tier object).
     return Kernel<simd_sse42_fma>::run(std::forward<Args>(args)...);
 #else
-    // x86: dispatch by detected features, most capable first. No exact-equality
-    // matching: a class the build disabled is simply never selected and the CPU
-    // falls through to the next lower tier that the build did include. The 512
-    // tier answers BOTH enumeration sources -- legacy AVX-512 (leaf 7 F+BW+DQ+VL)
+    // x86: dispatch by the current tier selection (detected hardware, capped
+    // by the runtime SIMD level -- see simd_caps_for_level), most capable
+    // first. No exact-equality matching: a class the build disabled is simply
+    // never selected and the CPU falls through to the next lower tier that the
+    // build did include. The 512 tier answers BOTH enumeration sources --
+    // legacy AVX-512 (leaf 7 F+BW+DQ+VL)
     // and AVX10 512-bit (leaf 0x24 bit 17, any version) -- because AVX10.1+
     // subsumes that instruction space and the tier objects are equivalent
     // (MSVC: byte-identical). Checked before AVX10.1-256 so a 512-capable part
     // is never downgraded to the 256 tier.
+    const simd_caps caps = g_simd_caps.load(std::memory_order_relaxed);
 #if defined(COSYVOICE_HAS_AVX512)
-    if (g_simd_caps.avx512 || g_simd_caps.avx10_1_512)
+    if (caps.avx512 || caps.avx10_1_512)
         return Kernel<simd_avx512>::run(std::forward<Args>(args)...);
 #endif
 #if defined(COSYVOICE_HAS_AVX10_1_256)
-    if (g_simd_caps.avx10_1_256)
+    if (caps.avx10_1_256)
         return Kernel<simd_avx10_1_256>::run(std::forward<Args>(args)...);
 #endif
 #if defined(COSYVOICE_HAS_AVX2)
-    if (g_simd_caps.avx2 && g_simd_caps.fma3 && g_simd_caps.sse42)
+    if (caps.avx2 && caps.fma3 && caps.sse42)
         return Kernel<simd_avx2>::run(std::forward<Args>(args)...);
 #endif
 #if defined(COSYVOICE_HAS_AVX)
-    if (g_simd_caps.avx && g_simd_caps.sse42)
+    if (caps.avx && caps.sse42)
         return Kernel<simd_avx>::run(std::forward<Args>(args)...);
 #endif
 #if defined(COSYVOICE_HAS_SSE42)
-    if (g_simd_caps.sse42)
+    if (caps.sse42)
         return Kernel<simd_sse42>::run(std::forward<Args>(args)...);
 #endif
 #if defined(COSYVOICE_HAS_SCALAR)

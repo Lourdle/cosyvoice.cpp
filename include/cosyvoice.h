@@ -366,6 +366,86 @@ COSYVOICE_API void cosyvoice_init_backend();
 COSYVOICE_API void cosyvoice_init_backend_from_path(const char* dir_path);
 
 // ----------------------------------------------------------------------------
+// SIMD Detection & Control API
+// ----------------------------------------------------------------------------
+// Runtime inspection and capping of the CPU DSP SIMD tiers (FFT, mel/spectral
+// kernels, log/sincos). On x86-64 the symbols always exist; in
+// COSYVOICE_NO_SIMD builds they report the static scalar-only picture and
+// only accept AUTO/SCALAR. On non-x86 targets the library exports none of
+// these symbols and the COSYVOICE_SIMD_CONTROL_SUPPORTED feature macro is
+// undefined, so consumers must guard calls with it. The control is
+// process-global and thread-safe; a level change takes effect for subsequent
+// kernel calls only (kernels already in flight keep their tier).
+
+#if defined(__x86_64__) || defined(_M_X64)
+#define COSYVOICE_SIMD_CONTROL_SUPPORTED 1
+
+#define COSYVOICE_SIMD_CAP_SSE42       (1u << 0) ///< SSE4.2-class tier.
+#define COSYVOICE_SIMD_CAP_AVX         (1u << 1) ///< AVX-class tier.
+#define COSYVOICE_SIMD_CAP_FMA3        (1u << 2) ///< FMA3 (consumed by the AVX2-class tiers and up).
+#define COSYVOICE_SIMD_CAP_AVX2        (1u << 3) ///< AVX2+FMA3-class tier.
+#define COSYVOICE_SIMD_CAP_AVX512      (1u << 4) ///< AVX-512 (F+BW+DQ+VL) tier; also serves AVX10-512 parts.
+#define COSYVOICE_SIMD_CAP_AVX10_1_256 (1u << 5) ///< AVX10.1-256 (k-masked 256-bit tail) tier.
+#define COSYVOICE_SIMD_CAP_AVX10_1_512 (1u << 6) ///< AVX10 512-bit capability; dispatch runs it on the AVX-512 tier.
+
+/**
+ * @brief Runtime cap on the SIMD tier the CPU DSP dispatch may select.
+ *
+ * The dispatch chain tries tiers from most capable to least capable; setting a
+ * level allows every tier at or below it and disables everything above.
+ * `AUTO` (the default) means no cap: the fastest tier the CPU supports and the
+ * build includes is used. `SCALAR` disables SIMD at runtime without a rebuild.
+ * Values must stay in sync with the internal `simd_level` enum in
+ * src/simd-dispatch.h.
+ */
+typedef enum cosyvoice_simd_level
+{
+    COSYVOICE_SIMD_LEVEL_AUTO        = 0, ///< No cap: use the fastest supported tier (default).
+    COSYVOICE_SIMD_LEVEL_SCALAR      = 1, ///< Force scalar kernels.
+    COSYVOICE_SIMD_LEVEL_SSE42       = 2, ///< Cap at the SSE4.2 tier.
+    COSYVOICE_SIMD_LEVEL_AVX         = 3, ///< Cap at the AVX tier.
+    COSYVOICE_SIMD_LEVEL_AVX2        = 4, ///< Cap at the AVX2+FMA3 tier.
+    COSYVOICE_SIMD_LEVEL_AVX10_1_256 = 5, ///< Cap at the AVX10.1-256 tier (512-bit tiers disabled).
+    COSYVOICE_SIMD_LEVEL_AVX512      = 6, ///< No cap on legacy tiers: AVX-512 / AVX10-512 allowed.
+    COSYVOICE_SIMD_LEVEL_COUNT            // Sentinel value.
+} cosyvoice_simd_level_t;
+
+/**
+ * @brief SIMD capability snapshot.
+ */
+typedef struct cosyvoice_simd_info
+{
+    uint32_t supported;  ///< Capabilities detected on the CPU (COSYVOICE_SIMD_CAP_* bits). Always 0 in scalar-only builds.
+    uint32_t built;      ///< Tiers compiled into this build. Note that the scalar fallback tier is always available on x86.
+    uint32_t current;    ///< Capabilities the dispatch currently selects: supported & built & capped by the active level.
+    cosyvoice_simd_level_t level; ///< The level currently set (COSYVOICE_SIMD_LEVEL_AUTO when no cap is active).
+    bool scalar_only;    ///< True when the build was compiled with COSYVOICE_NO_SIMD (scalar kernels only).
+} cosyvoice_simd_info_t;
+
+/**
+ * @brief Query the SIMD detection and runtime-capping state.
+ */
+COSYVOICE_API void cosyvoice_get_simd_info(cosyvoice_simd_info_t* info);
+
+/**
+ * @brief Get the currently set SIMD level cap.
+ */
+COSYVOICE_API cosyvoice_simd_level_t cosyvoice_get_simd_level(void);
+
+/**
+ * @brief Set the SIMD level cap for all subsequent CPU DSP kernel calls.
+ * @param level One of the COSYVOICE_SIMD_LEVEL_* values; COSYVOICE_SIMD_LEVEL_AUTO
+ *              restores uncapped dispatch. Levels above what the CPU supports
+ *              or the build includes are harmless (dispatch clamps to the best
+ *              available tier).
+ * @return True if the level is valid and, in scalar-only builds, meaningful.
+ * @note Process-global, atomic, thread-safe. In-flight kernels are unaffected.
+ */
+COSYVOICE_API bool cosyvoice_set_simd_level(cosyvoice_simd_level_t level);
+
+#endif // defined(__x86_64__) || defined(_M_X64)
+
+// ----------------------------------------------------------------------------
 // Context Initialization & Management API
 // ----------------------------------------------------------------------------
 
