@@ -28,6 +28,79 @@ using audio_buffer_handle = std::unique_ptr<float, tool_deleter<float, &cosyvoic
 using cosyvoice_audio_encoder_handle = std::unique_ptr<cosyvoice_audio_encoder, tool_deleter<cosyvoice_audio_encoder, &cosyvoice_audio_encoder_destroy>>;
 #endif
 
+#ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
+// CPU DSP SIMD tier name parsing, shared by the CLI and the server. The name
+// set must stay in sync with the internal env-var mapping in
+// src/cosyvoice-simd.cpp (COSYVOICE_SIMD_LEVEL).
+inline bool parse_simd_level_arg(const std::string& value, cosyvoice_simd_level_t* result)
+{
+    const auto lowered = to_lower(value);
+    if (lowered == "auto")
+        *result = COSYVOICE_SIMD_LEVEL_AUTO;
+    else if (lowered == "scalar" || lowered == "none")
+        *result = COSYVOICE_SIMD_LEVEL_SCALAR;
+    else if (lowered == "sse42" || lowered == "sse4.2")
+        *result = COSYVOICE_SIMD_LEVEL_SSE42;
+    else if (lowered == "avx")
+        *result = COSYVOICE_SIMD_LEVEL_AVX;
+    else if (lowered == "avx2")
+        *result = COSYVOICE_SIMD_LEVEL_AVX2;
+    else if (lowered == "avx10-256" || lowered == "avx10_256" ||
+             lowered == "avx10.1-256" || lowered == "avx10_1_256")
+        *result = COSYVOICE_SIMD_LEVEL_AVX10_1_256;
+    else if (lowered == "avx512" || lowered == "avx-512")
+        *result = COSYVOICE_SIMD_LEVEL_AVX512;
+    else
+        return false;
+    return true;
+}
+
+inline const char* simd_level_to_string(cosyvoice_simd_level_t level)
+{
+    switch (level)
+    {
+    case COSYVOICE_SIMD_LEVEL_AUTO:
+        return "auto";
+    case COSYVOICE_SIMD_LEVEL_SCALAR:
+        return "scalar";
+    case COSYVOICE_SIMD_LEVEL_SSE42:
+        return "sse42";
+    case COSYVOICE_SIMD_LEVEL_AVX:
+        return "avx";
+    case COSYVOICE_SIMD_LEVEL_AVX2:
+        return "avx2";
+    case COSYVOICE_SIMD_LEVEL_AVX10_1_256:
+        return "avx10-256";
+    case COSYVOICE_SIMD_LEVEL_AVX512:
+        return "avx512";
+    default:
+        return "unknown";
+    }
+}
+
+inline std::string simd_caps_to_string(uint32_t caps)
+{
+    std::string result;
+    auto add = [&](uint32_t bit, const char* name)
+    {
+        if (caps & bit)
+        {
+            if (!result.empty())
+                result += ",";
+            result += name;
+        }
+    };
+    add(COSYVOICE_SIMD_CAP_SSE42, "sse42");
+    add(COSYVOICE_SIMD_CAP_AVX, "avx");
+    add(COSYVOICE_SIMD_CAP_FMA3, "fma3");
+    add(COSYVOICE_SIMD_CAP_AVX2, "avx2");
+    add(COSYVOICE_SIMD_CAP_AVX512, "avx512");
+    add(COSYVOICE_SIMD_CAP_AVX10_1_256, "avx10-256");
+    add(COSYVOICE_SIMD_CAP_AVX10_1_512, "avx10-512");
+    return result.empty() ? "none (scalar)" : result;
+}
+#endif
+
 inline bool parse_kv_cache_type_arg(const std::string& value, cosyvoice_kv_cache_type_t* result)
 {
     // Check for separate K/V format: "k=<type>,v=<type>" or "k=<type>,v=<type>,fallback=<type>"

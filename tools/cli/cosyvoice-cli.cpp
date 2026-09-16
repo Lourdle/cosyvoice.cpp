@@ -98,6 +98,10 @@ struct cli_options
 #endif
     bool verbose = false;
     bool quiet = false;
+#ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
+    bool has_simd_level = false;
+    cosyvoice_simd_level_t simd_level = COSYVOICE_SIMD_LEVEL_AUTO;
+#endif
     bool has_temperature = false;
     float temperature = 0.0f;
     bool has_top_k = false;
@@ -365,6 +369,10 @@ static void print_usage(const char* argv0)
     printf("  --backend <name>                            GGML backend name. Default: auto (best available).\n");
     printf("  --cpu                                       Use CPU backend (equivalent to --backend cpu).\n");
     printf("  --cuda                                      Use CUDA backend (equivalent to --backend cuda0).\n");
+#ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
+    printf("  --simd-level <auto|scalar|sse42|avx|avx2|avx10-256|avx512>\n");
+    printf("                                              CPU DSP SIMD tier cap (x86-64). Default: auto (or the COSYVOICE_SIMD_LEVEL env var).\n");
+#endif
     printf("  --text, -t <text>                           Text to synthesize.\n");
     printf("  --instruction, -i <text>                    Only used in instruct mode.\n");
 #ifdef COSYVOICE_NO_AUDIO
@@ -905,6 +913,23 @@ static void print_memory_runtime_info(
     print_kv_line_mib_delta("random_noise", memory_usage_before.random_noise, memory_usage_after.random_noise);
 }
 
+#ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
+static void print_simd_runtime_info(cli_log_level log_level)
+{
+    if (log_level != cli_log_level::verbose)
+        return;
+
+    cosyvoice_simd_info_t info;
+    cosyvoice_get_simd_info(&info);
+    print_section_title("CPU DSP SIMD");
+    print_kv_line_string("supported", simd_caps_to_string(info.supported).c_str());
+    print_kv_line_string("current", simd_caps_to_string(info.current).c_str());
+    print_kv_line_string("level", simd_level_to_string(info.level));
+    if (info.scalar_only)
+        print_kv_line_string("build", "scalar-only");
+}
+#endif
+
 #ifndef COSYVOICE_NO_FRONTEND
 static void print_frontend_runtime_info(const cli_options& options, cli_log_level log_level)
 {
@@ -927,6 +952,9 @@ static void print_frontend_runtime_info(const cli_options& options, cli_log_leve
     print_kv_line_string("prompt_audio", options.prompt_audio.c_str());
 #endif
     print_kv_line_size("prompt_text_length", options.prompt_text.size());
+#ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
+    print_simd_runtime_info(log_level);
+#endif
 }
 #endif
 
@@ -1620,6 +1648,18 @@ int tool_entry(int argc, char** argv)
             }
             options.backend = "cuda0";
         }
+#ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
+        else if (str_casecmp(arg, "--simd-level") == 0)
+        {
+            auto value = get_arg_value();
+            if (!parse_simd_level_arg(value, &options.simd_level))
+            {
+                print_error_log("Error: invalid --simd-level value \"%s\" (expected auto|scalar|sse42|avx|avx2|avx10-256|avx512).\n", value);
+                return 1;
+            }
+            options.has_simd_level = true;
+        }
+#endif
         else if (str_casecmp(arg, "--max-llm-len") == 0)
         {
             auto value = get_arg_value();
@@ -1931,6 +1971,12 @@ int tool_entry(int argc, char** argv)
     if (!validate_options(options))
         return 1;
 
+#ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
+    // Overrides the COSYVOICE_SIMD_LEVEL env var the library applied at load.
+    if (options.has_simd_level)
+        cosyvoice_set_simd_level(options.simd_level);
+#endif
+
     const auto log_level = get_log_level(options);
     cli_timing_info timing;
     const auto total_start = std::chrono::steady_clock::now();
@@ -2214,6 +2260,9 @@ int tool_entry(int argc, char** argv)
     }
     const uint32_t sample_rate = cosyvoice_get_sample_rate(ctx.get());
     print_tts_runtime_info(options, ctx.get(), backend, effective_params, generation_config, sample_rate, log_level);
+#ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
+    print_simd_runtime_info(log_level);
+#endif
 
     tts_seed_state* seed_state_ptr = &seed_state;
 
