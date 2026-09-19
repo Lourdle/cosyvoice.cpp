@@ -759,6 +759,15 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
     print_info_log(runtime.log_level, "  served_model_name  : %s\n", runtime.served_model_name.c_str());
     print_info_log(runtime.log_level, "  bind               : %s:%u\n", runtime.host.c_str(), static_cast<unsigned>(runtime.port));
     print_info_log(runtime.log_level, "  sample_rate        : %u\n", runtime.sample_rate);
+    if (!runtime.model_slots.empty())
+    {
+        char steps_buf[160];
+        snprintf(steps_buf, sizeof(steps_buf), "requested: %d, actual: %d%s",
+            runtime.diffusion_steps,
+            cosyvoice_get_diffusion_steps(runtime.model_slots.front().get()),
+            runtime.diffusion_steps > 0 ? " (user override)" : "");
+        print_info_log(runtime.log_level, "  diffusion_steps    : %s\n", steps_buf);
+    }
     print_info_log(runtime.log_level, "  concurrency        : %u\n", runtime.concurrency);
     print_info_log(runtime.log_level, "  api_key_required   : %s\n", runtime.api_key.empty() ? "no" : "yes");
     const auto voices_str = join_strings(runtime.voice_names, ", ");

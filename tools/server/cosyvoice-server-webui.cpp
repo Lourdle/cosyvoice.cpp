@@ -440,6 +440,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             auto arch = cosyvoice_get_architecture(runtime.model_slots.front().get());
             if (arch && *arch)
                 json += ",\"model_arch\":\"" + std::string(arch) + "\"";
+            json += ",\"diffusion_steps\":" + std::to_string(cosyvoice_get_diffusion_steps(runtime.model_slots.front().get()));
         }
 #if !defined(COSYVOICE_NO_FRONTEND)
         bool fe_avail = runtime.frontend_ctx ? true : false;
@@ -1168,7 +1169,9 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         }
 
         // Build context params with defaults
-        cosyvoice_context_params_v3_cpp context_params{ .dit_allow_kv_cache_fallback = true };
+        cosyvoice_context_params_v4_cpp context_params_v4 = {};
+        cosyvoice_context_params_v3_cpp& context_params = context_params_v4;
+        context_params.dit_allow_kv_cache_fallback = true;
         cosyvoice_init_default_context_params(&context_params);
 
         if (runtime.has_seed)
@@ -1203,6 +1206,11 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             uint32_t v = body["dit_kv_cache_length"].get<uint32_t>();
             context_params.dit_kv_cache_length = v;
         }
+        if (body.contains("diffusion_steps"))
+        {
+            int v = body["diffusion_steps"].get<int>();
+            context_params_v4.diffusion_steps = v;
+        }
         if (body.contains("inference_buffer_policy"))
         {
             cosyvoice_inference_buffer_policy_t policy;
@@ -1225,7 +1233,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             chunk_tokens_val = body["chunk_tokens"].get<uint32_t>();
         auto loaded_ctx = cosyvoice_load_from_file_ext(
             model_path.c_str(),
-            &context_params,
+            &context_params_v4,
             backend,
             n_threads);
 
@@ -1245,14 +1253,15 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             cosyvoice_context_params_t p;
             cosyvoice_get_context_params(loaded_ctx, &p);
             log_message(runtime.log_level, server_log_level::concise, "WEBUI",
-                "Model loaded: %s (arch=%s, backend=%s, threads=%u, kv_cache_type=%s, buffer=%s, max_llm_len=%u)",
+                "Model loaded: %s (arch=%s, backend=%s, threads=%u, kv_cache_type=%s, buffer=%s, max_llm_len=%u, steps=%d)",
                 model_path.c_str(),
                 cosyvoice_get_architecture(loaded_ctx) ? cosyvoice_get_architecture(loaded_ctx) : "?",
                 backend_type.c_str(),
                 n_threads ? n_threads : (uint32_t)0,
                 kv_cache_type_to_string(p.llm_kv_cache_type).c_str(),
                 inference_buffer_policy_to_string(p.inference_buffer_policy),
-                p.n_max_seq);
+                p.n_max_seq,
+                cosyvoice_get_diffusion_steps(loaded_ctx));
         }
 
         // Set served model name
@@ -1281,6 +1290,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             runtime.dit_kv_fixed_slots       = cp.dit_kv_fixed_slots;
             runtime.dit_kv_offloadable_slots = cp.dit_kv_offloadable_slots;
             runtime.dit_kv_cache_length      = cp.dit_kv_cache_length;
+            runtime.diffusion_steps          = context_params_v4.diffusion_steps;
         }
 
         // Apply chunk_tokens if specified
@@ -1307,7 +1317,8 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         nlohmann::json ok = {
             {"success", true},
             {"model",    runtime.served_model_name},
-            {"sample_rate", runtime.sample_rate}
+            {"sample_rate", runtime.sample_rate},
+            {"diffusion_steps", cosyvoice_get_diffusion_steps(runtime.model_slots.front().get())}
         };
         res.status = 200;
         res.set_content(ok.dump(), "application/json");
@@ -1377,6 +1388,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         d["default_dit_kv_fixed_slots"]       = 0;
         d["default_dit_kv_offloadable_slots"] = 0;
         d["default_dit_kv_cache_length"]      = 0;
+        d["default_diffusion_steps"]          = 0;
 
         // Generation defaults (model-dependent or sensible fallbacks)
         if (!runtime.model_slots.empty())
@@ -1394,6 +1406,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             d["default_dit_kv_fixed_slots"]       = runtime.dit_kv_fixed_slots;
             d["default_dit_kv_offloadable_slots"] = runtime.dit_kv_offloadable_slots;
             d["default_dit_kv_cache_length"]      = runtime.dit_kv_cache_length;
+            d["default_diffusion_steps"]          = runtime.diffusion_steps;
         }
         else
         {
@@ -1447,6 +1460,15 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         runtime.api_key.empty() ? "no" : "yes");
     if (runtime.sample_rate > 0)
         print_info_log(runtime.log_level, "  sample_rate        : %u\n", runtime.sample_rate);
+    if (!runtime.model_slots.empty())
+    {
+        char steps_buf[160];
+        snprintf(steps_buf, sizeof(steps_buf), "requested: %d, actual: %d%s",
+            runtime.diffusion_steps,
+            cosyvoice_get_diffusion_steps(runtime.model_slots.front().get()),
+            runtime.diffusion_steps > 0 ? " (user override)" : "");
+        print_info_log(runtime.log_level, "  diffusion_steps    : %s\n", steps_buf);
+    }
     {
         const auto speakers_str = join_strings(runtime.voice_names, ", ");
         print_info_log(runtime.log_level, "  speakers           : %s\n", speakers_str.empty() ? "-" : speakers_str.c_str());

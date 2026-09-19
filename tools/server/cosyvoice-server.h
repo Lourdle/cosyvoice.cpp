@@ -138,6 +138,7 @@ struct server_runtime
     uint32_t dit_kv_fixed_slots          = 0;
     uint32_t dit_kv_offloadable_slots    = 0;
     uint32_t dit_kv_cache_length         = 0;
+    int      diffusion_steps             = 0;
 
     // Frontend model paths (ONNX, for feature extraction)
     std::string frontend_model;

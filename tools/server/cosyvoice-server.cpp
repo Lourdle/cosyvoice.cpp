@@ -67,6 +67,7 @@ struct server_options
     uint32_t dit_kv_fixed_slots = 0;
     uint32_t dit_kv_offloadable_slots = 0;
     uint32_t dit_kv_cache_length = 0;
+    int diffusion_steps = 0;
     bool stream = false;
     bool has_chunk_tokens = false;
     uint32_t chunk_tokens = 0;
@@ -144,6 +145,7 @@ static void print_usage(const char* argv0)
     printf("  --dit-kv-fixed-slots <value>                DiT KV fixed slots (0 = auto).\n");
     printf("  --dit-kv-offloadable-slots <value>          DiT KV offloadable slots (0 = auto).\n");
     printf("  --dit-kv-cache-length <value>               DiT KV cache length (0 = auto).\n");
+    printf("  --diffusion-steps <value>                   Flow diffusion steps (0/negative = use metadata, default 10; max 50).\n");
     printf("  --stream                                    Enable streaming for TTS requests.\n");
     printf("  --chunk-tokens <value>                      Tokens per streaming chunk. Default: model-defined.\n");
 
@@ -257,7 +259,9 @@ static std::string derive_served_model_name(const std::string& model_path)
 
 static bool init_model_context(const server_options& options, ggml_backend_t backend, server_runtime* runtime)
 {
-    cosyvoice_context_params_v3_cpp context_params{ .dit_allow_kv_cache_fallback = true };
+    cosyvoice_context_params_v4_cpp context_params_v4 = {};
+    cosyvoice_context_params_v3_cpp& context_params = context_params_v4;
+    context_params.dit_allow_kv_cache_fallback = true;
     cosyvoice_init_default_context_params(&context_params);
     context_params.inference_buffer_policy = options.inference_buffer_policy;
     context_params.n_max_seq = options.max_llm_len;
@@ -270,6 +274,7 @@ static bool init_model_context(const server_options& options, ggml_backend_t bac
     context_params.dit_kv_fixed_slots = options.dit_kv_fixed_slots;
     context_params.dit_kv_offloadable_slots = options.dit_kv_offloadable_slots;
     context_params.dit_kv_cache_length = options.dit_kv_cache_length;
+    context_params_v4.diffusion_steps = options.diffusion_steps;
     if (options.has_seed)
         context_params.seed = options.seed;
     context_params.n_workers = options.concurrency;
@@ -277,7 +282,7 @@ static bool init_model_context(const server_options& options, ggml_backend_t bac
     runtime->model_slots.reserve(options.concurrency);
     runtime->model_slots.emplace_back(cosyvoice_load_from_file_ext(
         options.model.c_str(),
-        &context_params,
+        &context_params_v4,
         backend,
         options.n_threads));
 
@@ -291,6 +296,7 @@ static bool init_model_context(const server_options& options, ggml_backend_t bac
     runtime->dit_kv_fixed_slots = context_params.dit_kv_fixed_slots;
     runtime->dit_kv_offloadable_slots = context_params.dit_kv_offloadable_slots;
     runtime->dit_kv_cache_length = context_params.dit_kv_cache_length;
+    runtime->diffusion_steps = context_params_v4.diffusion_steps;
 
     return true;
 }
@@ -929,6 +935,17 @@ int tool_entry(int argc, char** argv)
                     return 1;
                 }
                 options.dit_kv_cache_length = v;
+            }
+            else if (str_casecmp(arg, "--diffusion-steps") == 0)
+            {
+                const auto value = get_arg_value();
+                int v;
+                if (!parse_int_arg(value, &v))
+                {
+                    fprintf(stderr, "Error: invalid --diffusion-steps value \"%s\".\n", value);
+                    return 1;
+                }
+                options.diffusion_steps = v;
             }
             else if (str_casecmp(arg, "--stream") == 0)
                 options.stream = true;

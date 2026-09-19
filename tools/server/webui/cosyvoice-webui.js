@@ -31,6 +31,7 @@ const ADV_PARAM_IDS = [
     'model-max-llm','model-kv-k','model-kv-v','model-buffer-policy',
     'model-threads','model-backend',
     'model-dit-kv-k','model-dit-kv-v','model-dit-fixed-slots','model-dit-offloadable-slots','model-dit-cache-length',
+    'model-diffusion-steps',
     'model-llm-flash-attn','model-flow-flash-attn',
     'tts-stream','tts-chunk-tokens'
 ];
@@ -141,6 +142,7 @@ function initEls() {
         'model-path', 'model-backend', 'model-threads',
         'model-kv-k', 'model-kv-v', 'model-buffer-policy', 'model-max-llm',
         'model-dit-kv-k', 'model-dit-kv-v', 'model-dit-fixed-slots', 'model-dit-offloadable-slots', 'model-dit-cache-length',
+        'model-diffusion-steps',
         'btn-reset-model-config',
         'btn-load-model', 'btn-unload-model',
         'model-load-area', 'model-loaded-area', 'model-loaded-info',
@@ -345,13 +347,15 @@ function updateModelUI() {
         const mll = statusData.max_llm_len || '?';
         const llmFattn = statusData.llm_use_flash_attn !== undefined ? (statusData.llm_use_flash_attn ? 'yes' : 'no') : '?';
         const flowFattn = statusData.flow_use_flash_attn !== undefined ? (statusData.flow_use_flash_attn ? 'yes' : 'no') : '?';
+        const steps = statusData.diffusion_steps != null ? statusData.diffusion_steps : '?';
         els['model-loaded-info'].innerHTML = '<b>' + escapeHtml(arch) + '</b><br>'
             + 'KV Cache: K=' + kv_k + ', V=' + kv_v + '<br>'
             + 'Buffer Policy: ' + buf + '<br>'
             + 'Max LLM Length: ' + mll + '<br>'
             + 'LLM Flash Attn: ' + llmFattn + '<br>'
             + 'Flow Flash Attn: ' + flowFattn + '<br>'
-            + 'Sample Rate: ' + (statusData.sample_rate || '?') + ' Hz';
+            + 'Sample Rate: ' + (statusData.sample_rate || '?') + ' Hz'
+            + '<br>Diffusion Steps: ' + steps;
     }
 }
 
@@ -506,6 +510,8 @@ function initModelLoad() {
             body.dit_kv_offloadable_slots = dos;
             const dcl = parseInt(els['model-dit-cache-length'].value, 10) || 0;
             body.dit_kv_cache_length = dcl;
+            const dsteps = parseInt(els['model-diffusion-steps'].value, 10) || 0;
+            body.diffusion_steps = dsteps;
 
             await apiFetch('/model/load', { method: 'POST', ...jsonBody(body) });
             showSuccess(els['model-success'], 'Model loaded successfully');
@@ -1789,6 +1795,12 @@ async function fetchDefaults() {
             const llm = parseInt(els['model-max-llm'].value, 10);
             els['model-dit-cache-length'].value = llm > 0 ? String(llm * 10) : '0';
         }
+
+        // Diffusion steps: 0 = use model metadata (default 10)
+        if (d.default_diffusion_steps !== undefined && els['model-diffusion-steps'])
+            els['model-diffusion-steps'].value = d.default_diffusion_steps;
+        else if (els['model-diffusion-steps'] && !els['model-diffusion-steps'].value)
+            els['model-diffusion-steps'].value = '0';
 
         // Chunk tokens (0 = model default)
         if (d.chunk_tokens !== undefined && els['tts-chunk-tokens'])
