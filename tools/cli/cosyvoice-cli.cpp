@@ -89,6 +89,7 @@ struct cli_options
     uint32_t dit_kv_fixed_slots = 0;
     uint32_t dit_kv_offloadable_slots = 0;
     uint32_t dit_kv_cache_length = 0;
+    int32_t diffusion_steps = 0;
     bool has_inference_buffer_policy = false;
     cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
 #ifndef COSYVOICE_NO_PLAYBACK
@@ -395,6 +396,8 @@ static void print_usage(const char* argv0)
     printf("  --dit-kv-fixed-slots <value>                Number of fixed (non-offloadable) DiT KV slots (interactive only). Default: 0.\n");
     printf("  --dit-kv-offloadable-slots <value>          Number of offloadable DiT KV slots (interactive only). Default: 0.\n");
     printf("  --dit-kv-cache-length <value>               DiT KV cache max seq length (interactive only). Default: max-llm-len * 10.\n");
+    printf("  --diffusion-steps <value>                   Flow-matching diffusion steps. 0/negative uses the model's\n");
+    printf("                                              decoder.diffusion_steps metadata (default 10); clamped to 50.\n");
 #ifndef COSYVOICE_CLI_NO_PLAYBACK
     printf("  --stream                                    Enable streaming playback in interactive mode.\n");
     printf("  --chunk-tokens <value>                      Tokens per streaming chunk (interactive only). Default: model-defined.\n");
@@ -843,6 +846,14 @@ static void print_tts_runtime_info(
 
     print_section_title("Model");
     print_kv_line_u32("sample_rate", sample_rate);
+    {
+        char buf[160];
+        snprintf(buf, sizeof(buf), "requested: %d, actual: %d (%s)",
+            options.diffusion_steps,
+            cosyvoice_get_diffusion_steps(ctx),
+            options.diffusion_steps > 0 ? "cli override" : "default");
+        print_kv_line_string("diffusion_steps", buf);
+    }
     if (!options.interactive)
         if (!options.seed.empty())
         {
@@ -1739,6 +1750,17 @@ int tool_entry(int argc, char** argv)
             }
             options.dit_kv_cache_length = v;
         }
+        else if (str_casecmp(arg, "--diffusion-steps") == 0)
+        {
+            auto value = get_arg_value();
+            int v;
+            if (!parse_int_arg(value, &v))
+            {
+                print_error_log("Error: invalid --diffusion-steps value \"%s\".\n", value);
+                return 1;
+            }
+            options.diffusion_steps = v;
+        }
         #ifndef COSYVOICE_CLI_NO_PLAYBACK
         else if (str_casecmp(arg, "--stream") == 0)
             options.stream = true;
@@ -2135,7 +2157,8 @@ int tool_entry(int argc, char** argv)
     cosyvoice_init_backend_from_path(options.backend_path.empty() ? nullptr : options.backend_path.c_str());
     timing.backend_init_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
 
-    cosyvoice_context_params_v3_t params = {};
+    cosyvoice_context_params_v4_t params_v4 = {};
+    cosyvoice_context_params_v3_t& params = params_v4.base_params;
     cosyvoice_init_default_context_params(&params.base_params.base_params);
     params.base_params.base_params.n_max_seq = options.max_llm_len;
     params.base_params.base_params.llm_kv_cache_type = options.llm_kv_cache_type;
@@ -2159,6 +2182,7 @@ int tool_entry(int argc, char** argv)
         params.dit_kv_cache_length = options.dit_kv_cache_length;
         params.dit_allow_kv_cache_fallback = true;
     }
+    params_v4.diffusion_steps = options.diffusion_steps;
     tts_seed_state seed_state;
     const bool has_seed_value = !options.seed.empty();
     const cli_options::seed_policy_mode policy = resolve_seed_policy_mode(options);
@@ -2198,7 +2222,7 @@ int tool_entry(int argc, char** argv)
             return 1;
         }
     }
-    cosyvoice_context_handle ctx(cosyvoice_load_from_file_ext(options.model.c_str(), &params, backend, options.n_threads));
+    cosyvoice_context_handle ctx(cosyvoice_load_from_file_ext(options.model.c_str(), &params_v4, backend, options.n_threads));
     model_loading_spinner.stop(ctx != nullptr);
     timing.model_load_ms = elapsed_ms(stage_start, std::chrono::steady_clock::now());
     if (!ctx)
