@@ -97,7 +97,6 @@ bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float
     return token2wav_ext(token_ids, n_tokens, speed, prompt, false, true, result);
 }
 
-template<int n>
 struct dit_sched_config
 {
     struct graph_config_t
@@ -112,11 +111,14 @@ struct dit_sched_config
         int64_t cut_len;
     };
 
-    graph_config_t graph_config[n];
+    static constexpr int n_max = CausalConditionalCFM::MAX_DIFFUSION_STEPS;
+    int n;
+    graph_config_t graph_config[n_max];
 
     const auto& operator[](int i) const { return graph_config[i]; }
 
-    dit_sched_config(const cosyvoice_context_params_v3_cpp& params, int64_t cut_len, uint32_t offset, bool streaming, bool kv_slidable)
+    dit_sched_config(const cosyvoice_context_params_v3_cpp& params, int64_t cut_len, uint32_t offset, bool streaming, bool kv_slidable, int diffusion_steps)
+        : n(diffusion_steps)
     {
         if (!streaming)
         {
@@ -231,7 +233,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         }
     } while (false);
 
-    dit_sched_config<CausalConditionalCFM::diffusion_steps> config(params, cut_len, streaming ? worker->offset : 0, streaming, kv_cache->can_reuse());
+    dit_sched_config config(params, cut_len, streaming ? worker->offset : 0, streaming, kv_cache->can_reuse(), flow.decoder.diffusion_steps);
     uint32_t noise_len = static_cast<uint32_t>(ggml_nelements(ditctx.x));
     uint32_t noise_req = noise_len;
     int64_t full_len;

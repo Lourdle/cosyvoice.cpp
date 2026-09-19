@@ -16,14 +16,14 @@
 
 struct cosyvoice_model_shared
 {
-    cosyvoice_model_shared(const cosyvoice_context_params_v3_cpp& params);
+    cosyvoice_model_shared(const cosyvoice_context_params_v4_cpp& params);
 
     ggml_context_ptr ctx;
 
     ggml_backend_buffer_ptr buffer;
     ggml_backend_buffer_ptr cpu_buffer;
 
-    cosyvoice_context_params_v3_cpp params;
+    cosyvoice_context_params_v4_cpp params;
     ggml_backend_op_capabilities op_caps;
     bool backend_uma;
     int hift_overlap;
@@ -93,7 +93,7 @@ struct cosyvoice_worker_context
 
 struct cosyvoice_model : virtual cosyvoice_model_context, virtual cosyvoice_object_ref_counter
 {
-    cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_v3_cpp& params);
+    cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_v4_cpp& params);
     ~cosyvoice_model();
 
     virtual void load(gguf_loader& loader) = 0;
@@ -172,7 +172,7 @@ struct cosyvoice_3_worker_context
 
 struct cosyvoice_model_3 : cosyvoice_model
 {
-    cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_context_params_v3_cpp& params);
+    cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_context_params_v4_cpp& params);
     ~cosyvoice_model_3();
 
     void load(gguf_loader& loader);
@@ -187,6 +187,7 @@ struct cosyvoice_model_3 : cosyvoice_model
     bool llm_is_stop_token(int token_id);
 
     uint32_t get_sample_rate();
+    int get_diffusion_steps();
 
     const ggml_tensor* get_word_token_embed_weight();
     const ggml_tensor* get_speech_token_embed_weight();

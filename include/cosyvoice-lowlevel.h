@@ -71,6 +71,7 @@ typedef float* (*cosyvoice_noise_callback_t)(
 #define COSYVOICE_CONTEXT_PARAMS_VERSION     (0ul)
 #define COSYVOICE_CONTEXT_PARAMS_V2_VERSION  (1ul)
 #define COSYVOICE_CONTEXT_PARAMS_V3_VERSION  (2ul)
+#define COSYVOICE_CONTEXT_PARAMS_V4_VERSION  (3ul)
 
 // ----------------------------------------------------------------------------
 // Logging Utilities
@@ -133,12 +134,15 @@ constexpr cosyvoice_context_t cosyvoice_load_from_file_ext(
         return cosyvoice_load_from_file_ext(filename, &params->base_params, backend, n_threads, COSYVOICE_CONTEXT_PARAMS_V2_VERSION);
     else if constexpr (_is_same<params_t, cosyvoice_context_params_v3_t>::value)
         return cosyvoice_load_from_file_ext(filename, &params->base_params.base_params, backend, n_threads, COSYVOICE_CONTEXT_PARAMS_V3_VERSION);
+    else if constexpr (_is_same<params_t, cosyvoice_context_params_v4_t>::value)
+        return cosyvoice_load_from_file_ext(filename, &params->base_params.base_params.base_params, backend, n_threads, COSYVOICE_CONTEXT_PARAMS_V4_VERSION);
     else
     {
-        static_assert(_is_same<params_t, cosyvoice_context_params_v2_cpp>::value || _is_same<params_t, cosyvoice_context_params_v3_cpp>::value, "Unsupported context parameter type");
-        constexpr auto version = _is_same<params_t, cosyvoice_context_params_v3_cpp>::value
-            ? COSYVOICE_CONTEXT_PARAMS_V3_VERSION
-            : COSYVOICE_CONTEXT_PARAMS_V2_VERSION;
+        static_assert(_is_same<params_t, cosyvoice_context_params_v2_cpp>::value || _is_same<params_t, cosyvoice_context_params_v3_cpp>::value || _is_same<params_t, cosyvoice_context_params_v4_cpp>::value, "Unsupported context parameter type");
+        constexpr auto version =
+            _is_same<params_t, cosyvoice_context_params_v4_cpp>::value ? COSYVOICE_CONTEXT_PARAMS_V4_VERSION :
+            _is_same<params_t, cosyvoice_context_params_v3_cpp>::value ? COSYVOICE_CONTEXT_PARAMS_V3_VERSION :
+            COSYVOICE_CONTEXT_PARAMS_V2_VERSION;
         return cosyvoice_load_from_file_ext(filename, reinterpret_cast<const cosyvoice_context_params_t*>(params), backend, n_threads, version);
     }
 }

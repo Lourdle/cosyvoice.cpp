@@ -167,8 +167,9 @@ struct DiT
 
 struct CausalConditionalCFM
 {
-    constexpr static int diffusion_steps = 10;
-    std::array<float, diffusion_steps + 1> t_span;
+    constexpr static int MAX_DIFFUSION_STEPS = 50;
+    std::vector<float> t_span;
+    int diffusion_steps = 10;
     float inference_cfg_rate;
 
     DiT estimator;

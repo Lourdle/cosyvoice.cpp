@@ -19,6 +19,7 @@ struct cosyvoice_model_context
 {
     // Configuration
     virtual uint32_t get_sample_rate() = 0; ///< Get the model output sample rate.
+    virtual int get_diffusion_steps() = 0; ///< Get the effective number of flow-matching diffusion steps used by the DiT.
     virtual void get_default_generation_config(cosyvoice_generation_config_t* config) = 0; ///< Copy the model-default generation configuration into `config`.
     virtual void get_generation_config(cosyvoice_generation_config_t* config) = 0; ///< Copy the current active worker's generation configuration into `config`.
     virtual bool set_generation_config(const cosyvoice_generation_config_t* config) = 0; ///< Validate and apply a generation configuration to the active worker.

@@ -60,7 +60,7 @@ void cosyvoice_init_default_context_params(cosyvoice_context_params_t* params)
     params->sampler_ctx = nullptr;
 }
 
-cosyvoice_model_shared::cosyvoice_model_shared(const cosyvoice_context_params_v3_cpp& params)
+cosyvoice_model_shared::cosyvoice_model_shared(const cosyvoice_context_params_v4_cpp& params)
     : params(params), ctx(nullptr), backend_uma(false), rand_noise_len(0), noise_callback(nullptr), noise_callback_ctx(nullptr) {}
 
 cosyvoice_worker_context::cosyvoice_worker_context(ggml_backend_t backend)
@@ -69,7 +69,7 @@ cosyvoice_worker_context::cosyvoice_worker_context(ggml_backend_t backend)
     gf(nullptr), llm_input(nullptr), llm_probs(nullptr), position_ids(nullptr), causal_mask(nullptr), llm_kv_cache(), dit_kv_cache(),
     status(GGML_STATUS_SUCCESS), prompt_crc32(0), sampler_seed(0), sampler(nullptr), sampler_ctx(nullptr), builtin_sampler_rng_policy(COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION), nucleus_probs_capacity(0), nucleus_probs_len(0) {}
 
-cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_v3_cpp& params)
+cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_v4_cpp& params)
     : shared(new cosyvoice_model_shared(params)), workers(reinterpret_cast<cosyvoice_worker_context*>(malloc(sizeof(cosyvoice_worker_context) * params.n_workers)))
 {
     auto dev = ggml_backend_get_device(backend);
@@ -313,7 +313,7 @@ void cosyvoice_model_3::reset_shared_buffer(ggml_backend_buffer* new_buffer)
 cosyvoice_3_worker_context::cosyvoice_3_worker_context() :
     ctx1(ggml_init(ggml_init_params{ .mem_size = ggml_tensor_overhead() * 4, .no_alloc = true })) {}
 
-cosyvoice_model_3::cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_context_params_v3_cpp& params)
+cosyvoice_model_3::cosyvoice_model_3(ggml_backend_t backend, const cosyvoice_context_params_v4_cpp& params)
     : cosyvoice_model(backend, params), cv3_shared(new cosyvoice_model_3_shared), cv3_workers(new cosyvoice_3_worker_context[params.n_workers]())
 {
     cv3_worker = cv3_workers;
@@ -361,6 +361,11 @@ void cosyvoice_model_3::set_hift_rand_ini(const float* data)
 uint32_t cosyvoice_model_3::get_sample_rate()
 {
     return cv3_shared->hift.sampling_rate;
+}
+
+int cosyvoice_model_3::get_diffusion_steps()
+{
+    return cv3_shared->flow.decoder.diffusion_steps;
 }
 
 void cosyvoice_model::get_default_generation_config(cosyvoice_generation_config_t* config)

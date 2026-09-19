@@ -263,8 +263,9 @@ void CausalConditionalCFM::OnLoad(gguf_loader& loader, const std::string& prefix
 
     LOAD_METADATA(inference_cfg_rate);
 
-    for (int i = 0; i != 11; ++i)
-        t_span[i] = 1.f - std::cos(0.1f * 0.5f * 3.14159265358979323846f * i);
+    t_span.resize(diffusion_steps + 1);
+    for (int i = 0; i <= diffusion_steps; ++i)
+        t_span[i] = 1.f - std::cos(0.5f * 3.14159265358979323846f * i / diffusion_steps);
 }
 
 void PreLookaheadLayer::OnLoad(gguf_loader& loader, const std::string& prefix)
@@ -748,7 +749,24 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     auto& llm = cv3_shared->llm;
 
     {
-        constexpr auto diffusion_steps = CausalConditionalCFM::diffusion_steps;
+        // Resolve the effective number of diffusion steps before the flow submodule
+        // is loaded (which sizes t_span) and before the DiT KV slots are clamped.
+        // Precedence: params override (v4) > GGUF metadata > default 10, clamped to [1, MAX].
+        int32_t md_steps = 10;
+        loader.get_metadata("decoder", "diffusion_steps", md_steps);
+
+        const int32_t req_steps = shared->params.diffusion_steps;
+        int diffusion_steps = req_steps > 0 ? req_steps : md_steps;
+        if (diffusion_steps < 1)
+            diffusion_steps = 1;
+        if (diffusion_steps > CausalConditionalCFM::MAX_DIFFUSION_STEPS)
+        {
+            cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_WARN,
+                std::format("decoder.diffusion_steps {} clamped to the maximum of {}.\n", diffusion_steps, CausalConditionalCFM::MAX_DIFFUSION_STEPS).c_str());
+            diffusion_steps = CausalConditionalCFM::MAX_DIFFUSION_STEPS;
+        }
+        flow.decoder.diffusion_steps = diffusion_steps;
+
         auto& n_fixed_slots = shared->params.dit_kv_fixed_slots;
         auto& n_offloadable_slots = shared->params.dit_kv_offloadable_slots;
         if (n_fixed_slots > diffusion_steps)

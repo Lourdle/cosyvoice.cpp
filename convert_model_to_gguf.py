@@ -283,6 +283,7 @@ def convert_cosyvoice_to_gguf(yaml_config_path: str, llm_model_path: str, blank_
     gguf_model.add_int32("decoder.estimator.heads", config["flow"]["decoder"]["estimator"]["heads"])
     gguf_model.add_int32("decoder.estimator.depth", config["flow"]["decoder"]["estimator"]["depth"])
     gguf_model.add_int32("decoder.estimator.mel_dim", config["flow"]["decoder"]["estimator"]["mel_dim"])
+    gguf_model.add_int32("decoder.diffusion_steps", 10)
     gguf_model.add_int32("nb_harmonics", config["hift"]["nb_harmonics"])
     gguf_model.add_float32("nsf_alpha", config["hift"]["nsf_alpha"])
     gguf_model.add_float32("nsf_sigma", config["hift"]["nsf_sigma"])
