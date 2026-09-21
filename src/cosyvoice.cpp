@@ -193,6 +193,8 @@ cosyvoice_context_t cosyvoice_load_ext(const void* data, size_t size, const cosy
         // against the GGUF metadata and clamped inside cosyvoice_model_3::load().
         auto* p_v4 = reinterpret_cast<const cosyvoice_context_params_v4_t*>(params);
         params_v4.diffusion_steps = p_v4->diffusion_steps;
+        params_v4.dit_kv_actual_fixed_slots = p_v4->dit_kv_actual_fixed_slots;
+        params_v4.dit_kv_actual_offloadable_slots = p_v4->dit_kv_actual_offloadable_slots;
     }
 
     auto ctx = new cosyvoice_context_3(params_v4,

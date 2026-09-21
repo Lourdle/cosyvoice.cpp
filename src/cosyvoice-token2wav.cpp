@@ -103,11 +103,14 @@ struct dit_sched_config
     {
         bool rebuild;
         bool cache_kv;
-        bool load;
         bool offload;
+        bool load;
+        bool store;
         bool slide;
         bool slice;
         bool mask;
+        int phys_slot;
+        int off_group;
         int64_t cut_len;
     };
 
@@ -117,7 +120,7 @@ struct dit_sched_config
 
     const auto& operator[](int i) const { return graph_config[i]; }
 
-    dit_sched_config(const cosyvoice_context_params_v3_cpp& params, int64_t cut_len, uint32_t offset, bool streaming, bool kv_slidable, int diffusion_steps)
+    dit_sched_config(const cosyvoice_context_params_v4_cpp& params, int64_t cut_len, uint32_t offset, bool streaming, bool kv_slidable, int diffusion_steps)
         : n(diffusion_steps)
     {
         if (!streaming)
@@ -126,11 +129,14 @@ struct dit_sched_config
             {
                 graph_config[i].rebuild = false;
                 graph_config[i].cache_kv = false;
-                graph_config[i].load = false;
                 graph_config[i].offload = false;
+                graph_config[i].load = false;
+                graph_config[i].store = false;
                 graph_config[i].slide = false;
                 graph_config[i].slice = false;
                 graph_config[i].mask = false;
+                graph_config[i].phys_slot = 0;
+                graph_config[i].off_group = 0;
                 graph_config[i].cut_len = 0;
             }
 
@@ -146,6 +152,26 @@ struct dit_sched_config
             const auto n_offloadable_steps = params.dit_kv_offloadable_slots;
             const auto n_fixed_steps = params.dit_kv_fixed_slots;
             const auto n_no_cache_steps = static_cast<uint32_t>(n) - n_offloadable_steps - n_fixed_steps;
+            const auto n_actual_fixed = params.dit_kv_actual_fixed_slots;
+            const auto n_actual_offloadable = params.dit_kv_actual_offloadable_slots;
+            // Device slot 0 is the scratch buffer for the whole offloadable region;
+            // fixed steps map onto `scratch_slot + group`, so the slot index is
+            // non-decreasing and increases by at most one per step.
+            const auto scratch_slot = n_offloadable_steps != 0 ? 1 : 0;
+            const auto o_start = n_no_cache_steps;
+            const auto o_end = n_no_cache_steps + n_offloadable_steps;
+            const auto f_start = o_end;
+
+            // Adjacent steps mapped to the same group share one physical KV cache.
+            const auto off_group_of = [&](int i)
+            {
+                return (i - static_cast<int>(o_start)) * n_actual_offloadable / n_offloadable_steps;
+            };
+            const auto phys_slot_of = [&](int i)
+            {
+                if (i < static_cast<int>(o_end)) return 0;
+                return scratch_slot + static_cast<int>((i - static_cast<int>(f_start)) * n_actual_fixed / n_fixed_steps);
+            };
 
             for (int i = 0; i != n; ++i)
             {
@@ -155,14 +181,20 @@ struct dit_sched_config
                     || i == n - 1 && cut_len != 0
                     || !kv_slidable && i >= n_no_cache_steps;
                 graph_config[i].cache_kv = i >= n_no_cache_steps;
-                graph_config[i].offload = i >= n_no_cache_steps && i < n_no_cache_steps + n_offloadable_steps;
-                graph_config[i].load = graph_config[i].offload && offset != 0;
+                graph_config[i].offload = i >= static_cast<int>(o_start) && i < static_cast<int>(o_end);
+                graph_config[i].phys_slot = graph_config[i].cache_kv ? phys_slot_of(i) : 0;
+                graph_config[i].off_group = graph_config[i].offload ? off_group_of(i) : 0;
+                graph_config[i].load = graph_config[i].offload && offset != 0
+                    && (i == static_cast<int>(o_start) || off_group_of(i - 1) != off_group_of(i));
+                graph_config[i].store = graph_config[i].offload
+                    && (i == static_cast<int>(o_end) - 1 || off_group_of(i + 1) != off_group_of(i));
                 graph_config[i].mask = i < n_no_cache_steps && offset != 0;
                 graph_config[i].cut_len = i == n - 1 && offset == 0 ? cut_len : 0;
                 if (i == n_no_cache_steps - 1 && offset != 0)
                     graph_config[i].cut_len = offset;
                 graph_config[i].slice = offset != 0 && i == n_no_cache_steps;
-                graph_config[i].slide = kv_slidable && graph_config[i].cache_kv && (!graph_config[i].offload || i == n_no_cache_steps + n_offloadable_steps - 1) && i != n - 1;
+                graph_config[i].slide = kv_slidable && graph_config[i].cache_kv && i != n - 1
+                    && phys_slot_of(i + 1) == graph_config[i].phys_slot + 1;
             }
         }
     }
@@ -265,7 +297,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     ggml_tensor* position_ids;
     ggml_tensor* attn_mask;
     if (config[0].cache_kv)
-        kv_cache->bind_slot(0);
+        kv_cache->bind_slot(config[0].phys_slot);
     auto feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 1, op_caps, config[0].cut_len, t_leaf, position_ids, gf, config[0].cache_kv ? kv_cache : nullptr, config[0].mask ? &attn_mask : nullptr);
     ggml_build_forward_expand(gf, feat);
     set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps);
@@ -310,13 +342,12 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     memcpy(prompt_feat->data, prompt->prompt_speech_feat.data, prompt_feat->nb[2]);
     memcpy(embedding->data, prompt->flow_embedding.data, embedding->nb[2]);
 
-    int offload_slot = 0;
     auto load_kv = [&](int step)
     {
         if (config[step].load)
         {
             const auto kv_len = kv_cache->cur_len;
-            kv_cache->load_slot(backend.get(), sched.get(), offload_slot);
+            kv_cache->load_slot(backend.get(), sched.get(), config[step].off_group);
             kv_cache->cur_len = kv_len;
             return true;
         }
@@ -341,10 +372,10 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
             ggml_backend_tensor_copy_async(backend.get(), backend.get(), feat, ditctx.x);
             if (step != flow.decoder.diffusion_steps - 1 && config[step + 1].rebuild)
                 ggml_backend_sched_reset(sched.get());
-            if (full_len >= params.dit_kv_cache_length)
-                ++offload_slot;
-            else
-                kv_cache->offload_slot(backend.get(), sched.get(), offload_slot++, kv_cache->cur_len + static_cast<uint32_t>(position_ids->ne[0]));
+            // Only the last step of an offload group round-trips to CPU; earlier
+            // steps leave their state in the scratch slot for the group to overwrite.
+            if (config[step].store && full_len < params.dit_kv_cache_length)
+                kv_cache->offload_slot(backend.get(), sched.get(), config[step].off_group, kv_cache->cur_len + static_cast<uint32_t>(position_ids->ne[0]));
         }
         if (config[step].slide)
             kv_cache->slide_kv_slot();
@@ -360,7 +391,6 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         memset(tensor->src, 0, sizeof(tensor->src));
     }
 
-    int slot_offset = params.dit_kv_fixed_slots - flow.decoder.diffusion_steps + (params.dit_kv_offloadable_slots ? 1 : 0);
     for (int step = 1; step != flow.decoder.diffusion_steps; ++step)
     {
         if (is_stop_requested())
@@ -388,7 +418,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         if (config[step].rebuild)
         {
             if (config[step].cache_kv)
-                kv_cache->bind_slot(config[step].offload ? 0 : step + slot_offset);
+                kv_cache->bind_slot(config[step].phys_slot);
             ggml_reset(ctx0.get());
             ggml_backend_sched_reset(sched.get());
 

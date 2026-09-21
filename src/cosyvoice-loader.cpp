@@ -773,6 +773,16 @@ void cosyvoice_model_3::load(gguf_loader& loader)
             n_fixed_slots = diffusion_steps;
         if (n_offloadable_slots + n_fixed_slots > diffusion_steps)
             n_offloadable_slots = diffusion_steps - n_fixed_slots;
+
+        // Physical slot counts backing the logical slots. 0 disables sharing (one
+        // physical slot per logical slot); a positive value merges adjacent steps
+        // into that many groups, each sharing one KV cache.
+        auto& actual_fixed = shared->params.dit_kv_actual_fixed_slots;
+        auto& actual_offloadable = shared->params.dit_kv_actual_offloadable_slots;
+        if (actual_fixed == 0 || actual_fixed > n_fixed_slots)
+            actual_fixed = n_fixed_slots;
+        if (actual_offloadable == 0 || actual_offloadable > n_offloadable_slots)
+            actual_offloadable = n_offloadable_slots;
     }
 
 
@@ -1029,8 +1039,8 @@ void cosyvoice_model_3::load(gguf_loader& loader)
                 dit_k_type,
                 dit_v_type,
                 2,
-                shared->params.dit_kv_fixed_slots + (shared->params.dit_kv_offloadable_slots != 0 ? 1 : 0),
-                shared->params.dit_kv_offloadable_slots,
+                shared->params.dit_kv_actual_fixed_slots + (shared->params.dit_kv_offloadable_slots != 0 ? 1 : 0),
+                shared->params.dit_kv_actual_offloadable_slots,
                 shared->params.flow_use_flash_attn
             );
         }

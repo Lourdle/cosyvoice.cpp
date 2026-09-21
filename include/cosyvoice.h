@@ -310,6 +310,8 @@ typedef struct cosyvoice_context_params_v4
 {
     cosyvoice_context_params_v3_t base_params; ///< V3 base parameters.
     int32_t diffusion_steps;                   ///< Number of flow-matching diffusion steps. When `<= 0`, the value comes from the `decoder.diffusion_steps` GGUF metadata (which itself defaults to 10 when absent); otherwise it is clamped to the runtime maximum.
+    uint32_t dit_kv_actual_fixed_slots;        ///< Number of physical device KV slots backing the fixed DiT KV slots. Adjacent fixed steps are grouped and share one slot, trading a small cross-step KV approximation for memory. `0` means one slot per fixed step (no sharing); clamped to `[1, dit_kv_fixed_slots]`.
+    uint32_t dit_kv_actual_offloadable_slots;  ///< Number of physical CPU KV buffers backing the offloadable DiT KV slots. Adjacent offloadable steps are grouped and share one buffer, also reducing per-step CPU round-trips. `0` means one buffer per offloadable step (no sharing); clamped to `[1, dit_kv_offloadable_slots]`.
 } cosyvoice_context_params_v4_t;
 
 #ifdef __cplusplus
@@ -351,6 +353,8 @@ struct cosyvoice_context_params_v3_cpp : cosyvoice_context_params_v2_cpp
 struct cosyvoice_context_params_v4_cpp : cosyvoice_context_params_v3_cpp
 {
     int32_t  diffusion_steps;         ///< Number of flow-matching diffusion steps. When `<= 0`, the value comes from the `decoder.diffusion_steps` GGUF metadata (which itself defaults to 10 when absent); otherwise it is clamped to the runtime maximum.
+    uint32_t dit_kv_actual_fixed_slots;       ///< Number of physical device KV slots backing the fixed DiT KV slots. `0` means no sharing; clamped to `[1, dit_kv_fixed_slots]`.
+    uint32_t dit_kv_actual_offloadable_slots; ///< Number of physical CPU KV buffers backing the offloadable DiT KV slots. `0` means no sharing; clamped to `[1, dit_kv_offloadable_slots]`.
     uint32_t reserved_tail_padding;
 };
 #endif
