@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -169,6 +170,34 @@ struct server_runtime
     std::vector<bool>       slot_in_use;
 
     stop_thread_pool        stop_pool;  // dedicated thread for stop requests
+
+    // In-flight TTS request tracking (WebUI stop/unload safety)
+    std::mutex              tts_mutex;
+    std::condition_variable tts_cv;
+    uint32_t                active_tts = 0;
+};
+
+// RAII: marks an in-flight TTS request. Constructed when /tts handling starts,
+// destroyed when the request (including the streaming provider) is fully done.
+struct tts_request_scope
+{
+    server_runtime* rt;
+
+    explicit tts_request_scope(server_runtime& r) : rt(&r)
+    {
+        std::lock_guard<std::mutex> lock(rt->tts_mutex);
+        ++rt->active_tts;
+    }
+
+    ~tts_request_scope()
+    {
+        std::lock_guard<std::mutex> lock(rt->tts_mutex);
+        --rt->active_tts;
+        rt->tts_cv.notify_all();
+    }
+
+    tts_request_scope(const tts_request_scope&) = delete;
+    tts_request_scope& operator=(const tts_request_scope&) = delete;
 };
 
 inline cosyvoice_context_t get_slot_model_context(server_runtime& runtime, uint32_t slot)

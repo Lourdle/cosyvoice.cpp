@@ -327,7 +327,10 @@
             </div>
         </details>
 
-        <div style="margin-top:14px"><button class="btn" id="btn-tts" style="width:100%;padding:10px;font-size:15px">Generate Speech</button></div>
+        <div style="margin-top:14px;display:flex;gap:8px">
+            <button class="btn" id="btn-tts" style="flex:1;padding:10px;font-size:15px">Generate Speech</button>
+            <button class="btn btn-danger" id="btn-stop-tts" style="display:none;padding:10px 18px;font-size:15px">Stop</button>
+        </div>
 
         <div class="player-area" id="player-area" style="display:none">
             <audio id="audio-player" controls></audio>

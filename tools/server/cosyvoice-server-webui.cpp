@@ -724,6 +724,10 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             return;
         }
 
+        // Track this request as in-flight so /tts/stop and /model/unload can
+        // stop it and wait for it to finish before releasing model resources.
+        auto tts_scope = std::make_shared<tts_request_scope>(runtime);
+
         const std::string text  = body.value("input", body.value("text", ""));
         if (text.empty())
         {
@@ -857,7 +861,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             auto conn_checker = req.is_connection_closed;  // copy the socket-checker function
 
             res.set_chunked_content_provider(content_type,
-                [&rt, vctx, text_copy, instr_copy, speed, mode, fmt, wav_header, has_wav, log_ctx_copy, applied_seed, conn_checker]
+                [&rt, vctx, text_copy, instr_copy, speed, mode, fmt, wav_header, has_wav, log_ctx_copy, applied_seed, conn_checker, tts_scope]
                 (size_t /*offset*/, DataSink& sink) -> bool
                 {
                     auto model_ctx = get_slot_model_context(rt, 0);
@@ -972,6 +976,28 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             res.set_content(std::move(audio_payload), response_format_to_content_type(fmt));
             log_request_done(runtime.log_level, log_ctx, request_log_status::ok, res.status, applied_seed, audio_payload.size(), "tts");
         }
+    });
+
+    // ---- POST /tts/stop - stop the active TTS generation ----
+    server.Post("/tts/stop", [&runtime](const Request&, Response& res)
+    {
+        if (runtime.model_slots.empty())
+        {
+            res.status = 409;
+            nlohmann::json err = {{"error", "No model loaded"}};
+            res.set_content(err.dump(), "application/json");
+            return;
+        }
+
+        // Blocks until the active job (if any) has stopped
+        cosyvoice_request_stop(runtime.model_slots[0].get());
+
+        log_message(runtime.log_level, server_log_level::concise, "WEBUI",
+            "TTS stop requested");
+
+        nlohmann::json ok = {{"success", true}};
+        res.status = 200;
+        res.set_content(ok.dump(), "application/json");
     });
 
     // ---- GET /frontend/model - return frontend model paths ----
@@ -1351,6 +1377,15 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             res.set_content(err.dump(), "application/json");
             log_request_done(runtime.log_level, log_ctx, request_log_status::bad_request, res.status, 0, res.body.size(), "no_model");
             return;
+        }
+
+        // Stop any active TTS generation first, then wait for in-flight
+        // requests (including streaming providers) to finish before releasing
+        // model resources.
+        cosyvoice_request_stop(runtime.model_slots[0].get());
+        {
+            std::unique_lock<std::mutex> lock(runtime.tts_mutex);
+            runtime.tts_cv.wait(lock, [&runtime] { return runtime.active_tts == 0; });
         }
 
         // Order matters: TTS sessions -> voices -> model context

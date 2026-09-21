@@ -9,6 +9,7 @@ const CFG = window.__COSYVOICE_CONFIG__ || {};
 let speakers = [];
 let statusData = {};
 let isGenerating = false;
+let stopRequested = false;
 let seedLocked = false;
 let historyEntries = [];
 const MAX_HISTORY = 20;
@@ -174,7 +175,7 @@ function initEls() {
         'tts-fadein', 'tts-textnorm', 'tts-split', 'tts-fastsplit',
         'tts-stream', 'tts-chunk-tokens',
         'seed-dice', 'seed-lock',
-        'btn-tts', 'btn-reset-gen-config',
+        'btn-tts', 'btn-stop-tts', 'btn-reset-gen-config',
         'player-area', 'audio-player', 'download-link',
         'tts-error',
 
@@ -542,6 +543,11 @@ function initModelUnload() {
         hideError(els['model-error']);
         hideSuccess(els['model-success']);
         if (!confirm('Unload the current model? All speakers will be removed.')) return;
+
+        // If a TTS generation is in progress, stop it first
+        const stopBtn = els['btn-stop-tts'];
+        if (stopBtn && stopBtn.style.display !== 'none')
+            await stopTts();
 
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner"></span>Unloading...';
@@ -1162,6 +1168,9 @@ function initTts() {
 
     btn.addEventListener('click', generateTts);
 
+    const stopBtn = els['btn-stop-tts'];
+    if (stopBtn) stopBtn.addEventListener('click', stopTts);
+
     // Mode helper text
     if (els['tts-mode']) {
         els['tts-mode'].addEventListener('change', () => {
@@ -1173,10 +1182,36 @@ function initTts() {
     }
 }
 
+// ---- Stop TTS ----
+function showStopButton(show) {
+    const btn = els['btn-stop-tts'];
+    if (btn) btn.style.display = show ? '' : 'none';
+}
+
+async function stopTts() {
+    stopRequested = true;
+    const btn = els['btn-stop-tts'];
+    if (btn) btn.disabled = true;
+    const audio = els['audio-player'];
+    if (audio) audio.pause();
+    try {
+        await fetch('/tts/stop', { method: 'POST', credentials: 'same-origin' });
+    } catch(e) { /* ignore */ }
+    if (btn) btn.disabled = false;
+}
+
 // After streaming finishes: set up download link, history, reset button.
 // The audio player already has the data via MediaSource or blob URL.
 function onStreamDone(chunks, contentType, els, voice, ext, text) {
-    if (chunks.length === 0) return;
+    const stopped = stopRequested;
+    showStopButton(false);
+    if (chunks.length === 0) {
+        if (els['btn-tts']) {
+            els['btn-tts'].disabled = false;
+            els['btn-tts'].innerHTML = ICONS.speaker + ' Generate Speech';
+        }
+        return;
+    }
     const blob = new Blob(chunks, { type: contentType });
     const url = URL.createObjectURL(blob);
     if (els['download-link']) {
@@ -1185,7 +1220,10 @@ function onStreamDone(chunks, contentType, els, voice, ext, text) {
         els['download-link'].innerHTML = ICONS.download + ' Download ' + ext.toUpperCase() + ' (' + formatFileSize(blob.size) + ')';
     }
     addHistory({ voice, text, blob, url, format: ext, mode: els['tts-mode'] ? els['tts-mode'].value : '', timestamp: new Date() });
-    showToast('Stream complete: ' + formatFileSize(blob.size), 'success');
+    if (stopped)
+        showToast('Stopped (' + formatFileSize(blob.size) + ' generated)', 'info');
+    else
+        showToast('Stream complete: ' + formatFileSize(blob.size), 'success');
     if (els['btn-tts']) {
         els['btn-tts'].disabled = false;
         els['btn-tts'].innerHTML = ICONS.speaker + ' Generate Speech';
@@ -1236,6 +1274,8 @@ async function generateTts() {
     }
 
     isGenerating = true;
+    stopRequested = false;
+    showStopButton(true);
     const btn = els['btn-tts'];
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Generating...';
@@ -1355,10 +1395,15 @@ async function generateTts() {
             return;
         }
     } catch(e) {
-        showError(els['tts-error'], 'Synthesis failed: ' + e.message);
-        showToast('TTS generation failed', 'error');
+        if (stopRequested) {
+            showToast('Generation stopped', 'info');
+        } else {
+            showError(els['tts-error'], 'Synthesis failed: ' + e.message);
+            showToast('TTS generation failed', 'error');
+        }
     }
     isGenerating = false;
+    showStopButton(false);
     btn.disabled = false;
     btn.innerHTML = ICONS.speaker + ' Generate Speech';
 }
