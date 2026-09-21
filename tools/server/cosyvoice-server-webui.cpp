@@ -1201,6 +1201,16 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             uint32_t v = body["dit_kv_offloadable_slots"].get<uint32_t>();
             context_params.dit_kv_offloadable_slots = v;
         }
+        if (body.contains("dit_kv_actual_fixed_slots"))
+        {
+            uint32_t v = body["dit_kv_actual_fixed_slots"].get<uint32_t>();
+            context_params_v4.dit_kv_actual_fixed_slots = v;
+        }
+        if (body.contains("dit_kv_actual_offloadable_slots"))
+        {
+            uint32_t v = body["dit_kv_actual_offloadable_slots"].get<uint32_t>();
+            context_params_v4.dit_kv_actual_offloadable_slots = v;
+        }
         if (body.contains("dit_kv_cache_length"))
         {
             uint32_t v = body["dit_kv_cache_length"].get<uint32_t>();
@@ -1290,6 +1300,8 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             runtime.dit_kv_fixed_slots       = cp.dit_kv_fixed_slots;
             runtime.dit_kv_offloadable_slots = cp.dit_kv_offloadable_slots;
             runtime.dit_kv_cache_length      = cp.dit_kv_cache_length;
+            runtime.dit_kv_actual_fixed_slots = context_params_v4.dit_kv_actual_fixed_slots;
+            runtime.dit_kv_actual_offloadable_slots = context_params_v4.dit_kv_actual_offloadable_slots;
             runtime.diffusion_steps          = context_params_v4.diffusion_steps;
         }
 
@@ -1387,6 +1399,8 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         d["default_dit_v_cache_type"]  = "q4_0";
         d["default_dit_kv_fixed_slots"]       = 0;
         d["default_dit_kv_offloadable_slots"] = 0;
+        d["default_dit_kv_actual_fixed_slots"] = 0;
+        d["default_dit_kv_actual_offloadable_slots"] = 0;
         d["default_dit_kv_cache_length"]      = 0;
         d["default_diffusion_steps"]          = 0;
 
@@ -1405,6 +1419,8 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             // Use effective DiT params saved in runtime after model load
             d["default_dit_kv_fixed_slots"]       = runtime.dit_kv_fixed_slots;
             d["default_dit_kv_offloadable_slots"] = runtime.dit_kv_offloadable_slots;
+            d["default_dit_kv_actual_fixed_slots"] = runtime.dit_kv_actual_fixed_slots;
+            d["default_dit_kv_actual_offloadable_slots"] = runtime.dit_kv_actual_offloadable_slots;
             d["default_dit_kv_cache_length"]      = runtime.dit_kv_cache_length;
             d["default_diffusion_steps"]          = runtime.diffusion_steps;
         }

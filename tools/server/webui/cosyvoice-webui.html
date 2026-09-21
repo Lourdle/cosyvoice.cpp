@@ -145,6 +145,8 @@
                             </select></div>
                         <div><label>Fixed Slots</label><input type="number" id="model-dit-fixed-slots" value="0" min="0"></div>
                         <div><label>Offloadable Slots</label><input type="number" id="model-dit-offloadable-slots" value="0" min="0"></div>
+                        <div><label title="Physical device KV slots for the fixed DiT slots; adjacent steps share one. 0 = no sharing">Actual Fixed Slots</label><input type="number" id="model-dit-actual-fixed-slots" value="0" min="0"></div>
+                        <div><label title="Physical CPU KV buffers for the offloadable DiT slots; adjacent steps share one. 0 = no sharing">Actual Offloadable Slots</label><input type="number" id="model-dit-actual-offloadable-slots" value="0" min="0"></div>
                         <div><label>KV Cache Length</label><input type="number" id="model-dit-cache-length" value="0" min="0"></div>
                         <div><label title="0 = use model metadata (default 10); clamped to 50">Diffusion Steps</label><input type="number" id="model-diffusion-steps" value="0" min="0" max="50"></div>
                     </div>

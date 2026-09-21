@@ -66,6 +66,8 @@ struct server_options
         COSYVOICE_KV_CACHE_TYPE_Q8_0);
     uint32_t dit_kv_fixed_slots = 0;
     uint32_t dit_kv_offloadable_slots = 0;
+    uint32_t dit_kv_actual_fixed_slots = 0;
+    uint32_t dit_kv_actual_offloadable_slots = 0;
     uint32_t dit_kv_cache_length = 0;
     int diffusion_steps = 0;
     bool stream = false;
@@ -144,6 +146,8 @@ static void print_usage(const char* argv0)
     printf("                                              DiT KV cache type. Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
     printf("  --dit-kv-fixed-slots <value>                DiT KV fixed slots (0 = auto).\n");
     printf("  --dit-kv-offloadable-slots <value>          DiT KV offloadable slots (0 = auto).\n");
+    printf("  --dit-kv-actual-fixed-slots <value>         Physical device KV slots for the fixed DiT KV slots (0 = no sharing).\n");
+    printf("  --dit-kv-actual-offloadable-slots <value>   Physical CPU KV buffers for the offloadable DiT KV slots (0 = no sharing).\n");
     printf("  --dit-kv-cache-length <value>               DiT KV cache length (0 = auto).\n");
     printf("  --diffusion-steps <value>                   Flow diffusion steps (0/negative = use metadata, default 10; max 50).\n");
     printf("  --stream                                    Enable streaming for TTS requests.\n");
@@ -275,6 +279,8 @@ static bool init_model_context(const server_options& options, ggml_backend_t bac
     context_params.dit_kv_offloadable_slots = options.dit_kv_offloadable_slots;
     context_params.dit_kv_cache_length = options.dit_kv_cache_length;
     context_params_v4.diffusion_steps = options.diffusion_steps;
+    context_params_v4.dit_kv_actual_fixed_slots = options.dit_kv_actual_fixed_slots;
+    context_params_v4.dit_kv_actual_offloadable_slots = options.dit_kv_actual_offloadable_slots;
     if (options.has_seed)
         context_params.seed = options.seed;
     context_params.n_workers = options.concurrency;
@@ -296,6 +302,8 @@ static bool init_model_context(const server_options& options, ggml_backend_t bac
     runtime->dit_kv_fixed_slots = context_params.dit_kv_fixed_slots;
     runtime->dit_kv_offloadable_slots = context_params.dit_kv_offloadable_slots;
     runtime->dit_kv_cache_length = context_params.dit_kv_cache_length;
+    runtime->dit_kv_actual_fixed_slots = context_params_v4.dit_kv_actual_fixed_slots;
+    runtime->dit_kv_actual_offloadable_slots = context_params_v4.dit_kv_actual_offloadable_slots;
     runtime->diffusion_steps = context_params_v4.diffusion_steps;
 
     return true;
@@ -924,6 +932,28 @@ int tool_entry(int argc, char** argv)
                     return 1;
                 }
                 options.dit_kv_offloadable_slots = v;
+            }
+            else if (str_casecmp(arg, "--dit-kv-actual-fixed-slots") == 0)
+            {
+                const auto value = get_arg_value();
+                uint32_t v;
+                if (!parse_uint32_arg(value, &v))
+                {
+                    fprintf(stderr, "Error: invalid --dit-kv-actual-fixed-slots value \"%s\".\n", value);
+                    return 1;
+                }
+                options.dit_kv_actual_fixed_slots = v;
+            }
+            else if (str_casecmp(arg, "--dit-kv-actual-offloadable-slots") == 0)
+            {
+                const auto value = get_arg_value();
+                uint32_t v;
+                if (!parse_uint32_arg(value, &v))
+                {
+                    fprintf(stderr, "Error: invalid --dit-kv-actual-offloadable-slots value \"%s\".\n", value);
+                    return 1;
+                }
+                options.dit_kv_actual_offloadable_slots = v;
             }
             else if (str_casecmp(arg, "--dit-kv-cache-length") == 0)
             {

@@ -31,6 +31,7 @@ const ADV_PARAM_IDS = [
     'model-max-llm','model-kv-k','model-kv-v','model-buffer-policy',
     'model-threads','model-backend',
     'model-dit-kv-k','model-dit-kv-v','model-dit-fixed-slots','model-dit-offloadable-slots','model-dit-cache-length',
+    'model-dit-actual-fixed-slots','model-dit-actual-offloadable-slots',
     'model-diffusion-steps',
     'model-llm-flash-attn','model-flow-flash-attn',
     'tts-stream','tts-chunk-tokens'
@@ -142,6 +143,7 @@ function initEls() {
         'model-path', 'model-backend', 'model-threads',
         'model-kv-k', 'model-kv-v', 'model-buffer-policy', 'model-max-llm',
         'model-dit-kv-k', 'model-dit-kv-v', 'model-dit-fixed-slots', 'model-dit-offloadable-slots', 'model-dit-cache-length',
+        'model-dit-actual-fixed-slots', 'model-dit-actual-offloadable-slots',
         'model-diffusion-steps',
         'btn-reset-model-config',
         'btn-load-model', 'btn-unload-model',
@@ -508,6 +510,10 @@ function initModelLoad() {
             body.dit_kv_fixed_slots = dfs;
             const dos = parseInt(els['model-dit-offloadable-slots'].value, 10) || 0;
             body.dit_kv_offloadable_slots = dos;
+            const dafs = parseInt(els['model-dit-actual-fixed-slots'].value, 10) || 0;
+            body.dit_kv_actual_fixed_slots = dafs;
+            const daos = parseInt(els['model-dit-actual-offloadable-slots'].value, 10) || 0;
+            body.dit_kv_actual_offloadable_slots = daos;
             const dcl = parseInt(els['model-dit-cache-length'].value, 10) || 0;
             body.dit_kv_cache_length = dcl;
             const dsteps = parseInt(els['model-diffusion-steps'].value, 10) || 0;
@@ -1786,6 +1792,16 @@ async function fetchDefaults() {
             els['model-dit-offloadable-slots'].value = d.default_dit_kv_offloadable_slots;
         else if (els['model-dit-offloadable-slots'] && !els['model-dit-offloadable-slots'].value)
             els['model-dit-offloadable-slots'].value = '0';
+
+        if (d.default_dit_kv_actual_fixed_slots !== undefined && els['model-dit-actual-fixed-slots'])
+            els['model-dit-actual-fixed-slots'].value = d.default_dit_kv_actual_fixed_slots;
+        else if (els['model-dit-actual-fixed-slots'] && !els['model-dit-actual-fixed-slots'].value)
+            els['model-dit-actual-fixed-slots'].value = '0';
+
+        if (d.default_dit_kv_actual_offloadable_slots !== undefined && els['model-dit-actual-offloadable-slots'])
+            els['model-dit-actual-offloadable-slots'].value = d.default_dit_kv_actual_offloadable_slots;
+        else if (els['model-dit-actual-offloadable-slots'] && !els['model-dit-actual-offloadable-slots'].value)
+            els['model-dit-actual-offloadable-slots'].value = '0';
 
         // DiT KV Cache Length: server value > 0 → use it; otherwise 10× LLM max seq
         if (d.default_dit_kv_cache_length && els['model-dit-cache-length'])

@@ -137,6 +137,8 @@ struct server_runtime
     // Effective DiT KV cache params (populated after model load)
     uint32_t dit_kv_fixed_slots          = 0;
     uint32_t dit_kv_offloadable_slots    = 0;
+    uint32_t dit_kv_actual_fixed_slots   = 0;
+    uint32_t dit_kv_actual_offloadable_slots = 0;
     uint32_t dit_kv_cache_length         = 0;
     int      diffusion_steps             = 0;
 
