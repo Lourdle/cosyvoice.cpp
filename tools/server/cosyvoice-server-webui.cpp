@@ -1390,7 +1390,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
         d["default_max_llm_len"]   = static_cast<uint32_t>(COSYVOICE_DEFAULT_LLM_MAX_SEQ_LEN);
         d["default_k_cache_type"]  = "q8_0";
         d["default_v_cache_type"]  = "q4_0";
-        d["default_buffer_policy"] = "balanced";
+        d["default_buffer_policy"] = "dedicated";
         d["default_backend"]       = "auto";
         d["default_n_threads"]     = 0;
 

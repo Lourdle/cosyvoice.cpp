@@ -44,7 +44,7 @@ struct server_options
     uint32_t n_threads = 0;
     uint32_t concurrency = 1;
     bool has_inference_buffer_policy = false;
-    cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
+    cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED;
 
     bool has_seed = false;
     uint32_t seed = 0;
@@ -137,7 +137,7 @@ static void print_usage(const char* argv0)
     printf("  --threads, -j <value>                       CPU thread count. Default: 0 (hardware concurrency).\n");
     printf("  --concurrency, -c <value>                   Concurrent request slots. Default: 1.\n");
     printf("  --inference-buffer-policy <shared|balanced|dedicated>\n");
-    printf("                                              Inference buffer policy. Default: balanced.\n");
+    printf("                                              Inference buffer policy. Default: dedicated.\n");
     printf("  --llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>\n");
     printf("                                              KV cache type. Single type (e.g. q8_0) uses the same format for K and V.\n");
     printf("                                              Default: k=q8_0,v=q4_0,fallback=q8_0.\n");

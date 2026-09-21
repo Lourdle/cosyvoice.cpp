@@ -48,7 +48,7 @@ void cosyvoice_init_default_context_params(cosyvoice_context_params_t* params)
 
     params->llm_kv_cache_type = COSYVOICE_KV_CACHE_TYPE_Q8_0;
     params->llm_allow_kv_cache_fallback = true;
-    params->inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
+    params->inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED;
 
     params->n_batch = 256;
     params->n_max_seq = COSYVOICE_DEFAULT_LLM_MAX_SEQ_LEN;

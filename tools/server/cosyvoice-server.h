@@ -118,7 +118,7 @@ struct server_runtime
     bool webui_enabled = false;
     uint32_t seed = 0;
     uint32_t concurrency = 1;
-    cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
+    cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED;
     bool has_llm_kv_cache_override = false;
     cosyvoice_kv_cache_type_t requested_llm_kv_cache_type = static_cast<cosyvoice_kv_cache_type_t>(0);
     cosyvoice_kv_cache_type_t actual_llm_kv_cache_type = static_cast<cosyvoice_kv_cache_type_t>(0);

@@ -93,7 +93,7 @@ struct cli_options
     uint32_t dit_kv_cache_length = 0;
     int32_t diffusion_steps = 0;
     bool has_inference_buffer_policy = false;
-    cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED;
+    cosyvoice_inference_buffer_policy_t inference_buffer_policy = COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED;
 #ifndef COSYVOICE_NO_PLAYBACK
     bool stream = false;
     uint32_t chunk_tokens = 0;
@@ -391,7 +391,7 @@ static void print_usage(const char* argv0)
     printf("                                              KV cache type. Single type (e.g. q8_0) uses the same format for K and V.\n");
     printf("                                              Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
     printf("  --inference-buffer-policy <shared|balanced|dedicated>\n");
-    printf("                                              Inference buffer policy (interactive only). Default: balanced.\n");
+    printf("                                              Inference buffer policy (interactive only). Default: dedicated.\n");
     printf("  --dit-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>\n");
     printf("                                              DiT KV cache type (interactive only).\n");
     printf("                                              Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
