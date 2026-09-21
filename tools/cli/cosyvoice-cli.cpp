@@ -88,6 +88,8 @@ struct cli_options
         COSYVOICE_KV_CACHE_TYPE_Q8_0);
     uint32_t dit_kv_fixed_slots = 0;
     uint32_t dit_kv_offloadable_slots = 0;
+    uint32_t dit_kv_actual_fixed_slots = 0;
+    uint32_t dit_kv_actual_offloadable_slots = 0;
     uint32_t dit_kv_cache_length = 0;
     int32_t diffusion_steps = 0;
     bool has_inference_buffer_policy = false;
@@ -395,6 +397,12 @@ static void print_usage(const char* argv0)
     printf("                                              Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
     printf("  --dit-kv-fixed-slots <value>                Number of fixed (non-offloadable) DiT KV slots (interactive only). Default: 0.\n");
     printf("  --dit-kv-offloadable-slots <value>          Number of offloadable DiT KV slots (interactive only). Default: 0.\n");
+    printf("  --dit-kv-actual-fixed-slots <value>         Physical device KV slots backing the fixed DiT KV slots\n");
+    printf("                                              (interactive only). Adjacent fixed steps share one cache.\n");
+    printf("                                              0 = one slot per step (no sharing). Default: 0.\n");
+    printf("  --dit-kv-actual-offloadable-slots <value>   Physical CPU KV buffers backing the offloadable DiT KV slots\n");
+    printf("                                              (interactive only). Adjacent offloadable steps share one buffer.\n");
+    printf("                                              0 = one buffer per step (no sharing). Default: 0.\n");
     printf("  --dit-kv-cache-length <value>               DiT KV cache max seq length (interactive only). Default: max-llm-len * 10.\n");
     printf("  --diffusion-steps <value>                   Flow-matching diffusion steps. 0/negative uses the model's\n");
     printf("                                              decoder.diffusion_steps metadata (default 10); clamped to 50.\n");
@@ -1739,6 +1747,28 @@ int tool_entry(int argc, char** argv)
             }
             options.dit_kv_offloadable_slots = v;
         }
+        else if (str_casecmp(arg, "--dit-kv-actual-fixed-slots") == 0)
+        {
+            auto value = get_arg_value();
+            uint32_t v;
+            if (!parse_uint32_arg(value, &v))
+            {
+                print_error_log("Error: invalid --dit-kv-actual-fixed-slots value \"%s\".\n", value);
+                return 1;
+            }
+            options.dit_kv_actual_fixed_slots = v;
+        }
+        else if (str_casecmp(arg, "--dit-kv-actual-offloadable-slots") == 0)
+        {
+            auto value = get_arg_value();
+            uint32_t v;
+            if (!parse_uint32_arg(value, &v))
+            {
+                print_error_log("Error: invalid --dit-kv-actual-offloadable-slots value \"%s\".\n", value);
+                return 1;
+            }
+            options.dit_kv_actual_offloadable_slots = v;
+        }
         else if (str_casecmp(arg, "--dit-kv-cache-length") == 0)
         {
             auto value = get_arg_value();
@@ -2181,6 +2211,8 @@ int tool_entry(int argc, char** argv)
         params.dit_kv_offloadable_slots = options.dit_kv_offloadable_slots;
         params.dit_kv_cache_length = options.dit_kv_cache_length;
         params.dit_allow_kv_cache_fallback = true;
+        params_v4.dit_kv_actual_fixed_slots = options.dit_kv_actual_fixed_slots;
+        params_v4.dit_kv_actual_offloadable_slots = options.dit_kv_actual_offloadable_slots;
     }
     params_v4.diffusion_steps = options.diffusion_steps;
     tts_seed_state seed_state;
