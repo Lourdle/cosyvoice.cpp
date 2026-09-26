@@ -69,6 +69,13 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
                 for (const auto& i : prompt->prompt_text)
                     prefill_embedding(token_emb, i, token_row_size, token_type);
                 prompt_crc32 = prompt->prompt_crc32;
+
+                if (params.strict_seed_mode && offset != 0)
+                {
+                    if (!llm_prefill(token_type, batch_buffer.get(), offset))
+                        throw std::runtime_error("Failed to prefill LLM KV cache.\n");
+                    offset = 0;
+                }
             }
             else if (prompt_crc32 != prompt->prompt_crc32
                 || !llm_set_kv_cache_len(1 + static_cast<uint32_t>(prompt->prompt_text.size())))

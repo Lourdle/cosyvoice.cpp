@@ -153,6 +153,7 @@ cosyvoice_context_t cosyvoice_load_ext(const void* data, size_t size, const cosy
 
     cosyvoice_context_params_v4_cpp params_v4 = {};
     params_v4.cosyvoice_context_params_t::operator=(*params);
+    params_v4.strict_seed_mode = true;
 
     if (version >= COSYVOICE_CONTEXT_PARAMS_V2_VERSION)
         params_v4.n_workers = std::max(1u, reinterpret_cast<const cosyvoice_context_params_v2_t*>(params)->n_workers);
@@ -195,6 +196,7 @@ cosyvoice_context_t cosyvoice_load_ext(const void* data, size_t size, const cosy
         params_v4.diffusion_steps = p_v4->diffusion_steps;
         params_v4.dit_kv_actual_fixed_slots = p_v4->dit_kv_actual_fixed_slots;
         params_v4.dit_kv_actual_offloadable_slots = p_v4->dit_kv_actual_offloadable_slots;
+        params_v4.strict_seed_mode = p_v4->strict_seed_mode;
     }
 
     auto ctx = new cosyvoice_context_3(params_v4,

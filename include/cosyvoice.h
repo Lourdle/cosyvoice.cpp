@@ -312,6 +312,7 @@ typedef struct cosyvoice_context_params_v4
     int32_t diffusion_steps;                   ///< Number of flow-matching diffusion steps. When `<= 0`, the value comes from the `decoder.diffusion_steps` GGUF metadata (which itself defaults to 10 when absent); otherwise it is clamped to the runtime maximum.
     uint32_t dit_kv_actual_fixed_slots;        ///< Number of physical device KV slots backing the fixed DiT KV slots. Adjacent fixed steps are grouped and share one slot, trading a small cross-step KV approximation for memory. `0` means one slot per fixed step (no sharing); clamped to `[1, dit_kv_fixed_slots]`.
     uint32_t dit_kv_actual_offloadable_slots;  ///< Number of physical CPU KV buffers backing the offloadable DiT KV slots. Adjacent offloadable steps are grouped and share one buffer, also reducing per-step CPU round-trips. `0` means one buffer per offloadable step (no sharing); clamped to `[1, dit_kv_offloadable_slots]`.
+    bool     strict_seed_mode;                 ///< If true, strictly guarantees that repeated generations with the same sampler seed produce identical results. When false, generation skips a small prefill pass and is slightly faster, but strict seed reproducibility is no longer guaranteed. Default: true.
 } cosyvoice_context_params_v4_t;
 
 #ifdef __cplusplus
@@ -343,19 +344,19 @@ struct cosyvoice_context_params_v3_cpp : cosyvoice_context_params_v2_cpp
         };
         cosyvoice_kv_cache_type_t dit_kv_cache_type;                     ///< The data type of the KV cache in the DiT module.
     };
-    bool     dit_allow_kv_cache_fallback; ///< If true, fall back to a Flash Attention-compatible KV cache type when the requested one is unsupported.
-    uint32_t dit_kv_fixed_slots;          ///< Number of fixed (non-offloadable) DiT KV slots.
-    uint32_t dit_kv_offloadable_slots;    ///< Number of offloadable DiT KV slots.
+    bool     dit_allow_kv_cache_fallback;  ///< If true, fall back to a Flash Attention-compatible KV cache type when the requested one is unsupported.
+    uint32_t dit_kv_fixed_slots;           ///< Number of fixed (non-offloadable) DiT KV slots.
+    uint32_t dit_kv_offloadable_slots;     ///< Number of offloadable DiT KV slots.
     uint32_t dit_kv_cache_length;          ///< Maximum sequence length for the DiT KV cache. 0 to use default (n_max_seq * 10).
     uint32_t reserved_tail_padding;
 };
 
 struct cosyvoice_context_params_v4_cpp : cosyvoice_context_params_v3_cpp
 {
-    int32_t  diffusion_steps;         ///< Number of flow-matching diffusion steps. When `<= 0`, the value comes from the `decoder.diffusion_steps` GGUF metadata (which itself defaults to 10 when absent); otherwise it is clamped to the runtime maximum.
+    int32_t  diffusion_steps;                 ///< Number of flow-matching diffusion steps. When `<= 0`, the value comes from the `decoder.diffusion_steps` GGUF metadata (which itself defaults to 10 when absent); otherwise it is clamped to the runtime maximum.
     uint32_t dit_kv_actual_fixed_slots;       ///< Number of physical device KV slots backing the fixed DiT KV slots. `0` means no sharing; clamped to `[1, dit_kv_fixed_slots]`.
     uint32_t dit_kv_actual_offloadable_slots; ///< Number of physical CPU KV buffers backing the offloadable DiT KV slots. `0` means no sharing; clamped to `[1, dit_kv_offloadable_slots]`.
-    uint32_t reserved_tail_padding;
+    bool     strict_seed_mode;                ///< Strictly guarantees that repeated generations with the same sampler seed produce identical results. Default: true.
 };
 #endif
 
