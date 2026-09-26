@@ -75,6 +75,7 @@ struct cli_options
     bool has_seed_policy = false;
     enum class seed_policy_mode { auto_mode, fixed, random };
     seed_policy_mode seed_policy = seed_policy_mode::auto_mode;
+    bool strict_seed = true;
     uint32_t n_threads = 0;
     bool has_llm_kv_cache_type = false;
     cosyvoice_kv_cache_type_t llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
@@ -414,6 +415,9 @@ static void print_usage(const char* argv0)
     printf("  --flow-flash-attn <0|1>                     Enable/disable Flow/DiT flash attention. Default: 1.\n");
     printf("  --seed <value>                              Fixed seed for sampling.\n");
     printf("  --seed-policy <auto|fixed|random>           Seed strategy. Default: auto (fixed if --seed is set).\n");
+    printf("  --strict-seed <0|1>                         Strictly guarantee identical audio for the same sampler\n");
+    printf("                                              seed. Disable for a slightly faster prefill pass.\n");
+    printf("                                              Default: 1.\n");
 
     printf("\nSampling overrides:\n");
     printf("  --temperature <value>                       Sampling temperature (> 0).\n");
@@ -875,6 +879,7 @@ static void print_tts_runtime_info(
             snprintf(buf, sizeof(buf), "%u (random)", context_params.seed);
             print_kv_line_string("seed", buf);
         }
+    print_kv_line_string("strict_seed", enabled_to_string(options.strict_seed));
     {
         char buf[256];
         snprintf(buf, sizeof(buf), "requested: %s, actual: %s (%s)",
@@ -1927,6 +1932,19 @@ int tool_entry(int argc, char** argv)
             options.seed_policy = policy;
             options.has_seed_policy = true;
         }
+        else if (str_casecmp(arg, "--strict-seed") == 0)
+        {
+            const auto v = to_lower(get_arg_value());
+            if (v == "1" || v == "yes" || v == "true" || v == "on")
+                options.strict_seed = true;
+            else if (v == "0" || v == "no" || v == "false" || v == "off")
+                options.strict_seed = false;
+            else
+            {
+                print_error_log("Error: invalid --strict-seed value \"%s\". Use 0/1, yes/no, true/false, on/off.\n", v.c_str());
+                return 1;
+            }
+        }
         else if (str_casecmp(arg, "--temperature") == 0)
         {
             auto value = get_arg_value();
@@ -2215,6 +2233,7 @@ int tool_entry(int argc, char** argv)
         params_v4.dit_kv_actual_offloadable_slots = options.dit_kv_actual_offloadable_slots;
     }
     params_v4.diffusion_steps = options.diffusion_steps;
+    params_v4.strict_seed_mode = options.strict_seed;
     tts_seed_state seed_state;
     const bool has_seed_value = !options.seed.empty();
     const cli_options::seed_policy_mode policy = resolve_seed_policy_mode(options);
