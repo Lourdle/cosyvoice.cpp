@@ -32,6 +32,40 @@ set(BUILD_SHARED_LIBS ${ORIGINAL_BUILD_SHARED_LIBS} CACHE BOOL "Build shared lib
 # vendor/ggml/src/ggml-metal/*, then
 # `git -C vendor/ggml diff --src-prefix=a/ --dst-prefix=b/ > cmake/patches/ggml-metal-pad-beg.patch`),
 # and re-verify Metal synthesis end-to-end.
+function(cosyvoice_git_clone_with_retry REPO_URL DEST_DIR ATTEMPTS DEPTH)
+    set(_clone_ok FALSE)
+    foreach(_attempt RANGE 1 ${ATTEMPTS})
+        if(EXISTS "${DEST_DIR}")
+            file(REMOVE_RECURSE "${DEST_DIR}")
+        endif()
+
+        if(DEPTH GREATER 0)
+            execute_process(
+                COMMAND git clone --depth=${DEPTH} "${REPO_URL}" "${DEST_DIR}"
+                RESULT_VARIABLE _clone_result
+            )
+        else()
+            execute_process(
+                COMMAND git clone "${REPO_URL}" "${DEST_DIR}"
+                RESULT_VARIABLE _clone_result
+            )
+        endif()
+
+        if(_clone_result EQUAL 0)
+            set(_clone_ok TRUE)
+            break()
+        endif()
+
+        if(_attempt LESS ${ATTEMPTS})
+            message(WARNING "Failed to clone ${REPO_URL} (attempt ${_attempt}/${ATTEMPTS}); retrying...")
+        endif()
+    endforeach()
+
+    if(NOT _clone_ok)
+        message(FATAL_ERROR "Failed to clone ${REPO_URL} into ${DEST_DIR} after ${ATTEMPTS} attempts")
+    endif()
+endfunction()
+
 if(NOT DEFINED GGML_METAL)
     set(_GGML_USES_METAL ${APPLE})
 else()
@@ -45,13 +79,7 @@ set(GGML_PINNED_COMMIT
 if(_GGML_USES_METAL)
     if(NOT EXISTS "${GGML_SOURCE_DIR}/CMakeLists.txt")
         message(STATUS "ggml not found in ${GGML_SOURCE_DIR}. Cloning (Metal on, pinned @ ${GGML_PINNED_COMMIT})...")
-        execute_process(
-            COMMAND git clone https://github.com/ggml-org/ggml.git "${GGML_SOURCE_DIR}"
-            RESULT_VARIABLE GGML_CLONE_RESULT
-        )
-        if(NOT GGML_CLONE_RESULT EQUAL 0)
-            message(FATAL_ERROR "Failed to clone ggml into ${GGML_SOURCE_DIR}")
-        endif()
+        cosyvoice_git_clone_with_retry("https://github.com/ggml-org/ggml.git" "${GGML_SOURCE_DIR}" 3 0)
         execute_process(
             COMMAND git -C "${GGML_SOURCE_DIR}" checkout "${GGML_PINNED_COMMIT}"
             RESULT_VARIABLE GGML_CHECKOUT_RESULT
@@ -99,9 +127,7 @@ else()
     # Non-Metal build: keep the original behaviour — latest ggml, no patch.
     if(NOT EXISTS "${GGML_SOURCE_DIR}/CMakeLists.txt")
         message(STATUS "ggml not found in ${GGML_SOURCE_DIR}. Cloning from https://github.com/ggml-org/ggml.git...")
-        execute_process(
-            COMMAND git clone --depth=1 https://github.com/ggml-org/ggml.git "${GGML_SOURCE_DIR}"
-        )
+        cosyvoice_git_clone_with_retry("https://github.com/ggml-org/ggml.git" "${GGML_SOURCE_DIR}" 3 1)
     endif()
 endif()
 
