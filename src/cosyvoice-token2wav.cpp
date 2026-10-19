@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <span>
 #include <vector>
@@ -567,6 +569,25 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         for (size_t k = 0; k != n_harmonics; ++k)
             worker->phase_offset[k] = static_cast<float>(std::fmod(
                 static_cast<double>(worker->phase_offset[k]) + checkpoint[k], 1.0));
+    }
+
+    static const bool log_phase = std::getenv("COSYVOICE_HIFT_PHASE_LOG") != nullptr;
+    if (log_phase && use_phase_offset)
+    {
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+            "hift phase: input_frames=%lld new_frames=%lld cache_frames=%lld retain=%lld row=%lld offset=",
+            static_cast<long long>(speech_feat->ne[0]), static_cast<long long>(feat->ne[1]),
+            static_cast<long long>(cache_length), static_cast<long long>(retain_frames),
+            static_cast<long long>(phase_state.checkpoint_row));
+        std::string msg = buf;
+        for (auto v : worker->phase_offset)
+        {
+            std::snprintf(buf, sizeof(buf), "%.6f ", static_cast<double>(v));
+            msg += buf;
+        }
+        msg += '\n';
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, msg.c_str());
     }
 
     return worker->status == GGML_STATUS_SUCCESS;
