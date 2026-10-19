@@ -75,6 +75,7 @@ struct cosyvoice_worker_context
 
     uint32_t chunk_size;
     std::vector<float> flow_cache;
+    std::vector<float> phase_offset;      // per-harmonic mod-1 HiFT oscillator phase
     std::vector<uint32_t> chunk_boundaries;
     uint32_t offset{0};
     std::unique_ptr<char[]> batch_buffer;
