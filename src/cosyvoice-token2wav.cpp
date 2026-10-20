@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <span>
 #include <vector>
 
@@ -482,6 +483,8 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         ggml_backend_tensor_copy_async(backend.get(), backend.get(), feat, speech_feat);
     }
 
+    const int64_t mel_new_frames = feat->ne[1];
+
     int64_t retain_frames = 0;
     if (streaming && !finalize)
     {
@@ -508,6 +511,8 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     ggml_reset(ctx0.get());
     ggml_backend_sched_reset(sched.get());
     gf = new_cgraph(ctx0.get());
+
+    ggml_tensor* mel_tensor = speech_feat;
 
     speech_feat = ggml_permute(ctx0.get(), speech_feat, 1, 0, 2, 3);
     if (auto ne0 = static_cast<int64_t>(speech_feat->ne[0] / speed); ne0 != speech_feat->ne[0])
@@ -576,10 +581,11 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     {
         char buf[256];
         std::snprintf(buf, sizeof(buf),
-            "hift phase: input_frames=%lld new_frames=%lld cache_frames=%lld retain=%lld row=%lld offset=",
-            static_cast<long long>(speech_feat->ne[0]), static_cast<long long>(feat->ne[1]),
+            "hift phase: input_frames=%lld new_frames=%lld cache_frames=%lld retain=%lld row=%lld emitted_frames=%lld offset=",
+            static_cast<long long>(speech_feat->ne[0]), static_cast<long long>(mel_new_frames),
             static_cast<long long>(cache_length), static_cast<long long>(retain_frames),
-            static_cast<long long>(phase_state.checkpoint_row));
+            static_cast<long long>(phase_state.checkpoint_row),
+            static_cast<long long>(result->length / hift.scale_factor));
         std::string msg = buf;
         for (auto v : worker->phase_offset)
         {
@@ -588,6 +594,23 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         }
         msg += '\n';
         cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, msg.c_str());
+    }
+
+    // Debug aid: append this call's new mel frames so the chunked mel sequence
+    // can be checked for continuity across streaming joins.
+    static const char* dump_mel_path = std::getenv("COSYVOICE_DUMP_MEL");
+    if (dump_mel_path && mel_tensor)
+    {
+        const auto dim = mel_tensor->ne[0];
+        const auto total = mel_tensor->ne[1];
+        const auto n_new = std::min(mel_new_frames, total);
+        std::vector<float> buffer(static_cast<size_t>(n_new * dim));
+        ggml_backend_tensor_get(mel_tensor, buffer.data(),
+            static_cast<size_t>((total - n_new) * dim) * sizeof(float), buffer.size() * sizeof(float));
+        const uint32_t header[2] = { static_cast<uint32_t>(n_new), static_cast<uint32_t>(dim) };
+        std::ofstream out(dump_mel_path, std::ios::binary | std::ios::app);
+        out.write(reinterpret_cast<const char*>(header), sizeof(header));
+        out.write(reinterpret_cast<const char*>(buffer.data()), static_cast<std::streamsize>(buffer.size() * sizeof(float)));
     }
 
     return worker->status == GGML_STATUS_SUCCESS;
