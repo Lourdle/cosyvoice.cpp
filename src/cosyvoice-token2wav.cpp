@@ -243,6 +243,9 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     auto [mu, spks, conds, cut_len] = flow.build_cgraph_encode(ctx0.get(), token, prompt_token, prompt_feat, embedding, op_caps, (flow.decoder.diffusion_steps - params.dit_kv_fixed_slots - params.dit_kv_offloadable_slots) == 0 && streaming ? worker->offset : 0, streaming && !finalize);
     const auto seq_len = mu->ne[1];
     auto ditctx = flow.decoder.prepare_context(ctx1.get(), mu, spks, conds);
+    // End of the region occupied by the DiT context tensors, so the mel tensor
+    // can be placed after them instead of on top of them.
+    char* ditctx_buffer_end = nullptr;
     do
     {
         auto buft = ggml_backend_get_default_buffer_type(backend.get());
@@ -263,6 +266,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
             size = get_aligned_size(size, alignment);
             buffer_base += size;
         }
+        ditctx_buffer_end = buffer_base;
     } while (false);
 
     dit_sched_config config(params, cut_len, streaming ? worker->offset : 0, streaming, kv_cache->can_reuse(), flow.decoder.diffusion_steps);
@@ -456,6 +460,17 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     ggml_reset(ctx1.get());
     const auto cache_length = streaming ? static_cast<int64_t>(worker->flow_cache.size() / feat->ne[0]) : 0;
     ggml_tensor* speech_feat = ggml_new_tensor_2d(ctx1.get(), feat->type, feat->ne[0], feat->ne[1] + cache_length);
+    // Place the mel after the DiT context tensors. Both live in the same buffer
+    // and the DiT tensors are much smaller than the mel when the DiT KV cache is
+    // in use; sharing the base would let the mel overwrite the flow state and the
+    // first frames of the token conditioning, which the next chunk would then
+    // read back as its input.
+    const auto mel_buffer_base = [&]()
+    {
+        return ditctx_buffer_end != nullptr
+            ? ditctx_buffer_end
+            : reinterpret_cast<char*>(ggml_backend_buffer_get_base(token2wav_buffer.get()));
+    };
     if (cache_length != 0)
     {
         auto buft = ggml_backend_get_default_buffer_type(backend.get());
@@ -463,8 +478,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         if (size > ggml_backend_buffer_get_size(token2wav_buffer.get()))
             reset_shared_buffer(ggml_backend_alloc_ctx_tensors_from_buft(ctx1.get(), buft));
         else
-            ggml_backend_tensor_alloc(token2wav_buffer.get(), speech_feat,
-                ggml_backend_buffer_get_base(token2wav_buffer.get()));
+            ggml_backend_tensor_alloc(token2wav_buffer.get(), speech_feat, mel_buffer_base());
 
         auto speech_feat_view = ggml_view_2d(ctx0.get(), speech_feat, speech_feat->ne[0], feat->ne[1], speech_feat->nb[1], speech_feat->nb[1] * cache_length);
         speech_feat_view->buffer = speech_feat->buffer;
@@ -473,8 +487,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     }
     else
     {
-        ggml_backend_tensor_alloc(token2wav_buffer.get(), speech_feat,
-            ggml_backend_buffer_get_base(token2wav_buffer.get()));
+        ggml_backend_tensor_alloc(token2wav_buffer.get(), speech_feat, mel_buffer_base());
         ggml_backend_tensor_copy_async(backend.get(), backend.get(), feat, speech_feat);
     }
 
