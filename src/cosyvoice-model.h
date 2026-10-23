@@ -75,12 +75,18 @@ struct cosyvoice_worker_context
 
     uint32_t chunk_size;
     std::vector<float> flow_cache;
+    std::vector<float> phase_offset;      // per-harmonic mod-1 HiFT oscillator phase
     std::vector<uint32_t> chunk_boundaries;
     uint32_t offset{0};
     std::unique_ptr<char[]> batch_buffer;
     std::unique_ptr<float[]> nucleus_probs;
+    // Immutable copy of the top-k candidates of the last computed logits, so
+    // preparing the nucleus is idempotent and can be repeated for one logits
+    // state without re-filtering already normalized probabilities.
+    std::unique_ptr<float[]> nucleus_raw;
     uint32_t nucleus_probs_capacity;
     int nucleus_probs_len;
+    bool raw_probs_masked;
     std::unique_ptr<float[]> probs;
     ggml_backend_buffer_ptr llm_kv_buffer;
     ggml_backend_buffer_ptr dit_kv_buffer;
