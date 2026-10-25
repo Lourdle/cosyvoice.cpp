@@ -4,9 +4,12 @@
 
 #include <tuple>
 #include <algorithm>
+#include <charconv>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <system_error>
 #include <format>
 #include <span>
 #include <ranges>
@@ -76,7 +79,12 @@ bool backend_looks_uma(ggml_backend_t backend, ggml_backend_buffer* buffer)
 
     const auto buffer_size = ggml_backend_buffer_get_size(buffer);
     if (buffer_size < kUmaProbeBytes)
+    {
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, std::format(
+            "UMA probe: skipped (buffer of {} bytes is smaller than the {} byte probe)\n",
+            buffer_size, kUmaProbeBytes).c_str());
         return false;
+    }
 
     ggml_tensor tensor =
     {
@@ -824,10 +832,89 @@ void cosyvoice_model_3::load(gguf_loader& loader)
             && tensor != &llm.speech_embedding_weight)
             mem_size += get_aligned_size(ggml_backend_buft_get_alloc_size(buft, *tensor), alignment);
 
-    shared->buffer.reset(ggml_backend_buft_alloc_buffer(buft, mem_size));
-    auto buffer_base = reinterpret_cast<char*>(ggml_backend_buffer_get_base(shared->buffer.get()));
+    // Split the packed weights over as many buffers as needed: some backends
+    // cannot create a single allocation above a device limit (reported through
+    // get_max_size) and the packed set exceeds that limit on some drivers.
+    const size_t device_total = mem_size;
+    size_t max_buffer_size = ggml_backend_get_max_size(backend);
 
-    shared->backend_uma = backend_looks_uma(backend, shared->buffer.get());
+    // Debug knob: override the largest weight allocation so the multi-buffer
+    // path can be exercised on backends that report no limit (CUDA and CPU
+    // return SIZE_MAX). The value is in bytes; 0 removes the cap.
+    if (const char* env = std::getenv("COSYVOICE_MAX_WEIGHT_BUFFER_SIZE"); env && *env)
+    {
+        const auto* const end = env + std::strlen(env);
+        size_t requested = 0;
+        const auto [ptr, ec] = std::from_chars(env, end, requested);
+        if (ec == std::errc{} && ptr == end)
+        {
+            max_buffer_size = requested != 0 ? requested : std::numeric_limits<size_t>::max();
+            cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, std::format(
+                "weights: max buffer size overridden to {} bytes (COSYVOICE_MAX_WEIGHT_BUFFER_SIZE)\n",
+                max_buffer_size).c_str());
+
+            constexpr size_t small_buffer_warn_bytes = 64ull * 1024ull * 1024ull;
+            if (requested != 0 && requested < small_buffer_warn_bytes)
+                cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_WARN, std::format(
+                    "weights: COSYVOICE_MAX_WEIGHT_BUFFER_SIZE={} is very small; this creates many device "
+                    "buffers and can slow down loading or fragment device memory.\n", requested).c_str());
+        }
+        else
+            cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_WARN, std::format(
+                "weights: ignoring invalid COSYVOICE_MAX_WEIGHT_BUFFER_SIZE=\"{}\"\n", env).c_str());
+    }
+
+    auto& device_buffers = shared->buffers;
+    device_buffers.clear();
+    size_t device_bytes_left = device_total;
+    size_t device_buffer_used = 0;
+    size_t device_buffer_capacity = 0;
+    char* buffer_base = nullptr;
+
+    auto alloc_device_bytes = [&](size_t size) -> char*
+    {
+        if (device_buffers.empty() || device_buffer_used + size > device_buffer_capacity)
+        {
+            if (device_buffer_capacity < device_bytes_left)
+                device_bytes_left -= device_buffer_capacity;
+            else
+                device_bytes_left = 0;
+
+            const auto capacity = std::max(std::min(max_buffer_size, device_bytes_left), size);
+            auto buffer = ggml_backend_buft_alloc_buffer(buft, capacity);
+            if (!buffer)
+                throw std::runtime_error(std::format(
+                    "Failed to allocate a {} byte buffer for the model weights (max {} bytes per buffer).\n",
+                    capacity, max_buffer_size));
+
+            device_buffers.emplace_back(buffer);
+            buffer_base = reinterpret_cast<char*>(ggml_backend_buffer_get_base(device_buffers.back().get()));
+            device_buffer_used = 0;
+            device_buffer_capacity = capacity;
+        }
+
+        auto ptr = buffer_base + device_buffer_used;
+        device_buffer_used += size;
+        return ptr;
+    };
+
+    auto alloc_device_tensor = [&](ggml_tensor* tensor)
+    {
+        const auto size = get_aligned_size(ggml_backend_buft_get_alloc_size(buft, tensor), alignment);
+        if (size > max_buffer_size)
+            throw std::runtime_error(std::format(
+                "Tensor '{}' needs {} bytes, which exceeds the maximum weight buffer size ({} bytes). "
+                "The backend limit or COSYVOICE_MAX_WEIGHT_BUFFER_SIZE is too small for this model.\n",
+                tensor->name, size, max_buffer_size));
+
+        auto* ptr = alloc_device_bytes(size);
+        ggml_backend_tensor_alloc(device_buffers.back().get(), tensor, ptr);
+    };
+
+    // The UMA probe uses the first buffer's base as scratch space, so it has to
+    // run before the weights are uploaded.
+    alloc_device_bytes(0);
+    shared->backend_uma = backend_looks_uma(backend, device_buffers.front().get());
 
     shared->ctx.reset(ggml_init(params));
 
@@ -840,7 +927,6 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     auto set_tensor = [&](ggml_tensor* tensor, const void* data, size_t size)
     {
         ggml_backend_tensor_set_async(backend, tensor, data, 0, size);
-        buffer_base += get_aligned_size(ggml_backend_buft_get_alloc_size(buft, tensor), alignment);
     };
     auto set_cpu_tensor = [&](ggml_tensor* tensor, const void* data, size_t size)
     {
@@ -848,13 +934,14 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         cpu_buffer_base += ggml_backend_buft_get_alloc_size(ggml_backend_get_default_buffer_type(cpu_backend), tensor);
     };
     flow.decoder.estimator.time_embed.time_embed.emb = ggml_new_tensor_1d(shared->ctx.get(), GGML_TYPE_F32, half_dim);
-    ggml_backend_tensor_alloc(shared->buffer.get(), flow.decoder.estimator.time_embed.time_embed.emb, buffer_base);
+    alloc_device_tensor(flow.decoder.estimator.time_embed.time_embed.emb);
     set_tensor(flow.decoder.estimator.time_embed.time_embed.emb, emb_buffer.get(), sizeof(float) * half_dim);
 
     for (const auto& [name, tensor] : tensors)
     {
         size_t tensor_size = ggml_nbytes(*tensor);
         auto new_tensor = ggml_new_tensor(shared->ctx.get(), (*tensor)->type, GGML_MAX_DIMS, (*tensor)->ne);
+        ggml_set_name(new_tensor, name.c_str());
         if (tensor == &llm.embed_tokens_weight
             || tensor == &llm.speech_embedding_weight)
         {
@@ -863,7 +950,7 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         }
         else
         {
-            ggml_backend_tensor_alloc(shared->buffer.get(), new_tensor, buffer_base);
+            alloc_device_tensor(new_tensor);
 
             const auto eps = get_tensor_eps(*tensor);
             if (eps == 0.f)
@@ -890,7 +977,6 @@ void cosyvoice_model_3::load(gguf_loader& loader)
 
         *tensor = new_tensor;
         ggml_set_param(*tensor);
-        ggml_set_name(*tensor, name.c_str());
     }
 
     hift.window = ggml_new_tensor_1d(shared->ctx.get(), GGML_TYPE_F32, hift.nfft);
@@ -904,7 +990,7 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     hift.ictx = create_istft_context(hift.nfft, shared->ctx.get(),
         [&](ggml_tensor* tensor, void* data, size_t size)
         {
-            ggml_backend_tensor_alloc(shared->buffer.get(), tensor, buffer_base);
+            alloc_device_tensor(tensor);
             set_tensor(tensor, data, size);
             ggml_set_param(tensor);
             ggml_backend_synchronize(backend);
@@ -920,9 +1006,8 @@ void cosyvoice_model_3::load(gguf_loader& loader)
 
         worker->position_ids = ggml_new_tensor_1d(shared->ctx.get(), GGML_TYPE_I32, shared->params.n_batch);
         ggml_set_name(worker->position_ids, std::format("position_ids.{}", i).c_str());
-        ggml_backend_tensor_alloc(shared->buffer.get(), worker->position_ids, buffer_base);
+        alloc_device_tensor(worker->position_ids);
         ggml_set_param(worker->position_ids);
-        buffer_base += get_aligned_size(worker->position_ids->nb[1], alignment);
 
         worker->causal_mask = ggml_new_tensor_2d(shared->ctx.get(), GGML_TYPE_F16, shared->params.n_max_seq - 1, shared->params.n_batch);
         ggml_set_input(worker->causal_mask);
@@ -931,7 +1016,15 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     shared->noise_rng.seed(shared->params.seed);
 
     hift.m_source.l_sin_gen.rand_ini = ggml_new_tensor_1d(shared->ctx.get(), GGML_TYPE_F32, hift.nb_harmonics + 1);
-    ggml_backend_tensor_alloc(shared->buffer.get(), hift.m_source.l_sin_gen.rand_ini, buffer_base);
+    alloc_device_tensor(hift.m_source.l_sin_gen.rand_ini);
+
+    if (device_buffers.size() > 1)
+        cosyvoice_call_ggml_log_callback(
+            GGML_LOG_LEVEL_INFO,
+            std::format(
+                "weights: packed into {} buffers ({} MiB total, backend max {} MiB per buffer)\n",
+                device_buffers.size(), device_total >> 20, max_buffer_size >> 20
+            ).c_str());
 
     auto rand_ini_buffer = std::make_unique<float[]>(hift.nb_harmonics + 1);
     rand_ini_buffer[0] = 0.f;
