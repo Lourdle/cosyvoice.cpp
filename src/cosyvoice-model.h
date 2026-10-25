@@ -20,7 +20,7 @@ struct cosyvoice_model_shared
 
     ggml_context_ptr ctx;
 
-    ggml_backend_buffer_ptr buffer;
+    std::vector<ggml_backend_buffer_ptr> buffers;
     ggml_backend_buffer_ptr cpu_buffer;
 
     cosyvoice_context_params_v4_cpp params;
