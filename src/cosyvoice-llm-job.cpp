@@ -142,11 +142,6 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
         // Reset the counter whenever a non-silent token appears.
         uint32_t cur_silent_token_num = 0;
         constexpr uint32_t max_silent_token_num = 5;
-        // Dropped silent tokens are re-sampled from the same logits state. The
-        // prepared nucleus is stable across those retries, so this only guards
-        // against a distribution that offers nothing but silent tokens.
-        uint32_t silent_drop_retries = 0;
-        constexpr uint32_t max_silent_drop_retries = 64;
         const auto& silent_tokens = cv3_shared->silent_tokens;
 
         for (uint32_t n = llm_get_n_accepted_tokens();; ++n)
@@ -166,14 +161,15 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
                 ++cur_silent_token_num;
                 if (cur_silent_token_num > max_silent_token_num)
                 {
-                    if (++silent_drop_retries > max_silent_drop_retries)
-                        throw std::runtime_error("Failed to sample a non-silent token from LLM output. This might be wrong with the model or caused by an issue with the sampling parameters.\n");
-                    // Drop excess silent tokens — the token is already in the
-                    // KV cache (from llm_decode), so update cur to keep the
-                    // model state consistent, but skip llm_accept_token so
-                    // it does not appear in the output.
+                    if (n > limit)
+                        break;
+
+                    // Excess silence is not emitted, but the token still enters
+                    // the model state so generation can move past it instead of
+                    // re-sampling the same logits.
                     cur = speech_emb + token_id * speech_row_size;
-                    --n;
+                    if (!llm_decode(speech_type, cur))
+                        throw std::runtime_error("Failed to decode LLM output.\n");
                     continue;
                 }
             }
@@ -181,7 +177,6 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
                 cur_silent_token_num = 0;
 
             llm_accept_token(token_id);
-            silent_drop_retries = 0;
 
             if (is_stop_requested())
             {
