@@ -67,7 +67,7 @@ cosyvoice_worker_context::cosyvoice_worker_context(ggml_backend_t backend)
     : backend(backend), cpu_backend(backend),
     ctx0(ggml_init(ggml_init_params{ .mem_size = ggml_graph_overhead() * kCosyVoiceGraphSize, .no_alloc = true })),
     gf(nullptr), llm_input(nullptr), llm_probs(nullptr), position_ids(nullptr), causal_mask(nullptr), llm_kv_cache(), dit_kv_cache(),
-    status(GGML_STATUS_SUCCESS), prompt_crc32(0), sampler_seed(0), sampler(nullptr), sampler_ctx(nullptr), builtin_sampler_rng_policy(COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION), nucleus_probs_capacity(0), nucleus_probs_len(0) {}
+    status(GGML_STATUS_SUCCESS), prompt_crc32(0), sampler_seed(0), sampler(nullptr), sampler_ctx(nullptr), builtin_sampler_rng_policy(COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION), nucleus_probs_capacity(0), nucleus_probs_len(0), raw_probs_masked(false) {}
 
 cosyvoice_model::cosyvoice_model(ggml_backend_t backend, const cosyvoice_context_params_v4_cpp& params)
     : shared(new cosyvoice_model_shared(params)), workers(reinterpret_cast<cosyvoice_worker_context*>(malloc(sizeof(cosyvoice_worker_context) * params.n_workers)))
@@ -268,7 +268,9 @@ void cosyvoice_model::empty_buffer_cache()
 
 void cosyvoice_model_3::get_memory_usage(cosyvoice_memory_usage_t* usage)
 {
-    usage->parameters = ggml_backend_buffer_get_size(shared->buffer.get());
+    usage->parameters = 0;
+    for (auto& buffer : shared->buffers)
+        usage->parameters += ggml_backend_buffer_get_size(buffer.get());
     usage->buffers = ggml_backend_sched_get_buffer_size(worker->sched.get(), worker->backend.get());
     usage->cpu_buffers = ggml_backend_sched_get_buffer_size(worker->sched.get(), worker->cpu_backend.get());
     usage->offloaded_kv_cache = worker->llm_kv_cache.get_offloaded_cache_size();
@@ -399,6 +401,7 @@ bool cosyvoice_model::set_generation_config(const cosyvoice_generation_config_t*
     if (worker->nucleus_probs_capacity < required_capacity)
     {
         worker->nucleus_probs.reset(new float[required_capacity]);
+        worker->nucleus_raw.reset(new float[required_capacity]);
         worker->nucleus_probs_capacity = required_capacity;
     }
     worker->nucleus_probs_len = 0;

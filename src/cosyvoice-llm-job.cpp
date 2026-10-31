@@ -161,12 +161,15 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
                 ++cur_silent_token_num;
                 if (cur_silent_token_num > max_silent_token_num)
                 {
-                    // Drop excess silent tokens — the token is already in the
-                    // KV cache (from llm_decode), so update cur to keep the
-                    // model state consistent, but skip llm_accept_token so
-                    // it does not appear in the output.
+                    if (n > limit)
+                        break;
+
+                    // Excess silence is not emitted, but the token still enters
+                    // the model state so generation can move past it instead of
+                    // re-sampling the same logits.
                     cur = speech_emb + token_id * speech_row_size;
-                    --n;
+                    if (!llm_decode(speech_type, cur))
+                        throw std::runtime_error("Failed to decode LLM output.\n");
                     continue;
                 }
             }

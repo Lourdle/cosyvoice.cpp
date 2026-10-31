@@ -7,7 +7,9 @@
 #include <ggml-backend.h>
 
 #include <chrono>
+#include <exception>
 #include <random>
+#include <format>
 #include <thread>
 
 uint32_t cosyvoice_generate_random_seed()
@@ -199,17 +201,30 @@ cosyvoice_context_t cosyvoice_load_ext(const void* data, size_t size, const cosy
         params_v4.strict_seed_mode = p_v4->strict_seed_mode;
     }
 
-    auto ctx = new cosyvoice_context_3(params_v4,
-        backend ? backend : ggml_backend_init_best()
-    );
-    ctx->cosyvoice_model_3::load(loader);
-    ctx->cosyvoice_tokenizer::load(loader);
+    cosyvoice_context_3* ctx = nullptr;
+    try
+    {
+        ctx = new cosyvoice_context_3(params_v4,
+            backend ? backend : ggml_backend_init_best()
+        );
+        ctx->cosyvoice_model_3::load(loader);
+        ctx->cosyvoice_tokenizer::load(loader);
 
-    auto ggml_backend_set_n_threads = reinterpret_cast<ggml_backend_set_n_threads_t>(ggml_backend_reg_get_proc_address(ggml_backend_dev_backend_reg(ggml_backend_get_device(ctx->worker->cpu_backend.get())), "ggml_backend_set_n_threads"));
-    if (n_threads == 0)
-        n_threads = std::max<uint32_t>(1, std::thread::hardware_concurrency() / params_v4.n_workers);
-    if (n_threads != 0)
-        ggml_backend_set_n_threads(ctx->worker->cpu_backend.get(), n_threads);
+        auto ggml_backend_set_n_threads = reinterpret_cast<ggml_backend_set_n_threads_t>(ggml_backend_reg_get_proc_address(ggml_backend_dev_backend_reg(ggml_backend_get_device(ctx->worker->cpu_backend.get())), "ggml_backend_set_n_threads"));
+        if (n_threads == 0)
+            n_threads = std::max<uint32_t>(1, std::thread::hardware_concurrency() / params_v4.n_workers);
+        if (n_threads != 0)
+            ggml_backend_set_n_threads(ctx->worker->cpu_backend.get(), n_threads);
+    }
+    catch (const std::exception& e)
+    {
+        // Loading can fail on allocation limits or bad metadata. Report it and
+        // return nullptr instead of letting the exception cross the C API.
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR,
+            std::format("failed to load model: {}\n", e.what()).c_str());
+        delete ctx;
+        return nullptr;
+    }
 
     return ctx;
 }
@@ -255,7 +270,17 @@ cosyvoice_context_t cosyvoice_load_from_file_with_params_v4(const char* filename
 cosyvoice_context_t cosyvoice_duplicate_context(cosyvoice_context_t ctx)
 {
     if (auto cv3_ctx = dynamic_cast<cosyvoice_context_3*>(ctx); cv3_ctx)
-        return new cosyvoice_context_3(*cv3_ctx);
+    {
+        try
+        {
+            return new cosyvoice_context_3(*cv3_ctx);
+        }
+        catch (const std::exception& e)
+        {
+            cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR,
+                std::format("failed to duplicate context: {}\n", e.what()).c_str());
+        }
+    }
     return nullptr;
 }
 
@@ -276,8 +301,19 @@ cosyvoice_tokenizer_context_t cosyvoice_tokenizer_load_from_file(const char* fil
         return nullptr;
 
     gguf_metadata_loader loader(&parser);
-    auto ctx = new cosyvoice_tokenizer();
-    ctx->load(loader);
+    cosyvoice_tokenizer* ctx = nullptr;
+    try
+    {
+        ctx = new cosyvoice_tokenizer();
+        ctx->load(loader);
+    }
+    catch (const std::exception& e)
+    {
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR,
+            std::format("failed to load tokenizer: {}\n", e.what()).c_str());
+        delete ctx;
+        return nullptr;
+    }
     return ctx;
 }
 
@@ -289,8 +325,19 @@ cosyvoice_tokenizer_context_t cosyvoice_tokenizer_load(const void* data, size_t 
         return nullptr;
 
     gguf_metadata_loader loader(&parser);
-    auto ctx = new cosyvoice_tokenizer();
-    ctx->load(loader);
+    cosyvoice_tokenizer* ctx = nullptr;
+    try
+    {
+        ctx = new cosyvoice_tokenizer();
+        ctx->load(loader);
+    }
+    catch (const std::exception& e)
+    {
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR,
+            std::format("failed to load tokenizer: {}\n", e.what()).c_str());
+        delete ctx;
+        return nullptr;
+    }
     return ctx;
 }
 

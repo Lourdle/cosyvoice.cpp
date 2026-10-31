@@ -267,7 +267,25 @@ struct SineGen2
 {
     ggml_tensor* rand_ini;
 
-    std::array<ggml_tensor*, 2> build_cgraph(ggml_context* ctx, ggml_tensor* f0, int harmonic_num, int sampling_rate, int upsample_scale, float sine_amp, int voiced_threshold, float noise_std) const;
+    // Carries the cross-call accumulated oscillator phase for streaming HiFT.
+    // offset is a [1, nb_harmonics + 1] F32 tensor of mod-1 phase added to the
+    // frame-rate cumsum. checkpoint is filled in by the graph with the
+    // [n_frames, nb_harmonics + 1] mod-1 cumsum; the frame axis is innermost,
+    // so the caller indexes it as [harmonic * n_frames + row].
+    //
+    // retain_frames is the number of trailing mel frames of this call that the
+    // next call re-feeds; checkpoint_row is derived from it in
+    // CausalHiFTGenerator::build_cgraph, where the input frame count is known,
+    // and is -1 when nothing resumes (finalized call).
+    struct phase_state
+    {
+        ggml_tensor* offset;
+        ggml_tensor* checkpoint;
+        int64_t retain_frames;
+        int64_t checkpoint_row;
+    };
+
+    std::array<ggml_tensor*, 2> build_cgraph(ggml_context* ctx, ggml_tensor* f0, int harmonic_num, int sampling_rate, int upsample_scale, float sine_amp, int voiced_threshold, float noise_std, phase_state* state = nullptr) const;
 };
 
 struct SourceModuleHnNSF
@@ -277,7 +295,7 @@ struct SourceModuleHnNSF
     SineGen2 l_sin_gen;
     Linear l_linear;
 
-    std::array<ggml_tensor*, 2> build_cgraph(ggml_context* ctx, ggml_tensor* x, int harmonic_num, int sampling_rate, int upsample_scale, float sine_amp, int voiced_threshold, float noise_std) const;
+    std::array<ggml_tensor*, 2> build_cgraph(ggml_context* ctx, ggml_tensor* x, int harmonic_num, int sampling_rate, int upsample_scale, float sine_amp, int voiced_threshold, float noise_std, SineGen2::phase_state* state = nullptr) const;
 };
 
 struct Snake
@@ -324,7 +342,10 @@ struct CausalHiFTGenerator
     std::vector<ResBlock> resblocks;
     CausalConv1d conv_post;
 
-    std::array<ggml_tensor*, 2> build_cgraph(ggml_context* ctx, ggml_tensor* speech_feat, bool finalize) const;
+    // When state is non-null the sine generator carries an accumulated
+    // phase offset and exports a checkpoint row so the next streaming chunk
+    // resumes at the correct oscillator phase.
+    std::array<ggml_tensor*, 2> build_cgraph(ggml_context* ctx, ggml_tensor* speech_feat, bool finalize, SineGen2::phase_state* state = nullptr) const;
 
     int overlap_length() const;
     void set_rand_ini(const float* data) const;

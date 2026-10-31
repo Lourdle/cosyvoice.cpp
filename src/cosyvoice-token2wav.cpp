@@ -3,7 +3,11 @@
 #include "ggml-cpu-flag.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <span>
 #include <vector>
 
@@ -223,6 +227,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         kv_cache->cur_len = 0;
         worker->chunk_boundaries.clear();
         worker->flow_cache.clear();
+        std::fill(worker->phase_offset.begin(), worker->phase_offset.end(), 0.f);
     }
 
     ggml_reset(ctx0.get());
@@ -494,11 +499,15 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     else
         ggml_backend_tensor_copy_async(backend.get(), backend.get(), feat, speech_feat);
 
+    const int64_t mel_new_frames = feat->ne[1];
+
+    int64_t retain_frames = 0;
     if (streaming && !finalize)
     {
         const auto overlap = static_cast<int64_t>(shared->hift_overlap);
         const auto n_feat_frames = feat->ne[1];
         const auto frames_to_keep = std::min(overlap, n_feat_frames);
+        retain_frames = frames_to_keep;
         const auto elements_to_keep = static_cast<size_t>(frames_to_keep * feat->ne[0]);
 
         worker->flow_cache.resize(elements_to_keep);
@@ -519,6 +528,8 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     ggml_backend_sched_reset(sched.get());
     gf = new_cgraph(ctx0.get());
 
+    ggml_tensor* mel_tensor = speech_feat;
+
     speech_feat = ggml_permute(ctx0.get(), speech_feat, 1, 0, 2, 3);
     if (auto ne0 = static_cast<int64_t>(speech_feat->ne[0] / speed); ne0 != speech_feat->ne[0])
         speech_feat = ggml_interpolate(ctx0.get(), speech_feat,
@@ -527,8 +538,23 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     else
         speech_feat = ggml_cont(ctx0.get(), speech_feat);
 
-    auto [generated_speech, noise] = hift.build_cgraph(ctx0.get(), speech_feat, finalize);
+    // Carry the NSF oscillator phase across streaming chunks. Disabled when the
+    // speed interpolate is active because the cached mel prefix is prepended
+    // before it, so absolute frame correspondence no longer holds. Also applied
+    // on the final chunk, which is the continuation of the previous ones.
+    SineGen2::phase_state phase_state = {};
+    const bool use_phase_offset = streaming && speed == 1.0f
+        && worker->phase_offset.size() == static_cast<size_t>(hift.nb_harmonics + 1);
+    if (use_phase_offset)
+    {
+        phase_state.offset = ggml_new_tensor_2d(ctx0.get(), GGML_TYPE_F32, 1, hift.nb_harmonics + 1);
+        phase_state.retain_frames = retain_frames;
+    }
+
+    auto [generated_speech, noise] = hift.build_cgraph(ctx0.get(), speech_feat, finalize, use_phase_offset ? &phase_state : nullptr);
     ggml_build_forward_expand(gf, generated_speech);
+    if (phase_state.checkpoint)
+        ggml_build_forward_expand(gf, phase_state.checkpoint);
     set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps);
 
     ggml_backend_sched_alloc_graph(sched.get(), gf);
@@ -548,10 +574,60 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     noise_buffer = shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_HIFT, noise_req, nullptr, shared->noise_callback_ctx);
     ggml_backend_tensor_set_async(backend.get(), noise, noise_buffer + noise_req - noise_len, 0, noise->nb[2]);
 
+    if (use_phase_offset)
+        ggml_backend_tensor_set_async(backend.get(), phase_state.offset, worker->phase_offset.data(), 0, sizeof(float) * (hift.nb_harmonics + 1));
+
     result->data = reinterpret_cast<float*>(generated_speech->data);
     result->length = static_cast<uint32_t>(generated_speech->ne[0]);
     worker->status = ggml_backend_sched_graph_compute(sched.get(), gf);
     shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_HIFT, noise_req, noise_buffer, shared->noise_callback_ctx);
+
+    if (use_phase_offset && phase_state.checkpoint)
+    {
+        const size_t n_harmonics = worker->phase_offset.size();
+        std::vector<float> checkpoint(n_harmonics);
+        ggml_backend_tensor_get(phase_state.checkpoint, checkpoint.data(), 0, checkpoint.size() * sizeof(float));
+        for (size_t k = 0; k != n_harmonics; ++k)
+            worker->phase_offset[k] = static_cast<float>(std::fmod(
+                static_cast<double>(worker->phase_offset[k]) + checkpoint[k], 1.0));
+    }
+
+    static const bool log_phase = std::getenv("COSYVOICE_HIFT_PHASE_LOG") != nullptr;
+    if (log_phase && use_phase_offset)
+    {
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+            "hift phase: input_frames=%lld new_frames=%lld cache_frames=%lld retain=%lld row=%lld emitted_frames=%lld offset=",
+            static_cast<long long>(speech_feat->ne[0]), static_cast<long long>(mel_new_frames),
+            static_cast<long long>(cache_length), static_cast<long long>(retain_frames),
+            static_cast<long long>(phase_state.checkpoint_row),
+            static_cast<long long>(result->length / hift.scale_factor));
+        std::string msg = buf;
+        for (auto v : worker->phase_offset)
+        {
+            std::snprintf(buf, sizeof(buf), "%.6f ", static_cast<double>(v));
+            msg += buf;
+        }
+        msg += '\n';
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, msg.c_str());
+    }
+
+    // Debug aid: append this call's new mel frames so the chunked mel sequence
+    // can be checked for continuity across streaming joins.
+    static const char* dump_mel_path = std::getenv("COSYVOICE_DUMP_MEL");
+    if (dump_mel_path && mel_tensor)
+    {
+        const auto dim = mel_tensor->ne[0];
+        const auto total = mel_tensor->ne[1];
+        const auto n_new = std::min(mel_new_frames, total);
+        std::vector<float> buffer(static_cast<size_t>(n_new * dim));
+        ggml_backend_tensor_get(mel_tensor, buffer.data(),
+            static_cast<size_t>((total - n_new) * dim) * sizeof(float), buffer.size() * sizeof(float));
+        const uint32_t header[2] = { static_cast<uint32_t>(n_new), static_cast<uint32_t>(dim) };
+        std::ofstream out(dump_mel_path, std::ios::binary | std::ios::app);
+        out.write(reinterpret_cast<const char*>(header), sizeof(header));
+        out.write(reinterpret_cast<const char*>(buffer.data()), static_cast<std::streamsize>(buffer.size() * sizeof(float)));
+    }
 
     return worker->status == GGML_STATUS_SUCCESS;
 }

@@ -4,6 +4,7 @@
 #include "simd-kernels.h"
 
 #include <algorithm>
+#include <cstring>
 #include <span>
 #include <ranges>
 
@@ -151,7 +152,9 @@ static void build_probs_tail(
 }
 
 // Copy the computed probs out of the backend into host memory, mirroring the
-// layout expected by llm_prepare_probs().
+// layout expected by llm_prepare_probs(). The candidates land in `nucleus_raw`
+// and stay untouched: llm_prepare_probs() derives the sampling nucleus from
+// this snapshot, so preparing twice for one logits state is a no-op.
 static void fetch_llm_probs(
     cosyvoice_worker_context* worker,
     cosyvoice_model_shared* shared,
@@ -160,7 +163,7 @@ static void fetch_llm_probs(
     const auto llm_probs = worker->llm_probs;
     GGML_ASSERT(llm_probs);
 
-    auto probs = reinterpret_cast<cosyvoice_llm_token_prob_t*>(worker->nucleus_probs.get());
+    auto probs = reinterpret_cast<cosyvoice_llm_token_prob_t*>(worker->nucleus_raw.get());
     auto backend = shared->op_caps.top_k ? worker->backend.get() : worker->cpu_backend.get();
     ggml_backend_tensor_get_async(backend, llm_probs, probs, 0, ggml_nbytes(llm_probs));
     ggml_backend_tensor_get_async(
@@ -170,6 +173,7 @@ static void fetch_llm_probs(
         0,
         sizeof(float) * cv3_shared->llm.llm_decoder.weight->ne[1]);
     ggml_backend_synchronize(backend);
+    worker->raw_probs_masked = false;
 }
 
 bool cosyvoice_model_3::llm_prefill(
@@ -447,9 +451,17 @@ bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
 void cosyvoice_model_3::llm_prepare_probs(bool allow_stop_tokens)
 {
     GGML_ASSERT(worker->llm_probs);
+    GGML_ASSERT(worker->nucleus_raw);
 
+    // Always rebuild the nucleus from the immutable top-k snapshot of the last
+    // computed logits. Filtering the already normalized nucleus in place would
+    // re-apply top_p to values that sum to one, collapsing the distribution to a
+    // single candidate whenever the first probability exceeds top_p.
     auto probs = reinterpret_cast<cosyvoice_llm_token_prob_t*>(worker->nucleus_probs.get());
+    const auto raw_probs = reinterpret_cast<const cosyvoice_llm_token_prob_t*>(worker->nucleus_raw.get());
     int k = worker->config.sampling.top_k;
+    memcpy(probs, raw_probs, static_cast<size_t>(k) * sizeof(*probs));
+
     const float top_p = worker->config.sampling.top_p;
     std::sort(probs, probs + k, [](const cosyvoice_llm_token_prob_t& a, const cosyvoice_llm_token_prob_t& b)
         { return a.prob > b.prob; });
@@ -467,19 +479,28 @@ void cosyvoice_model_3::llm_prepare_probs(bool allow_stop_tokens)
         }
     }
 
+    if (p <= 0.f)
+    {
+        // Every candidate was masked (e.g. only stop tokens were available); keep
+        // an empty nucleus so sampling fails instead of dividing by zero.
+        worker->nucleus_probs_len = 0;
+        return;
+    }
+
     worker->nucleus_probs_len = k;
     for (int i = 0; i != k; ++i)
         probs[i].prob /= p;
 
-    if (!allow_stop_tokens)
+    if (!allow_stop_tokens && !worker->raw_probs_masked)
     {
-        auto raw_probs = worker->probs.get();
+        auto vocab_probs = worker->probs.get();
         auto vocab_size = static_cast<uint32_t>(get_speech_token_embed_weight()->ne[1]);
         for (auto token_id : cv3_shared->stop_tokens)
-            raw_probs[token_id] = 0;
+            vocab_probs[token_id] = 0;
 
-        const float sum = simd_dispatch<sum_kernel>(raw_probs, vocab_size);
-        simd_dispatch<div_kernel>(raw_probs, vocab_size, sum);
+        const float sum = simd_dispatch<sum_kernel>(vocab_probs, vocab_size);
+        simd_dispatch<div_kernel>(vocab_probs, vocab_size, sum);
+        worker->raw_probs_masked = true;
     }
 }
 
