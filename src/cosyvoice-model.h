@@ -62,6 +62,11 @@ struct cosyvoice_worker_context
 
     std::vector<int> tokens;
 
+    // Consecutive-silent-token counter for the FSQ silence filtering. It must
+    // survive across llm_job_ext() calls that continue the same generation
+    // (streaming chunks), so it lives in the worker instead of the job call.
+    uint32_t silent_token_num{0};
+
     cosyvoice_kv_cache llm_kv_cache;
     cosyvoice_kv_cache dit_kv_cache;
 
