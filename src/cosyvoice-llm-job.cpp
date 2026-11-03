@@ -44,6 +44,9 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
         {
             GGML_ASSERT(text);
 
+            // A fresh generation: restart the consecutive-silence accounting.
+            worker->silent_token_num = 0;
+
             const auto token_type = llm.embed_tokens_weight->type;
             const auto token_row_size = static_cast<uint32_t>(llm.embed_tokens_weight->nb[1]);
 
@@ -139,8 +142,10 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
 
         // FSQ silent/breath token filtering: allow up to 5 consecutive silent tokens,
         // then drop any further consecutive ones to avoid generating long silence.
-        // Reset the counter whenever a non-silent token appears.
-        uint32_t cur_silent_token_num = 0;
+        // Reset the counter whenever a non-silent token appears. The counter is
+        // kept in the worker so it survives llm_job_ext() calls that continue
+        // the same generation across streaming chunks.
+        auto& cur_silent_token_num = worker->silent_token_num;
         constexpr uint32_t max_silent_token_num = 5;
         const auto& silent_tokens = cv3_shared->silent_tokens;
 
@@ -161,12 +166,15 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
                 ++cur_silent_token_num;
                 if (cur_silent_token_num > max_silent_token_num)
                 {
-                    // Drop excess silent tokens — the token is already in the
-                    // KV cache (from llm_decode), so update cur to keep the
-                    // model state consistent, but skip llm_accept_token so
-                    // it does not appear in the output.
+                    if (n > limit)
+                        break;
+
+                    // Excess silence is not emitted, but the token still enters
+                    // the model state so generation can move past it instead of
+                    // re-sampling the same logits.
                     cur = speech_emb + token_id * speech_row_size;
-                    --n;
+                    if (!llm_decode(speech_type, cur))
+                        throw std::runtime_error("Failed to decode LLM output.\n");
                     continue;
                 }
             }

@@ -657,7 +657,7 @@ ggml_tensor* CausalConvRNNF0Predictor::build_cgraph(ggml_context* ctx, ggml_tens
     return ggml_abs(ctx, x);
 }
 
-std::array<ggml_tensor*, 2> SineGen2::build_cgraph(ggml_context* ctx, ggml_tensor* f0, int harmonic_num, int sampling_rate, int upsample_scale, float sine_amp, int voiced_threshold, float noise_std) const
+std::array<ggml_tensor*, 2> SineGen2::build_cgraph(ggml_context* ctx, ggml_tensor* f0, int harmonic_num, int sampling_rate, int upsample_scale, float sine_amp, int voiced_threshold, float noise_std, phase_state* state) const
 {
     auto fn = ggml_arange(ctx, 1.f, static_cast<float>(harmonic_num + 2), 1.f);
     fn = ggml_mul(ctx, ggml_repeat_4d(ctx, f0, harmonic_num + 1, f0->ne[1], f0->ne[2], 1), fn);
@@ -676,7 +676,37 @@ std::array<ggml_tensor*, 2> SineGen2::build_cgraph(ggml_context* ctx, ggml_tenso
         rad_values = ggml_permute(ctx, rad_values, 1, 0, 2, 3);
         rad_values = ggml_interpolate(ctx, rad_values, rad_values->ne[0] / upsample_scale, rad_values->ne[1], rad_values->ne[2], 1, GGML_SCALE_MODE_BILINEAR);
         auto phase = ggml_cumsum(ctx, rad_values);
-        phase = ggml_scale(ctx, phase, 2.0f * 3.14159265358979323846f * upsample_scale);
+
+        // Fold the streaming phase offset in on the fractional part of the
+        // cumsum. sin(2*pi*scale*C) only depends on frac(scale*C) for integer
+        // scale, so reducing mod 1 first keeps the argument bounded and leaves
+        // room to add the [0, 1) offset without losing precision.
+        phase = ggml_sub(ctx, phase, ggml_floor(ctx, phase));
+
+        // Export the mod-1 phase for the next streaming chunk. The frame axis
+        // is innermost, so the harmonics of one frame are strided across the
+        // tensor; copy them into a small contiguous tensor. The copy is a
+        // terminal graph node, so the allocator keeps its storage alive until
+        // the caller reads it back after compute (a mid-graph tensor would be
+        // freed and recycled as soon as its single consumer was scheduled).
+        if (state && state->offset)
+        {
+            const int64_t row = state->checkpoint_row;
+            if (row >= 0 && row < phase->ne[0])
+            {
+                auto row_view = ggml_view_2d(ctx, phase, 1, phase->ne[1], phase->nb[1], row * phase->nb[0]);
+                auto dst = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 1, phase->ne[1]);
+                state->checkpoint = ggml_cpy(ctx, row_view, dst);
+            }
+        }
+
+        if (state && state->offset)
+            phase = ggml_add(ctx, phase, ggml_repeat_4d(ctx, state->offset, phase->ne[0], phase->ne[1], phase->ne[2], 1));
+
+        phase = ggml_scale(ctx, phase, static_cast<float>(upsample_scale));
+        phase = ggml_sub(ctx, phase, ggml_floor(ctx, phase));
+        phase = ggml_scale(ctx, phase, 2.0f * 3.14159265358979323846f);
+
         phase = ggml_permute(ctx, phase, 1, 0, 2, 3);
         phase = ggml_interpolate(ctx, phase, phase->ne[0], phase->ne[1] * upsample_scale, phase->ne[2], 1, GGML_SCALE_MODE_NEAREST);
         auto sines = ggml_sin(ctx, phase);
@@ -702,9 +732,9 @@ std::array<ggml_tensor*, 2> SineGen2::build_cgraph(ggml_context* ctx, ggml_tenso
     return { sine_waves, noise_orig };
 }
 
-std::array<ggml_tensor*, 2> SourceModuleHnNSF::build_cgraph(ggml_context* ctx, ggml_tensor* x, int harmonic_num, int sampling_rate, int upsample_scale, float sine_amp, int voiced_threshold, float noise_std) const
+std::array<ggml_tensor*, 2> SourceModuleHnNSF::build_cgraph(ggml_context* ctx, ggml_tensor* x, int harmonic_num, int sampling_rate, int upsample_scale, float sine_amp, int voiced_threshold, float noise_std, SineGen2::phase_state* state) const
 {
-    auto [sine_wavs, noise] = l_sin_gen.build_cgraph(ctx, x, harmonic_num, sampling_rate, upsample_scale, sine_amp, voiced_threshold, noise_std);
+    auto [sine_wavs, noise] = l_sin_gen.build_cgraph(ctx, x, harmonic_num, sampling_rate, upsample_scale, sine_amp, voiced_threshold, noise_std, state);
     auto sine_merge = l_linear.build_cgraph(ctx, sine_wavs);
     sine_merge = ggml_tanh(ctx, sine_merge);
     return { sine_merge, noise };
@@ -745,12 +775,20 @@ ggml_tensor* CausalConv1dUpsample::build_cgraph(ggml_context* ctx, ggml_tensor* 
     return Conv1d::build_cgraph(ctx, x, 1, 0, 1, 1, {});
 }
 
-std::array<ggml_tensor*, 2> CausalHiFTGenerator::build_cgraph(ggml_context* ctx, ggml_tensor* speech_feat, bool finalize) const
+std::array<ggml_tensor*, 2> CausalHiFTGenerator::build_cgraph(ggml_context* ctx, ggml_tensor* speech_feat, bool finalize, SineGen2::phase_state* state) const
 {
     auto f0 = f0_predictor.build_cgraph(ctx, speech_feat, finalize);
-    auto s_input = ggml_permute(ctx, f0, 1, 0, 2, 3);
+    auto s_input = ggml_permute(ctx, f0, 1, 0, 2, 3); // [1, T', 1]
     s_input = ggml_interpolate(ctx, s_input, s_input->ne[0], s_input->ne[1] * scale_factor, s_input->ne[2], 1, GGML_SCALE_MODE_NEAREST);
-    auto [s, noise] = m_source.build_cgraph(ctx, s_input, nb_harmonics, sampling_rate, scale_factor, nsf_alpha, nsf_voiced_threshold, nsf_sigma);
+
+    // The next chunk re-feeds the last `retain_frames` mel frames of this
+    // input, so it resumes the cumsum at row (T - retain_frames - 1) of the
+    // frame-rate phase. speech_feat->ne[0] is this call's input frame count.
+    // Nothing resumes from a finalized call.
+    if (state)
+        state->checkpoint_row = finalize ? -1 : speech_feat->ne[0] - state->retain_frames - 1;
+
+    auto [s, noise] = m_source.build_cgraph(ctx, s_input, nb_harmonics, sampling_rate, scale_factor, nsf_alpha, nsf_voiced_threshold, nsf_sigma, state);
     s = ggml_permute(ctx, s, 1, 0, 2, 3);
 
     // decode

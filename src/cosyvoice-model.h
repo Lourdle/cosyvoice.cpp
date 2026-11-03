@@ -20,7 +20,7 @@ struct cosyvoice_model_shared
 
     ggml_context_ptr ctx;
 
-    ggml_backend_buffer_ptr buffer;
+    std::vector<ggml_backend_buffer_ptr> buffers;
     ggml_backend_buffer_ptr cpu_buffer;
 
     cosyvoice_context_params_v4_cpp params;
@@ -62,6 +62,11 @@ struct cosyvoice_worker_context
 
     std::vector<int> tokens;
 
+    // Consecutive-silent-token counter for the FSQ silence filtering. It must
+    // survive across llm_job_ext() calls that continue the same generation
+    // (streaming chunks), so it lives in the worker instead of the job call.
+    uint32_t silent_token_num{0};
+
     cosyvoice_kv_cache llm_kv_cache;
     cosyvoice_kv_cache dit_kv_cache;
 
@@ -75,12 +80,21 @@ struct cosyvoice_worker_context
 
     uint32_t chunk_size;
     std::vector<float> flow_cache;
+    // Streaming re-renders the whole accumulated mel each chunk, matching the
+    // reference implementation, and crops away the already-emitted prefix at
+    // this sample offset before handing the result to the caller.
+    uint32_t wav_offset{0};
     std::vector<uint32_t> chunk_boundaries;
     uint32_t offset{0};
     std::unique_ptr<char[]> batch_buffer;
     std::unique_ptr<float[]> nucleus_probs;
+    // Immutable copy of the top-k candidates of the last computed logits, so
+    // preparing the nucleus is idempotent and can be repeated for one logits
+    // state without re-filtering already normalized probabilities.
+    std::unique_ptr<float[]> nucleus_raw;
     uint32_t nucleus_probs_capacity;
     int nucleus_probs_len;
+    bool raw_probs_masked;
     std::unique_ptr<float[]> probs;
     ggml_backend_buffer_ptr llm_kv_buffer;
     ggml_backend_buffer_ptr dit_kv_buffer;
