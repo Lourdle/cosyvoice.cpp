@@ -403,9 +403,7 @@ add_subdirectory(tools)
 
 option(COSYVOICE_BUILD_TESTS "Build model-backed regression tests" OFF)
 if(COSYVOICE_BUILD_TESTS)
-    add_executable(test-llm-graph-reuse tests/llm-graph-reuse.cpp)
-    target_link_libraries(test-llm-graph-reuse PRIVATE cosyvoice ggml)
-    target_include_directories(test-llm-graph-reuse PRIVATE include)
+    add_subdirectory(tests)
 endif()
 
 # -----------------------------------------------------------------------------
