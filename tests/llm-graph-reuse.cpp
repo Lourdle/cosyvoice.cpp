@@ -2,6 +2,7 @@
 #include "cosyvoice.h"
 #include "cosyvoice-lowlevel.h"
 #include "cosyvoice-interface.h"
+#include "tool_common.h"
 #include <ggml-backend.h>
 
 #include <algorithm>
@@ -18,7 +19,7 @@ static int capture_probs(cosyvoice_llm_token_prob_t*, int, float* probs, uint32_
     return 0;
 }
 
-int main(int argc, char** argv)
+int tool_entry(int argc, char** argv)
 {
     if (argc != 3) {
         std::fprintf(stderr, "Usage: %s MODEL.gguf BACKEND (e.g. CPU or MTL0)\n", argv[0]);
