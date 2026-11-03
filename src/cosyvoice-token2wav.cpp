@@ -3,10 +3,10 @@
 #include "ggml-cpu-flag.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <format>
 #include <fstream>
 #include <span>
 #include <vector>
@@ -222,12 +222,12 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     auto op_caps = shared->op_caps;
     auto kv_cache = &worker->dit_kv_cache;
 
-    if (streaming && worker->offset == 0)
+    if (!streaming || worker->offset == 0)
     {
         kv_cache->cur_len = 0;
         worker->chunk_boundaries.clear();
         worker->flow_cache.clear();
-        std::fill(worker->phase_offset.begin(), worker->phase_offset.end(), 0.f);
+        worker->wav_offset = 0;
     }
 
     ggml_reset(ctx0.get());
@@ -278,6 +278,14 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     } while (false);
 
     dit_sched_config config(params, cut_len, streaming ? worker->offset : 0, streaming, kv_cache->can_reuse(), flow.decoder.diffusion_steps);
+
+    // True when the DiT graph is fed the whole prompt+generated mel (the default
+    // path, and the first call of every path), so attention-mask indices line up
+    // with absolute mel positions. Otherwise the KV-cache path feeds only the new
+    // frames and the mask has to stay chunk-relative.
+    const bool absolute_dit_coords = !(streaming
+        && flow.decoder.diffusion_steps == params.dit_kv_fixed_slots + params.dit_kv_offloadable_slots
+        && worker->offset != 0);
     uint32_t noise_len = static_cast<uint32_t>(ggml_nelements(ditctx.x));
     uint32_t noise_req = noise_len;
     int64_t full_len;
@@ -330,16 +338,38 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
 
         if (config[step].mask)
         {
-            const auto& bounds = worker->chunk_boundaries;
-            for (int64_t i = 0; i < attn_mask->ne[0]; ++i)
+            const int64_t block = DiT::static_chunk_size;
+            if (absolute_dit_coords)
             {
-                auto it = std::upper_bound(bounds.begin(), bounds.end(), static_cast<uint32_t>(i));
-                int64_t block_end = it != bounds.end()
-                    ? static_cast<int64_t>(*it)
-                    : attn_mask->ne[0];
-                auto row = reinterpret_cast<ggml_fp16_t*>(attn_mask->data) + i * attn_mask->ne[1];
-                for (int64_t j = 0; j < attn_mask->ne[1]; ++j)
-                    row[j] = j < block_end ? 0 : 0xFC00;
+                // Match the reference streaming mask: fixed static chunks counted
+                // from mel position 0 (prompt included), each query attending all
+                // left context plus the whole chunk it belongs to. Rows with a
+                // base offset (cut_len > 0) encode the query's absolute position
+                // = base + row.
+                const int64_t base = config[step].cut_len;
+                for (int64_t i = 0; i < attn_mask->ne[0]; ++i)
+                {
+                    const int64_t pos = base + i;
+                    auto block_end = (pos / block + 1) * block;
+                    if (block_end > attn_mask->ne[1]) block_end = attn_mask->ne[1];
+                    auto row = reinterpret_cast<ggml_fp16_t*>(attn_mask->data) + i * attn_mask->ne[1];
+                    for (int64_t j = 0; j < attn_mask->ne[1]; ++j)
+                        row[j] = j < block_end ? 0 : 0xFC00;
+                }
+            }
+            else
+            {
+                const auto& bounds = worker->chunk_boundaries;
+                for (int64_t i = 0; i < attn_mask->ne[0]; ++i)
+                {
+                    auto it = std::upper_bound(bounds.begin(), bounds.end(), static_cast<uint32_t>(i));
+                    int64_t block_end = it != bounds.end()
+                        ? static_cast<int64_t>(*it)
+                        : attn_mask->ne[1];
+                    auto row = reinterpret_cast<ggml_fp16_t*>(attn_mask->data) + i * attn_mask->ne[1];
+                    for (int64_t j = 0; j < attn_mask->ne[1]; ++j)
+                        row[j] = j < block_end ? 0 : 0xFC00;
+                }
             }
         }
 
@@ -501,22 +531,18 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
 
     const int64_t mel_new_frames = feat->ne[1];
 
-    int64_t retain_frames = 0;
     if (streaming && !finalize)
     {
-        const auto overlap = static_cast<int64_t>(shared->hift_overlap);
-        const auto n_feat_frames = feat->ne[1];
-        const auto frames_to_keep = std::min(overlap, n_feat_frames);
-        retain_frames = frames_to_keep;
-        const auto elements_to_keep = static_cast<size_t>(frames_to_keep * feat->ne[0]);
-
-        worker->flow_cache.resize(elements_to_keep);
-        if (frames_to_keep > 0)
-        {
-            const auto byte_offset = static_cast<size_t>((n_feat_frames - frames_to_keep) * feat->nb[1]);
-            const auto byte_size = static_cast<size_t>(frames_to_keep * feat->nb[1]);
-            ggml_backend_tensor_get_async(backend.get(), feat, worker->flow_cache.data(), byte_offset, byte_size);
-        }
+        // Keep the whole new mel: every chunk re-runs the vocoder over the
+        // accumulated mel and hands out only the tail past the already-emitted
+        // prefix, so the next chunk renders its frames with the complete left
+        // context (this is what removes the boundary clicks; the reference
+        // streaming implementation works the same way).
+        const auto byte_size = static_cast<size_t>(mel_new_frames * feat->nb[1]);
+        worker->flow_cache.resize(static_cast<size_t>((cache_length + mel_new_frames) * feat->ne[0]));
+        if (byte_size != 0)
+            ggml_backend_tensor_get_async(backend.get(), feat,
+                worker->flow_cache.data() + static_cast<size_t>(cache_length * feat->ne[0]), 0, byte_size);
     }
 
     if (config[flow.decoder.diffusion_steps - 1].cache_kv)
@@ -538,23 +564,12 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     else
         speech_feat = ggml_cont(ctx0.get(), speech_feat);
 
-    // Carry the NSF oscillator phase across streaming chunks. Disabled when the
-    // speed interpolate is active because the cached mel prefix is prepended
-    // before it, so absolute frame correspondence no longer holds. Also applied
-    // on the final chunk, which is the continuation of the previous ones.
-    SineGen2::phase_state phase_state = {};
-    const bool use_phase_offset = streaming && speed == 1.0f
-        && worker->phase_offset.size() == static_cast<size_t>(hift.nb_harmonics + 1);
-    if (use_phase_offset)
-    {
-        phase_state.offset = ggml_new_tensor_2d(ctx0.get(), GGML_TYPE_F32, 1, hift.nb_harmonics + 1);
-        phase_state.retain_frames = retain_frames;
-    }
-
-    auto [generated_speech, noise] = hift.build_cgraph(ctx0.get(), speech_feat, finalize, use_phase_offset ? &phase_state : nullptr);
+    // No cross-chunk oscillator phase state: streaming re-runs the vocoder
+    // over the full accumulated mel, so the frame-rate rad cumsum starts from
+    // zero and continues the previous chunks' phase by construction — the
+    // reference implementation relies on the same property.
+    auto [generated_speech, noise] = hift.build_cgraph(ctx0.get(), speech_feat, finalize, nullptr);
     ggml_build_forward_expand(gf, generated_speech);
-    if (phase_state.checkpoint)
-        ggml_build_forward_expand(gf, phase_state.checkpoint);
     set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps);
 
     ggml_backend_sched_alloc_graph(sched.get(), gf);
@@ -574,42 +589,25 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     noise_buffer = shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_HIFT, noise_req, nullptr, shared->noise_callback_ctx);
     ggml_backend_tensor_set_async(backend.get(), noise, noise_buffer + noise_req - noise_len, 0, noise->nb[2]);
 
-    if (use_phase_offset)
-        ggml_backend_tensor_set_async(backend.get(), phase_state.offset, worker->phase_offset.data(), 0, sizeof(float) * (hift.nb_harmonics + 1));
-
-    result->data = reinterpret_cast<float*>(generated_speech->data);
-    result->length = static_cast<uint32_t>(generated_speech->ne[0]);
+    // The graph renders every sample of the accumulated mel again; crop away
+    // the prefix previous chunks already emitted.
+    result->data = reinterpret_cast<float*>(generated_speech->data) + worker->wav_offset;
+    result->length = worker->wav_offset < generated_speech->ne[0]
+        ? static_cast<uint32_t>(generated_speech->ne[0] - worker->wav_offset) : 0;
     worker->status = ggml_backend_sched_graph_compute(sched.get(), gf);
     shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_HIFT, noise_req, noise_buffer, shared->noise_callback_ctx);
-
-    if (use_phase_offset && phase_state.checkpoint)
-    {
-        const size_t n_harmonics = worker->phase_offset.size();
-        std::vector<float> checkpoint(n_harmonics);
-        ggml_backend_tensor_get(phase_state.checkpoint, checkpoint.data(), 0, checkpoint.size() * sizeof(float));
-        for (size_t k = 0; k != n_harmonics; ++k)
-            worker->phase_offset[k] = static_cast<float>(std::fmod(
-                static_cast<double>(worker->phase_offset[k]) + checkpoint[k], 1.0));
-    }
+    worker->wav_offset += result->length;
 
     static const bool log_phase = std::getenv("COSYVOICE_HIFT_PHASE_LOG") != nullptr;
-    if (log_phase && use_phase_offset)
+    if (log_phase && streaming)
     {
-        char buf[256];
-        std::snprintf(buf, sizeof(buf),
-            "hift phase: input_frames=%lld new_frames=%lld cache_frames=%lld retain=%lld row=%lld emitted_frames=%lld offset=",
-            static_cast<long long>(speech_feat->ne[0]), static_cast<long long>(mel_new_frames),
-            static_cast<long long>(cache_length), static_cast<long long>(retain_frames),
-            static_cast<long long>(phase_state.checkpoint_row),
-            static_cast<long long>(result->length / hift.scale_factor));
-        std::string msg = buf;
-        for (auto v : worker->phase_offset)
-        {
-            std::snprintf(buf, sizeof(buf), "%.6f ", static_cast<double>(v));
-            msg += buf;
-        }
-        msg += '\n';
-        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, msg.c_str());
+        const auto buf = std::format(
+            "hift: prompt_frames={} input_frames={} new_frames={} cache_frames={} emitted_frames={} emitted_total={}\n",
+            prompt->prompt_speech_feat.shape[0],
+            speech_feat->ne[0], mel_new_frames, cache_length,
+            result->length / hift.scale_factor, worker->wav_offset);
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, buf.c_str());
+        std::fprintf(stderr, "%s", buf.c_str());
     }
 
     // Debug aid: append this call's new mel frames so the chunked mel sequence
