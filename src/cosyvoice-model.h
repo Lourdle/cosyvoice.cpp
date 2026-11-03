@@ -80,7 +80,10 @@ struct cosyvoice_worker_context
 
     uint32_t chunk_size;
     std::vector<float> flow_cache;
-    std::vector<float> phase_offset;      // per-harmonic mod-1 HiFT oscillator phase
+    // Streaming re-renders the whole accumulated mel each chunk, matching the
+    // reference implementation, and crops away the already-emitted prefix at
+    // this sample offset before handing the result to the caller.
+    uint32_t wav_offset{0};
     std::vector<uint32_t> chunk_boundaries;
     uint32_t offset{0};
     std::unique_ptr<char[]> batch_buffer;
