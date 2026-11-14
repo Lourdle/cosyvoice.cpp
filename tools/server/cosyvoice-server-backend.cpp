@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <ctime>
+#include <format>
 #include <limits>
 #include <string>
 #include <unordered_map>
@@ -760,14 +761,11 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
     print_info_log(runtime.log_level, "  bind               : %s:%u\n", runtime.host.c_str(), static_cast<unsigned>(runtime.port));
     print_info_log(runtime.log_level, "  sample_rate        : %u\n", runtime.sample_rate);
     if (!runtime.model_slots.empty())
-    {
-        char steps_buf[160];
-        snprintf(steps_buf, sizeof(steps_buf), "requested: %d, actual: %d%s",
-            runtime.diffusion_steps,
-            cosyvoice_get_diffusion_steps(runtime.model_slots.front().get()),
-            runtime.diffusion_steps > 0 ? " (user override)" : "");
-        print_info_log(runtime.log_level, "  diffusion_steps    : %s\n", steps_buf);
-    }
+        print_info_log(runtime.log_level, "  diffusion_steps    : %s\n",
+            std::format("requested: {}, actual: {}{}",
+                runtime.diffusion_steps,
+                cosyvoice_get_diffusion_steps(runtime.model_slots.front().get()),
+                runtime.diffusion_steps > 0 ? " (user override)" : "").c_str());
     print_info_log(runtime.log_level, "  concurrency        : %u\n", runtime.concurrency);
     print_info_log(runtime.log_level, "  api_key_required   : %s\n", runtime.api_key.empty() ? "no" : "yes");
     const auto voices_str = join_strings(runtime.voice_names, ", ");
@@ -776,14 +774,11 @@ int cosyvoice_server_backend_run(server_runtime& runtime)
 #ifdef COSYVOICE_SIMD_CONTROL_SUPPORTED
     print_cosyvoice_simd_banner(runtime.log_level);
 #endif
-    {
-        char kv_buf[256];
-        snprintf(kv_buf, sizeof(kv_buf), "requested: %s, actual: %s (%s)",
-            kv_cache_type_to_string(runtime.requested_llm_kv_cache_type).c_str(),
-            kv_cache_type_to_string(runtime.actual_llm_kv_cache_type).c_str(),
-            runtime.has_llm_kv_cache_override ? "user override" : "default");
-        print_info_log(runtime.log_level, "  llm_kv_cache_type  : %s\n", kv_buf);
-    }
+    print_info_log(runtime.log_level, "  llm_kv_cache_type  : %s\n",
+        std::format("requested: {}, actual: {} ({})",
+            kv_cache_type_to_string(runtime.requested_llm_kv_cache_type),
+            kv_cache_type_to_string(runtime.actual_llm_kv_cache_type),
+            runtime.has_llm_kv_cache_override ? "user override" : "default").c_str());
     {
         cosyvoice_context_params_t ap;
         cosyvoice_get_context_params(runtime.model_slots.front().get(), &ap);

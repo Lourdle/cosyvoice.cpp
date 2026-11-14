@@ -7,7 +7,7 @@
 #include <ggml-backend.h>
 
 #include <atomic>
-#include <cstring>
+#include <format>
 #include <memory>
 #include <string>
 #include <vector>
@@ -426,13 +426,13 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             json += "null";
         else
             json += "\"" + runtime.served_model_name + "\"";
-        json += ",\"sample_rate\":" + std::to_string(runtime.sample_rate);
+        json += std::format(",\"sample_rate\":{}", runtime.sample_rate);
         json += ",\"strict_seed\":" + std::string(runtime.strict_seed_mode ? "true" : "false");
         if (!runtime.model_slots.empty())
         {
             cosyvoice_context_params_t actual_params;
             cosyvoice_get_context_params(runtime.model_slots.front().get(), &actual_params);
-            json += ",\"max_llm_len\":" + std::to_string(actual_params.n_max_seq);
+            json += std::format(",\"max_llm_len\":{}", actual_params.n_max_seq);
             json += ",\"k_cache_type\":\"" + kv_cache_type_to_string(actual_params.llm_k_cache_type) + "\"";
             json += ",\"v_cache_type\":\"" + kv_cache_type_to_string(actual_params.llm_v_cache_type) + "\"";
             json += ",\"buffer_policy\":\"" + std::string(inference_buffer_policy_to_string(actual_params.inference_buffer_policy)) + "\"";
@@ -441,7 +441,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
             auto arch = cosyvoice_get_architecture(runtime.model_slots.front().get());
             if (arch && *arch)
                 json += ",\"model_arch\":\"" + std::string(arch) + "\"";
-            json += ",\"diffusion_steps\":" + std::to_string(cosyvoice_get_diffusion_steps(runtime.model_slots.front().get()));
+            json += std::format(",\"diffusion_steps\":{}", cosyvoice_get_diffusion_steps(runtime.model_slots.front().get()));
         }
 #if !defined(COSYVOICE_NO_FRONTEND)
         bool fe_avail = runtime.frontend_ctx ? true : false;
@@ -1402,7 +1402,7 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
 
         runtime.sample_rate = 0;
         runtime.served_model_name.clear();
-        memset(&runtime.default_generation_config, 0, sizeof(runtime.default_generation_config));
+        runtime.default_generation_config = {};
 
     #ifndef COSYVOICE_NO_AUDIO
         runtime.audio_encoder.reset();
@@ -1519,14 +1519,11 @@ int cosyvoice_server_webui_run(server_runtime& runtime)
     if (runtime.sample_rate > 0)
         print_info_log(runtime.log_level, "  sample_rate        : %u\n", runtime.sample_rate);
     if (!runtime.model_slots.empty())
-    {
-        char steps_buf[160];
-        snprintf(steps_buf, sizeof(steps_buf), "requested: %d, actual: %d%s",
-            runtime.diffusion_steps,
-            cosyvoice_get_diffusion_steps(runtime.model_slots.front().get()),
-            runtime.diffusion_steps > 0 ? " (user override)" : "");
-        print_info_log(runtime.log_level, "  diffusion_steps    : %s\n", steps_buf);
-    }
+        print_info_log(runtime.log_level, "  diffusion_steps    : %s\n",
+            std::format("requested: {}, actual: {}{}",
+                runtime.diffusion_steps,
+                cosyvoice_get_diffusion_steps(runtime.model_slots.front().get()),
+                runtime.diffusion_steps > 0 ? " (user override)" : "").c_str());
     {
         const auto speakers_str = join_strings(runtime.voice_names, ", ");
         print_info_log(runtime.log_level, "  speakers           : %s\n", speakers_str.empty() ? "-" : speakers_str.c_str());
