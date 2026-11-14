@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cinttypes>
 #include <memory>
+#include <utility>
 #include <string>
 #include <map>
 #include <array>
@@ -24,39 +25,65 @@
 #include <nlohmann/json.hpp>
 
 // ---------------------------------------------------------------------------
-// Tensor data holder — wraps either a mmap pointer or a quantized buffer
+// Tensor data holder — either a non-owning view into the mmap region, or an
+// owned buffer destroyed through the stored deleter.
 // ---------------------------------------------------------------------------
 
-struct TensorData {
-    char* data = nullptr;     // points to mmap region or quantized buffer
-    size_t nbytes = 0;
-    bool owns_buffer = false; // true if `data` is a unique_ptr we manage
+class TensorData {
+    char* ptr = nullptr;
+    void (*deleter)(char*) = nullptr;
 
-    ~TensorData() { release(); }
+public:
+    size_t nbytes = 0;
 
     TensorData() = default;
+    ~TensorData() { reset(); }
 
     TensorData(const TensorData&) = delete;
-
     TensorData& operator=(const TensorData&) = delete;
+
+    TensorData(TensorData&& other) noexcept
+        : ptr(std::exchange(other.ptr, nullptr)),
+          deleter(std::exchange(other.deleter, nullptr)),
+          nbytes(std::exchange(other.nbytes, size_t{0})) {}
 
     TensorData& operator=(TensorData&& other) noexcept
     {
         if (this != &other)
         {
-            data = other.data;
-            nbytes = other.nbytes;
-            owns_buffer = other.owns_buffer;
-            other.data = nullptr;
-            other.nbytes = 0;
-            other.owns_buffer = false;
+            reset();
+            ptr = std::exchange(other.ptr, nullptr);
+            deleter = std::exchange(other.deleter, nullptr);
+            nbytes = std::exchange(other.nbytes, size_t{0});
         }
         return *this;
     }
 
-    void release()
+    char* data() const { return ptr; }
+
+    // Take ownership of an array allocated with new[] (e.g. make_unique<char[]>).
+    template<class T>
+    void adopt(std::unique_ptr<T[]>&& p)
     {
-        if (owns_buffer) { free(data); data = nullptr; owns_buffer = false; }
+        reset();
+        ptr = reinterpret_cast<char*>(p.release());
+        deleter = [](char* q) { delete[] reinterpret_cast<T*>(q); };
+    }
+
+    // Point at memory owned elsewhere (e.g. the mmap region).
+    void view(char* p)
+    {
+        reset();
+        ptr = p;
+    }
+
+private:
+    void reset() noexcept
+    {
+        if (deleter && ptr)
+            deleter(ptr);
+        ptr = nullptr;
+        deleter = nullptr;
     }
 };
 
@@ -158,9 +185,12 @@ static ggml_type get_fallback_type(ggml_type type, int64_t ne)
     }
 }
 
+struct pcre2_code_8_deleter_t { void operator()(pcre2_code_8* code) const { pcre2_code_free_8(code); } };
+using pcre2_code_8_ptr = std::unique_ptr<pcre2_code_8, pcre2_code_8_deleter_t>;
+
 struct TensorMapEntry {
     std::string pattern;
-    std::unique_ptr<pcre2_code_8, decltype(&pcre2_code_free_8)> code;
+    pcre2_code_8_ptr code;
     ggml_ftype ftype;
     bool is_literal;
     bool matched = false;
@@ -229,7 +259,7 @@ static std::vector<TensorMapEntry> load_tensor_map(const char* path)
 
             entries.push_back({
                 pattern_str,
-                std::unique_ptr<pcre2_code_8, decltype(&pcre2_code_free_8)>(raw, pcre2_code_free_8),
+                pcre2_code_8_ptr(raw),
                 ftype,
                 is_literal_pattern(pattern_str),
                 false
@@ -449,9 +479,8 @@ int tool_entry(int argc, char** argv)
         if (cur_ftype == GGML_FTYPE_UNKNOWN)
         {
             // COPY: keep original data, mmap pointer is fine as long as file_mmap lives
-            entry.data.data = reinterpret_cast<char*>(tensor->data);
+            entry.data.view(reinterpret_cast<char*>(tensor->data));
             entry.data.nbytes = ggml_nbytes(tensor);
-            entry.data.owns_buffer = false;
             printf("Tensor \"%s\": keep as %s (mapped to COPY)\n", tensor_name, ggml_type_name(tensor->type));
         }
         else
@@ -471,9 +500,8 @@ int tool_entry(int argc, char** argv)
             {
                 // Vectors: keep as F32
                 auto nbytes = ggml_nbytes(tensor);
-                entry.data.data = reinterpret_cast<char*>(tensor->data);
+                entry.data.view(reinterpret_cast<char*>(tensor->data));
                 entry.data.nbytes = nbytes;
-                entry.data.owns_buffer = false;
                 entry.type = tensor->type;
                 printf("Tensor \"%s\": keep as F32 (vector, no quantization)\n", tensor_name);
             }
@@ -484,9 +512,8 @@ int tool_entry(int argc, char** argv)
                     printf("Warning: tensor \"%s\"'s ne0 is %" PRId64 ", not divisible by block size of %s, rolling back to %s.\n",
                         tensor_name, tensor->ne[0], ggml_type_name(target_type), ggml_type_name(cur_type));
                 // Direct mmap pointer — zero-copy. Will be swapped after quantization.
-                entry.data.data = reinterpret_cast<char*>(tensor->data);
+                entry.data.view(reinterpret_cast<char*>(tensor->data));
                 entry.data.nbytes = ggml_nbytes(tensor);
-                entry.data.owns_buffer = false;
                 entry.type = cur_type;
                 entry.need_to_quantize = true;
                 n_parameters += nelements;
@@ -494,9 +521,8 @@ int tool_entry(int argc, char** argv)
             else
             {
                 printf("Warning: tensor \"%s\" is not a matrix or vector. It will be quantized to F16.\n", tensor_name);
-                entry.data.data = reinterpret_cast<char*>(tensor->data);
+                entry.data.view(reinterpret_cast<char*>(tensor->data));
                 entry.data.nbytes = ggml_nbytes(tensor);
-                entry.data.owns_buffer = false;
                 entry.type = GGML_TYPE_F16;
                 entry.need_to_quantize = true;
                 n_parameters += nelements;
@@ -537,12 +563,11 @@ int tool_entry(int argc, char** argv)
                 auto& type = iter->second.type;
                 auto& ne = iter->second.ne;
                 auto n_rows = ne[1] * ne[2] * ne[3];
-                auto quantized_data = std::make_unique<char[]>(ggml_row_size(type, ne[0]) * n_rows);
-                ggml_quantize_chunk(type, reinterpret_cast<float*>(td.data), quantized_data.get(), 0, n_rows, ne[0], nullptr);
-                td.release();
-                td.data = quantized_data.release();
-                td.nbytes = ggml_row_size(type, ne[0]) * n_rows;
-                td.owns_buffer = true;
+                const auto nbytes = ggml_row_size(type, ne[0]) * n_rows;
+                auto quantized = std::make_unique<char[]>(nbytes);
+                ggml_quantize_chunk(type, reinterpret_cast<float*>(td.data()), quantized.get(), 0, n_rows, ne[0], nullptr);
+                td.adopt(std::move(quantized));
+                td.nbytes = nbytes;
                 processed_parameters += ne[0] * n_rows;
                 report_progress();
             }
@@ -582,7 +607,7 @@ int tool_entry(int argc, char** argv)
         for (const auto& [name, te] : tensors)
         {
             auto tensor = ggml_new_tensor(gguf_ggml_ctx.get(), te.type, GGML_MAX_DIMS, te.ne.data());
-            tensor->data = te.data.data;
+            tensor->data = te.data.data();
             ggml_set_name(tensor, name.c_str());
             gguf_add_tensor(output_gguf_ctx.get(), tensor);
         }
