@@ -745,6 +745,13 @@ Type text at the `> ` prompt to synthesize, or use slash commands:
 - `/help`: Show command list.
 - `/exit`: Exit interactive mode. `Ctrl+C` also exits.
 
+Each successful generation prints a stats line: streaming shows the time from request start to the first audio chunk (`first-packet`), non-streaming shows the whole-utterance time (`total`):
+
+```
+Generated audio 3 (4.20s, rtf=0.85, first-packet=312.4ms), seed=42.
+Generated audio 4 (4.20s, rtf=0.85, total=3570.0ms), seed=42.
+```
+
 The `[code]` parameter defaults to the last synthesized audio when omitted.
 
 ### Option Reference

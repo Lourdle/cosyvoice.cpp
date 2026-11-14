@@ -723,6 +723,13 @@ cosyvoice-cli \
 - `/help`：显示命令列表。
 - `/exit`：退出交互模式，`Ctrl+C` 也可以退出。
 
+每次合成成功会打印统计行：流式显示从请求开始到首个音频块的耗时（`first-packet`），非流式显示整句耗时（`total`）：
+
+```
+Generated audio 3 (4.20s, rtf=0.85, first-packet=312.4ms), seed=42.
+Generated audio 4 (4.20s, rtf=0.85, total=3570.0ms), seed=42.
+```
+
 当省略 `[code]` 时，默认使用最近一次合成的音频。
 
 ### 参数说明
