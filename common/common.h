@@ -7,8 +7,25 @@
 std::wstring utf8_to_wstr(const char* utf8);
 #endif
 
-std::ifstream open_ifstream_utf8(const char* path, std::ios::openmode mode = std::ios::binary);
-std::ofstream open_ofstream_utf8(const char* path, std::ios::openmode mode = std::ios::binary | std::ios::trunc);
+inline
+std::ifstream open_ifstream_utf8(const char* path, std::ios::openmode mode = std::ios::binary)
+{
+#ifdef _WIN32
+    return std::ifstream(utf8_to_wstr(path).c_str(), mode);
+#else
+    return std::ifstream(path, mode);
+#endif
+}
+
+inline
+std::ofstream open_ofstream_utf8(const char* path, std::ios::openmode mode = std::ios::binary | std::ios::trunc)
+{
+#ifdef _WIN32
+    return std::ofstream(utf8_to_wstr(path).c_str(), mode);
+#else
+    return std::ofstream(path, mode);
+#endif
+}
 
 #define COSYVOICE_DEFAULT_LLM_MAX_SEQ_LEN 4096
 #define STRINGIFY(x) #x
@@ -19,7 +36,7 @@ class file_mmap
 {
 public:
     file_mmap(const char* filename);
-    ~file_mmap();
+    ~file_mmap() noexcept;
 
     operator bool() const;
     const void* data() const { return data_; }

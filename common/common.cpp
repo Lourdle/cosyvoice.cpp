@@ -25,27 +25,7 @@ std::wstring utf8_to_wstr(const char* utf8)
 
     return wide;
 }
-#endif
 
-std::ifstream open_ifstream_utf8(const char* path, std::ios::openmode mode)
-{
-#ifdef _WIN32
-    return std::ifstream(utf8_to_wstr(path).c_str(), mode);
-#else
-    return std::ifstream(path, mode);
-#endif
-}
-
-std::ofstream open_ofstream_utf8(const char* path, std::ios::openmode mode)
-{
-#ifdef _WIN32
-    return std::ofstream(utf8_to_wstr(path).c_str(), mode);
-#else
-    return std::ofstream(path, mode);
-#endif
-}
-
-#ifdef _WIN32
 file_mmap::file_mmap(const char* pFileName) : hFileMapping(INVALID_HANDLE_VALUE), data_(nullptr),
 hFile(CreateFileW(utf8_to_wstr(pFileName).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr))
 {
@@ -62,7 +42,7 @@ hFile(CreateFileW(utf8_to_wstr(pFileName).c_str(), GENERIC_READ, FILE_SHARE_READ
     }
 }
 
-file_mmap::~file_mmap()
+file_mmap::~file_mmap() noexcept
 {
     if (data_)
         UnmapViewOfFile(data_);
@@ -92,7 +72,7 @@ file_mmap::file_mmap(const char* path) : fd(open(path, O_RDONLY)), data_(MAP_FAI
     }
 }
 
-file_mmap::~file_mmap()
+file_mmap::~file_mmap() noexcept
 {
     if (data_ != MAP_FAILED)
         munmap(data_, size_);
@@ -104,5 +84,4 @@ file_mmap::operator bool() const
 {
     return data_ != MAP_FAILED;
 }
-
 #endif

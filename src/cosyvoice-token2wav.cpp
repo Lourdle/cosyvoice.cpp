@@ -1,6 +1,7 @@
 #include "cosyvoice-internal.h"
 #include "cosyvoice-model.h"
 #include "ggml-cpu-flag.h"
+#include "common.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -622,7 +623,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         ggml_backend_tensor_get(mel_tensor, buffer.data(),
             static_cast<size_t>((total - n_new) * dim) * sizeof(float), buffer.size() * sizeof(float));
         const uint32_t header[2] = { static_cast<uint32_t>(n_new), static_cast<uint32_t>(dim) };
-        std::ofstream out(dump_mel_path, std::ios::binary | std::ios::app);
+        auto out = open_ofstream_utf8(dump_mel_path, std::ios::binary | std::ios::app);
         out.write(reinterpret_cast<const char*>(header), sizeof(header));
         out.write(reinterpret_cast<const char*>(buffer.data()), static_cast<std::streamsize>(buffer.size() * sizeof(float)));
     }
