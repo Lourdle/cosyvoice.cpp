@@ -561,6 +561,23 @@ audio = client.audio.speech.create(
 
 with open("out.wav", "wb") as f:
     f.write(audio.read())
+
+# 流式请求（手动读取原始流）
+import httpx
+response = httpx.post(
+    "http://127.0.0.1:8080/v1/audio/speech",
+    json={
+        "model": "cosyvoice-3",
+        "voice": "alloy",
+        "input": "你好，这里是流式 TTS",
+        "response_format": "mp3",
+        "stream": True,
+    },
+    headers={"Authorization": "Bearer sk-local-demo"},
+)
+with open("out.mp3", "wb") as f:
+    for chunk in response.iter_bytes():
+        f.write(chunk)
 ```
 
 校验规则：

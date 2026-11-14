@@ -423,7 +423,3 @@ COSYVOICE_API void cosyvoice_audio_free(float* data);
 ### 参数
 
 - `data`：待释放音频缓冲区。
-
-### 返回值
-
-无返回值。

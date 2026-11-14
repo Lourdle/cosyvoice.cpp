@@ -4,7 +4,7 @@
 - CMake >= 3.28
 - 支持 C++20 的 C/C++ 编译器
 - Git（当本地缺少 GGML 源码时用于自动拉取）
-- 不要求特定的 x86 指令集：CPU DSP 路径通过运行时分派自动选择 CPU 支持的最快层级，最低可回退到纯 x86-64 标量基线（见 [SIMD.md](SIMD.md)）
+- 不要求特定的 x86 指令集：CPU DSP 路径通过运行时分派自动选择 CPU 支持的最快层级，最低可回退到纯 x86-64 标量基线（见 [SIMD_zh.md](SIMD_zh.md)）
 - SIMD 数学路径（如 `log`、三角函数）在所有受支持的工具链上均按层级编译（MSVC `/arch:...`、GCC/Clang `-m...`）；非 x86 平台可选 SIMDe 模拟 SSE4.2+FMA3 类，否则回退为标量实现
 
 后端/运行时依赖会随构建选项变化（CUDA/Vulkan/CPU、ONNX Runtime、ICU 等）。
@@ -165,7 +165,7 @@ cmake -B build \
 
 ## SIMDe（SIMD Everywhere）
 
-[SIMD.md](SIMD.md) 描述的各层级代码按 x86 内联函数编写。[SIMDe](https://github.com/simd-everywhere/simde) 是一个纯头文件库，可将这些 x86 内联函数翻译到其他指令集——在 ARM64/aarch64 上，模拟的 SSE4.2+FMA3 类代码无需修改即可编译为 NEON。
+[SIMD_zh.md](SIMD_zh.md) 描述的各层级代码按 x86 内联函数编写。[SIMDe](https://github.com/simd-everywhere/simde) 是一个纯头文件库，可将这些 x86 内联函数翻译到其他指令集——在 ARM64/aarch64 上，模拟的 SSE4.2+FMA3 类代码无需修改即可编译为 NEON。
 
 CMake 的处理方式（`CMakeLists.txt`）：
 

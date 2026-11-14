@@ -57,10 +57,6 @@ COSYVOICE_API cosyvoice_text_ptr cosyvoice_text_create();
 
 创建归一化文本对象。
 
-### 参数
-
-无。
-
 ### 返回值
 
 成功返回对象指针，失败返回 `NULL`。
@@ -80,10 +76,6 @@ COSYVOICE_API void cosyvoice_text_free(cosyvoice_text_ptr text);
 ### 参数
 
 - `text`：待释放对象。
-
-### 返回值
-
-无返回值。
 
 ## cosyvoice_frontend_util_text_normalize
 
@@ -108,10 +100,6 @@ COSYVOICE_API void cosyvoice_frontend_util_text_normalize(
 - `text_len`：输入字节长度。
 - `locale`：地区提示，传 `NULL` 表示自动检测。
 - `normalized_text`：输出文本对象。
-
-### 返回值
-
-无返回值。
 
 ## cosyvoice_frontend_context_t
 
@@ -221,7 +209,7 @@ COSYVOICE_API cosyvoice_prompt_speech_t cosyvoice_frontend_prompt_speech(
 
 ### 说明
 
-从单路波形提取提示语音特征。
+从单路波形提取提示语音特征；重采样与波形处理需要音频 API 支持。
 
 ### 参数
 
@@ -234,10 +222,6 @@ COSYVOICE_API cosyvoice_prompt_speech_t cosyvoice_frontend_prompt_speech(
 ### 返回值
 
 成功返回提示语音句柄，失败返回 `NULL`。
-
-### 备注
-
-该接口依赖音频 API 支持。
 
 ## cosyvoice_frontend_prompt_speech_direct
 
@@ -286,7 +270,3 @@ COSYVOICE_API void cosyvoice_frontend_free(cosyvoice_frontend_context_t ctx);
 ### 参数
 
 - `ctx`：待释放前端上下文。
-
-### 返回值
-
-无返回值。

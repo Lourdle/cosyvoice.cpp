@@ -1,6 +1,6 @@
 ﻿# 开发者指南
 
-本仓库的工具与测试的贡献规范。API 参考与 SIMD 内部实现见 [API.md](API.md) 与 [SIMD.md](SIMD.md)。
+本仓库的工具与测试的贡献规范。API 参考与 SIMD 内部实现见 [API_zh.md](API_zh.md) 与 [SIMD_zh.md](SIMD_zh.md)。
 
 ## 入口约定：使用 `tool_entry`，禁止写 `main`
 
@@ -16,7 +16,7 @@ int tool_entry(int argc, char** argv);
 
 在 **Windows** 上，`main(int argc, char** argv)` 入口点收到的是按系统 *ANSI 代码页*（ACP）编码的参数：运行时启动时从 `GetCommandLineA` 解析出 `argv`，而 ACP 随系统区域设置而变（如 zh-CN 为 GBK、西方为 Windows-1252）——它**不是 UTF-8**。任何含非 ASCII 字符的路径、文本或参数因此在到达你的代码之前就可能被错误编码或丢失。（下方 `main` 设置的“控制台输出代码页”只影响字节的显示方式，并不会改变 `argv` 的编码。）
 
-本项目要求所有路径与字符串在所有平台上均为 **UTF-8**（见 [API.md — 编码约定](API.md)）。为保证这一点，`tools/common/common.cpp` 中的 `main` 在 Windows 上调用 `tool_entry` 之前会：
+本项目要求所有路径与字符串在所有平台上均为 **UTF-8**（见 [API_zh.md — 编码约定](API_zh.md)）。为保证这一点，`tools/common/common.cpp` 中的 `main` 在 Windows 上调用 `tool_entry` 之前会：
 
 1. `SetConsoleOutputCP(CP_UTF8)` / `SetConsoleCP(CP_UTF8)` —— 让控制台以 UTF-8 收发；
 2. `CommandLineToArgvW` + `WideCharToMultiByte(CP_UTF8, ...)` —— 从宽字符（原生）命令行重建 UTF-8 `argv`，完全绕开 ANSI 代码页。

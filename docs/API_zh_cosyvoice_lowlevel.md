@@ -885,10 +885,6 @@ COSYVOICE_API cosyvoice_tokenization_result_t cosyvoice_tokenization_result_crea
 
 创建空分词结果容器。
 
-### 参数
-
-无。
-
 ### 返回值
 
 成功返回结果句柄，失败返回 `NULL`。

@@ -120,10 +120,6 @@ virtual uint32_t get_sample_rate() = 0;
 
 获取模型输出采样率。
 
-### 参数
-
-无。
-
 ### 返回值
 
 采样率（Hz）。
@@ -139,10 +135,6 @@ virtual int get_diffusion_steps() = 0;
 ### 说明
 
 获取模型 DiT 解码器实际使用的流匹配扩散步数。该值在加载时由上下文参数 / GGUF 元数据解析得到，并已裁剪到运行时上限。
-
-### 参数
-
-无。
 
 ### 返回值
 
@@ -312,10 +304,6 @@ virtual const char* get_instruction_prefix() = 0;
 
 获取模型要求的指令前缀。
 
-### 参数
-
-无。
-
 ### 返回值
 
 UTF-8 字符串指针。
@@ -395,10 +383,6 @@ virtual cosyvoice_builtin_sampler_rng_policy_t get_builtin_sampler_rng_policy() 
 ### 说明
 
 获取内置采样器 RNG 策略。
-
-### 参数
-
-无。
 
 ### 返回值
 
@@ -565,10 +549,6 @@ virtual const ggml_tensor* get_word_token_embed_weight() = 0;
 
 获取词 token embedding 张量。
 
-### 参数
-
-无。
-
 ### 返回值
 
 只读张量指针。
@@ -585,10 +565,6 @@ virtual const ggml_tensor* get_speech_token_embed_weight() = 0;
 
 获取语音 token embedding 张量。
 
-### 参数
-
-无。
-
 ### 返回值
 
 只读张量指针。
@@ -604,10 +580,6 @@ virtual uint32_t llm_get_kv_cache_len() = 0;
 ### 说明
 
 获取 KV 缓存长度。
-
-### 参数
-
-无。
 
 ### 返回值
 
@@ -677,10 +649,6 @@ virtual int llm_sample_token() = 0;
 
 采样下一个 token。
 
-### 参数
-
-无。
-
 ### 返回值
 
 采样 token ID。
@@ -737,10 +705,6 @@ virtual void llm_clear_accepted_tokens() = 0;
 
 清空已接受 token 历史。
 
-### 参数
-
-无。
-
 ### 返回值
 
 无返回值。
@@ -757,10 +721,6 @@ virtual uint32_t llm_get_n_accepted_tokens() = 0;
 
 获取已接受 token 数量。
 
-### 参数
-
-无。
-
 ### 返回值
 
 token 数量。
@@ -776,10 +736,6 @@ virtual const int* llm_get_accepted_tokens() = 0;
 ### 说明
 
 获取已接受 token 缓冲区指针。
-
-### 参数
-
-无。
 
 ### 返回值
 
@@ -949,10 +905,6 @@ virtual ggml_status get_last_status() = 0;
 
 获取最近一次后端操作状态。
 
-### 参数
-
-无。
-
 ### 返回值
 
 `ggml_status` 值。
@@ -1037,10 +989,6 @@ virtual void empty_buffer_cache() = 0;
 
 清理可复用缓冲缓存。
 
-### 参数
-
-无。
-
 ### 返回值
 
 无返回值。
@@ -1098,10 +1046,6 @@ virtual uint32_t get_hift_rand_ini_len() = 0;
 ### 说明
 
 获取 HiFT 初始化噪声长度。
-
-### 参数
-
-无。
 
 ### 返回值
 
@@ -1187,10 +1131,6 @@ virtual int* get_tokens() = 0;
 
 获取可写 token 缓冲区。
 
-### 参数
-
-无。
-
 ### 返回值
 
 token 数组指针。
@@ -1206,10 +1146,6 @@ virtual uint32_t get_n_tokens() = 0;
 ### 说明
 
 获取 token 数量。
-
-### 参数
-
-无。
 
 ### 返回值
 

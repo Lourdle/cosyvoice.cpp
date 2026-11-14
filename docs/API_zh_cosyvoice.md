@@ -426,17 +426,9 @@ COSYVOICE_API void cosyvoice_init_backend();
 
 初始化默认后端运行时。
 
-### 参数
-
-无。
-
-### 返回值
-
-无返回值。
-
 ### 备注
 
-会从指定目录加载后端资源并完成运行时初始化。
+当选定的后端需要显式初始化时，在创建上下文之前调用。
 
 ## cosyvoice_init_backend_from_path
 
@@ -454,9 +446,9 @@ COSYVOICE_API void cosyvoice_init_backend_from_path(const char* dir_path);
 
 - `dir_path`：后端初始化目录路径。
 
-### 返回值
+### 备注
 
-无返回值。
+会从指定目录加载后端资源并完成运行时初始化。
 
 ## COSYVOICE_SIMD_CONTROL_SUPPORTED
 
@@ -633,10 +625,6 @@ COSYVOICE_API void cosyvoice_init_default_context_params(cosyvoice_context_param
 ### 参数
 
 - `params`：输出参数结构体。
-
-### 返回值
-
-无返回值。
 
 ## cosyvoice_load_from_file
 
@@ -1043,10 +1031,6 @@ COSYVOICE_API void cosyvoice_free(cosyvoice_context_t ctx);
 
 - `ctx`：待释放上下文。
 
-### 返回值
-
-无返回值。
-
 ## cosyvoice_get_context_params
 
 ### 语法
@@ -1086,10 +1070,6 @@ COSYVOICE_API void cosyvoice_get_default_generation_config(
 
 - `ctx`：模型上下文。
 - `config`：输出默认生成配置。
-
-### 返回值
-
-无返回值。
 
 ## cosyvoice_get_architecture
 
@@ -1156,10 +1136,6 @@ COSYVOICE_API void cosyvoice_get_generation_config(
 
 - `ctx`：模型上下文。
 - `config`：输出配置结构体。
-
-### 返回值
-
-无返回值。
 
 ## cosyvoice_get_sample_rate
 
@@ -1273,10 +1249,6 @@ typedef int (_cdecl * cosyvoice_sampler_ext_t)(
 
 - `worker_no`：当前激活的 worker 槽编号。
 
-### 返回值
-
-无返回值。
-
 ## cosyvoice_get_sampler
 
 ### 语法
@@ -1294,10 +1266,6 @@ COSYVOICE_API void cosyvoice_get_sampler(cosyvoice_context_t ctx, cosyvoice_samp
 - `ctx`：模型上下文。
 - `sampler`：输出采样器指针。
 - `sampler_ctx`：输出上下文指针。
-
-### 返回值
-
-无返回值。
 
 ## cosyvoice_get_builtin_sampler_rng_policy
 
@@ -1506,10 +1474,6 @@ COSYVOICE_API void cosyvoice_prompt_speech_free(cosyvoice_prompt_speech_t prompt
 
 - `prompt_speech`：待释放对象。
 
-### 返回值
-
-无返回值。
-
 ## cosyvoice_prompt_free
 
 ### 语法
@@ -1525,10 +1489,6 @@ COSYVOICE_API void cosyvoice_prompt_free(cosyvoice_prompt_t prompt);
 ### 参数
 
 - `prompt`：待释放对象。
-
-### 返回值
-
-无返回值。
 
 ## cosyvoice_tts_context_new
 
@@ -1571,10 +1531,6 @@ COSYVOICE_API void cosyvoice_tts_context_free(cosyvoice_tts_context_t ctx);
 
 - `ctx`：会话句柄。
 
-### 返回值
-
-无返回值。
-
 ## cosyvoice_tts_context_set_prompt
 
 ### 语法
@@ -1591,10 +1547,6 @@ COSYVOICE_API void cosyvoice_tts_context_set_prompt(cosyvoice_tts_context_t ctx,
 
 - `ctx`：会话句柄。
 - `prompt`：新提示对象。
-
-### 返回值
-
-无返回值。
 
 ### 备注
 
@@ -1849,6 +1801,10 @@ COSYVOICE_API bool cosyvoice_tts_zero_shot(
 
 成功返回 `true`，失败返回 `false`。
 
+### 备注
+
+直接使用当前会话的 prompt 从文本生成语音。
+
 ## cosyvoice_tts_instruct
 
 ### 语法
@@ -2096,10 +2052,6 @@ COSYVOICE_API void cosyvoice_get_memory_usage(cosyvoice_context_t ctx, cosyvoice
 - `ctx`：模型上下文。
 - `usage`：输出内存明细结构体。
 
-### 返回值
-
-无返回值。
-
 ## cosyvoice_get_total_memory_usage
 
 ### 语法
@@ -2117,10 +2069,6 @@ COSYVOICE_API void cosyvoice_get_total_memory_usage(cosyvoice_context_t ctx, cos
 - `ctx`：模型上下文。
 - `usage`：输出内存明细结构体。
 
-### 返回值
-
-无返回值。
-
 ## cosyvoice_empty_buffer_cache
 
 ### 语法
@@ -2136,10 +2084,6 @@ COSYVOICE_API void cosyvoice_empty_buffer_cache(cosyvoice_context_t ctx);
 ### 参数
 
 - `ctx`：模型上下文。
-
-### 返回值
-
-无返回值。
 
 ## cosyvoice_request_stop
 

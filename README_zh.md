@@ -65,7 +65,7 @@
 
 所有平台的发布包都只包含 `cosyvoice` 可执行文件与前端/音频依赖，**不捆绑 GGML**——GGML 从 `llama.cpp` release 获取：
 1. 从本仓库的 [Releases 页面](https://github.com/Lourdle/cosyvoice.cpp/releases) 下载 `cosyvoice-cli` 或 `cosyvoice-server`。
-2. 下载与硬件和操作系统匹配的 `llama.cpp` release。
+2. 下载与硬件和操作系统匹配、且带有 **GGML 1.x**（v1.0.0，2026-11-13 起）的 `llama.cpp` release。
 3. 把该 release 中的**全部** GGML 库拷贝到 `cosyvoice` 可执行文件所在目录——`ggml*.dll` / `libggml*.so*` / `libggml*.dylib`，**包含 CPU 变体模块**（`ggml-cpu-<isa>.dll`、`libggml-cpu-<isa>.so`）。后端在运行时从可执行文件所在目录被发现，缺少变体模块会导致二进制没有可用的 CPU 后端。
 4. 在该目录下运行。macOS 上请用 `cp -a`（或直接解压）拷贝 dylib，以保留带版本号的符号链接链——`libggml.dylib` 是指向 `libggml.<版本>.dylib` 的符号链接。
 
@@ -73,7 +73,7 @@
 
 > **系统库：** `icu=ON` 与 `audio=FFMPEG` 变体会动态链接 `libicuuc`/`libicui18n` 与 `libav*`/`libswresample`，这些库已从发布包中剥离——请自行安装（或直接放到可执行文件旁）。`no_icu`、`miniaudio` 与 `no_audio` 变体除 GGML 外无其他依赖。
 
-> **macOS（Metal）上的 GGML 版本要求：** Metal 的 `GGML_OP_PAD` 内核必须支持 beg（左侧）填充。上游在 [ggml-org/llama.cpp#29561](https://github.com/ggml-org/llama.cpp/pull/29561)（ggml 提交 `46fc5b3b`，2026-09-28）中加入了该支持，因此请使用该日期之后构建的 `llama.cpp` release。更旧的 GGML 在任一 beg 填充非零时会把 `GGML_OP_PAD` 判定为不支持，推理会直接中止。Windows/Linux 无此版本约束，但建议仍保持版本一致。
+> **GGML 版本要求：** 请使用带有 **GGML 1.x** 的 `llama.cpp` release（GGML v1.0.0，2026-11-13 起）。GGML 1.0 剪除了废弃的公开 API，并把库 SONAME 升到 1（`libggml.so.1` / `libggml.1.dylib`），因此 0.x 的库与本构建不兼容：Linux/macOS 上因 SONAME 不匹配而加载失败；Windows 上虽能加载，但算子分派错误（GGML 1.0 移除了旧的 op 枚举项，剩余算子数值整体偏移），会崩溃或产生错误输出。这也覆盖了此前 macOS Metal 的要求——`GGML_OP_PAD` 内核需支持 beg（左侧）填充，上游已在 [ggml-org/llama.cpp#29561](https://github.com/ggml-org/llama.cpp/pull/29561) 加入，所有 1.x 构建均包含。
 
 > **预编译 GGML CUDA 后端已知问题（Issue [#15](https://github.com/Lourdle/cosyvoice.cpp/issues/15)）：** 有用户反馈使用 `llama.cpp` 预编译发布版的 GGML CUDA 后端时，生成的音频存在噪音。测试确认了预编译 GGML CUDA 版本存在此问题，而自行从源码编译的 GGML 则未出现该问题。如果您在使用 CUDA 后端配合预编译 GGML 时遇到噪音，建议将本项目与 GGML 一同从源码编译。如果不想自行编译，也可以直接改用 **Vulkan 后端**——它与 llama.cpp 的预编译 GGML 发布包配合良好，开箱即用。
 
@@ -209,5 +209,3 @@ flowchart TD
 - 文档与工具改进
 
 如果根因在 GGML，请优先向上游 GGML 提交修复补丁。
-
-新增工具与测试请遵循开发者约定（`tool_entry` 入口点与 `tools_common` 链接要求），详见 [docs/DEVELOPING_zh.md](docs/DEVELOPING_zh.md)。

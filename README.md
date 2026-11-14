@@ -65,7 +65,7 @@ This project provides:
 
 On every platform a release contains the `cosyvoice` binaries and the frontend/audio dependencies, but **never** GGML — that comes from a `llama.cpp` release:
 1. Download `cosyvoice-cli` or `cosyvoice-server` from this repository's [Releases page](https://github.com/Lourdle/cosyvoice.cpp/releases).
-2. Download a `llama.cpp` release that matches your hardware and OS.
+2. Download a `llama.cpp` release that matches your hardware and OS and ships **GGML 1.x** (releases built after GGML v1.0.0, 2026-11-13).
 3. Copy **all** GGML libraries from that release into the same directory as the `cosyvoice` executables — `ggml*.dll` / `libggml*.so*` / `libggml*.dylib`, **including the CPU variant modules** (`ggml-cpu-<isa>.dll`, `libggml-cpu-<isa>.so`). Backends are discovered at runtime from the executable's directory, so omitting the variants leaves the binaries without a CPU backend.
 4. Run from that directory. On macOS copy the dylibs with `cp -a` (or extract the archive) so the versioned symlink chain stays intact — `libggml.dylib` is a symlink to `libggml.<version>.dylib`.
 
@@ -73,7 +73,7 @@ Sanity check: run `cosyvoice-cli --list-backends`. It prints the backends that w
 
 > **System libraries:** the `icu=ON` and `audio=FFMPEG` variants link `libicuuc`/`libicui18n` and `libav*`/`libswresample` dynamically, and those are stripped from the archive — install them (or drop them in next to the executables). The `no_icu`, `miniaudio` and `no_audio` variants need nothing beyond GGML.
 
-> **GGML version requirement on macOS (Metal):** the Metal `GGML_OP_PAD` kernel must support beg (left) padding. Upstream added it in [ggml-org/llama.cpp#29561](https://github.com/ggml-org/llama.cpp/pull/29561) (ggml commit `46fc5b3b`, 2026-09-28), so use a `llama.cpp` release built from that date or later. An older GGML reports `GGML_OP_PAD` as unsupported as soon as any beg padding is non-zero, and inference then aborts. No version constraint applies on Windows/Linux, though matching versions is still recommended.
+> **GGML version requirement:** use the GGML libraries from a `llama.cpp` release that ships **GGML 1.x** (built after GGML v1.0.0, 2026-11-13). GGML 1.0 pruned the deprecated public API and bumped the library SONAME to 1 (`libggml.so.1` / `libggml.1.dylib`), so 0.x libraries are incompatible: on Linux/macOS they fail to load (SONAME mismatch), and on Windows they load but dispatch ops incorrectly — GGML 1.0 removed legacy op enum entries, shifting the remaining op values — which crashes or produces garbage output. This also covers the older macOS Metal requirement — the `GGML_OP_PAD` kernel must support beg (left) padding, which upstream added in [ggml-org/llama.cpp#29561](https://github.com/ggml-org/llama.cpp/pull/29561) and which every 1.x build includes.
 
 > **Known issue with pre-built GGML CUDA backend (Issue [#15](https://github.com/Lourdle/cosyvoice.cpp/issues/15)):** Some users have reported noise in generated audio when using pre-built GGML binaries from `llama.cpp` releases with the CUDA backend. Testing confirmed this issue with pre-compiled GGML CUDA builds, while self-compiled GGML from source did not exhibit the problem. If you encounter noise when using the CUDA backend with pre-built GGML, we recommend building both this project and GGML from source. Alternatively, use the **Vulkan backend** — it works with the pre-built GGML releases out of the box.
 
@@ -211,5 +211,3 @@ Please feel free to open issues or submit pull requests for:
 - Documentation/tooling improvements
 
 If the root cause is in GGML, please submit fixes/patches upstream to GGML.
-
-For new tools and tests, note the developer conventions (the `tool_entry` entry point and the `tools_common` linkage requirement) documented in [docs/DEVELOPING.md](docs/DEVELOPING.md).
