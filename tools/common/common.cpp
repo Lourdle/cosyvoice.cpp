@@ -4,30 +4,17 @@
     #define NOMINMAX
     #include <Windows.h>
     #include <shellapi.h>
-    #include <cwchar>
-
-static std::string wstr_to_utf8(const wchar_t* wstr)
-{
-    const int wide_len = static_cast<int>(wcslen(wstr));
-    const int utf8_len = WideCharToMultiByte(CP_UTF8, 0, wstr, wide_len, nullptr, 0, nullptr, nullptr);
-    if (utf8_len <= 0) return {};
-
-    std::string result(static_cast<size_t>(utf8_len), '\0');
-    if (WideCharToMultiByte(CP_UTF8, 0, wstr, wide_len, &result[0], utf8_len, nullptr, nullptr) <= 0)
-        return {};
-    return result;
-}
 #else
     #include <strings.h>
 #endif
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cctype>
-#include <cstdlib>
-#include <cstdio>
 #include <ctime>
-#include <limits>
+#include <format>
+#include <memory>
 
 std::string to_lower(std::string value)
 {
@@ -65,34 +52,22 @@ int str_casecmp(const char* lhs, const char* rhs)
 #endif
 }
 
-bool parse_float_arg(const std::string& value, float* result)
+bool parse_float_arg(std::string_view value, float* result)
 {
-    char* end = nullptr;
-    *result = strtof(value.c_str(), &end);
-    return end != value.c_str() && end && *end == '\0';
+    const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), *result);
+    return ec == std::errc{} && ptr == value.data() + value.size();
 }
 
-bool parse_uint32_arg(const char* value, uint32_t* result)
+bool parse_uint32_arg(std::string_view value, uint32_t* result)
 {
-    char* end = nullptr;
-    unsigned long long parsed = strtoull(value, &end, 10);
-    if (end == value || !end || *end != '\0' || parsed > UINT32_MAX)
-        return false;
-    *result = static_cast<uint32_t>(parsed);
-    return true;
+    const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), *result);
+    return ec == std::errc{} && ptr == value.data() + value.size();
 }
 
-bool parse_int_arg(const std::string& value, int* result)
+bool parse_int_arg(std::string_view value, int* result)
 {
-    char* end = nullptr;
-    long long parsed = strtoll(value.c_str(), &end, 10);
-    if (end == value.c_str() || !end || *end != '\0')
-        return false;
-    if (parsed < static_cast<long long>(std::numeric_limits<int>::min())
-        || parsed > static_cast<long long>(std::numeric_limits<int>::max()))
-        return false;
-    *result = static_cast<int>(parsed);
-    return true;
+    const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), *result);
+    return ec == std::errc{} && ptr == value.data() + value.size();
 }
 
 bool parse_uint16_port(const std::string& value, uint16_t* result)
@@ -118,38 +93,59 @@ std::string get_local_timestamp_ms()
     localtime_r(&t, &tm_local);
 #endif
 
-    char date_buf[32] = {};
-    strftime(date_buf, sizeof(date_buf), "%Y-%m-%d %H:%M:%S", &tm_local);
-
-    char final_buf[48] = {};
-    snprintf(final_buf, sizeof(final_buf), "%s.%03d", date_buf, static_cast<int>(millis.count()));
-    return final_buf;
+    return std::format("{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}",
+        tm_local.tm_year + 1900, tm_local.tm_mon + 1, tm_local.tm_mday,
+        tm_local.tm_hour, tm_local.tm_min, tm_local.tm_sec,
+        static_cast<int>(millis.count()));
 }
 
-int main(int argc, char** argv)
-{
 #ifdef _WIN32
+int main(int argc, char**)
+{
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 
-    std::vector<char*> utf8_argv;
-    utf8_argv.reserve(argc);
-    std::vector<std::string> utf8_args_storage;
-    utf8_args_storage.reserve(argc);
-
+    std::unique_ptr<char[]> block;
     {
-        auto wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
-        if (!wargv) return 1;
+        struct local_deleter_t { void operator()(wchar_t** p) { LocalFree(p); } };
+        std::unique_ptr<wchar_t*, local_deleter_t> wargv(CommandLineToArgvW(GetCommandLineW(), &argc));
+        if (!wargv)
+        {
+            fprintf(stderr, "Error: CommandLineToArgvW failed (%lu).\n", GetLastError());
+            return 1;
+        }
 
+        const size_t argv_bytes = (static_cast<size_t>(argc) + 1) * sizeof(char*);
+        size_t text_bytes = 0;
         for (int i = 0; i < argc; ++i)
         {
-            utf8_args_storage.push_back(wstr_to_utf8(wargv[i]));
-            utf8_argv.push_back(utf8_args_storage.back().data());
+            const int len = WideCharToMultiByte(CP_UTF8, 0, wargv.get()[i], -1, nullptr, 0, nullptr, nullptr);
+            if (len <= 0)
+            {
+                fprintf(stderr, "Error: WideCharToMultiByte failed measuring argument %d (%lu).\n", i, GetLastError());
+                return 1;
+            }
+            text_bytes += static_cast<size_t>(len);
         }
-        LocalFree(wargv);
-    }
-    argv = utf8_argv.data();
 
-#endif
-    return tool_entry(argc, argv);
+        block.reset(new char[argv_bytes + text_bytes]);
+        char** utf8_argv = reinterpret_cast<char**>(block.get());
+        char* text = block.get() + argv_bytes;
+        char* const text_end = block.get() + argv_bytes + text_bytes;
+        for (int i = 0; i < argc; ++i)
+        {
+            utf8_argv[i] = text;
+            const int len = WideCharToMultiByte(CP_UTF8, 0, wargv.get()[i], -1, text, static_cast<int>(text_end - text), nullptr, nullptr);
+            if (len <= 0)
+            {
+                fprintf(stderr, "Error: WideCharToMultiByte failed converting argument %d (%lu).\n", i, GetLastError());
+                return 1;
+            }
+            text += len;
+        }
+        utf8_argv[argc] = nullptr;
+    }
+
+    return tool_entry(argc, reinterpret_cast<char**>(block.get()));
 }
+#endif
