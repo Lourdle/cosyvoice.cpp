@@ -15,7 +15,7 @@ enum token_type {
 };
 
 struct token_data {
-    std::string text;
+    std::string_view text;
     token_type type;
 };
 
@@ -25,9 +25,9 @@ struct llm_tokenizer {
 };
 
 struct pair_hash {
-    size_t operator()(const std::pair<std::string, std::string>& p) const {
-        return std::hash<std::string>{}(p.first) ^
-            (std::hash<std::string>{}(p.second) << 1);
+    size_t operator()(const std::pair<std::string_view, std::string_view>& p) const {
+        return std::hash<std::string_view>{}(p.first) ^
+            (std::hash<std::string_view>{}(p.second) << 1);
     }
 };
 
@@ -254,10 +254,11 @@ private:
 struct cosyvoice_vocab::impl {
     void partition_special_tokens(std::forward_list<fragment_buffer_variant>& buffer, bool parse_special) const;
 
-    std::unordered_map<std::string, int> token_to_id;
+    std::unique_ptr<char[]> text_pool;
+    std::unordered_map<std::string_view, int> token_to_id;
     std::vector<token_data>              id_to_token;
     std::vector<int>                     cache_special_tokens;
-    std::unordered_map<std::pair<std::string, std::string>, int, pair_hash> bpe_ranks;
+    std::unordered_map<std::pair<std::string_view, std::string_view>, int, pair_hash> bpe_ranks;
     std::unique_ptr<llm_tokenizer>       tokenizer;
 };
 
@@ -353,18 +354,43 @@ void cosyvoice_vocab::load(gguf_metadata_loader& loader) {
     const auto toktype_idx = loader.parser.find_key("tokenizer.vocab.token_types");
     toktypes = (const int*)loader.parser.arr_data(toktype_idx);
 
-    auto n_tokens = loader.parser.arr_n(token_idx);
+    const auto merges_keyidx = loader.parser.find_key("tokenizer.model.merges");
+
+    const auto n_tokens = loader.parser.arr_n(token_idx);
+    const auto n_merges = loader.parser.arr_n(merges_keyidx);
+
+    size_t pool_size = 0;
+    for (int i = 0; i != n_tokens; i++) {
+        const std::string_view word = loader.parser.arr_str(token_idx, i);
+        pool_size += word.empty() ? std::formatted_size("[EMPTY_{}]", i) : word.size();
+    }
+    for (int i = 0; i < n_merges; i++)
+        pool_size += loader.parser.arr_str(merges_keyidx, i).size();
+
     pimpl_->id_to_token.resize(n_tokens);
+    pimpl_->text_pool = std::make_unique<char[]>(pool_size);
+    char* pool = pimpl_->text_pool.get();
+    size_t pool_offset = 0;
 
     for (int i = 0; i != n_tokens; i++) {
-        std::string word(loader.parser.arr_str(token_idx, i));
-        if (word.empty())
-            word = std::format("[EMPTY_{}]", i);
+        const std::string_view word = loader.parser.arr_str(token_idx, i);
 
-        pimpl_->token_to_id[word] = i;
+        size_t word_len;
+        if (word.empty()) {
+            word_len = std::formatted_size("[EMPTY_{}]", i);
+            std::format_to(pool + pool_offset, "[EMPTY_{}]", i);
+        }
+        else {
+            word_len = word.size();
+            std::copy(word.begin(), word.end(), pool + pool_offset);
+        }
 
         auto& token_data = pimpl_->id_to_token[i];
-        token_data.text = std::move(word);
+        token_data.text = std::string_view(pool + pool_offset, word_len);
+        pool_offset += word_len;
+
+        pimpl_->token_to_id[token_data.text] = i;
+
         token_data.type = static_cast<token_type>(toktypes[i]);
 
         if (token_data.type == TOKEN_TYPE_CONTROL)
@@ -372,19 +398,20 @@ void cosyvoice_vocab::load(gguf_metadata_loader& loader) {
     }
     GGML_ASSERT(pimpl_->id_to_token.size() == pimpl_->token_to_id.size());
 
-    const auto merges_keyidx = loader.parser.find_key("tokenizer.model.merges");
-    const auto n_merges = loader.parser.arr_n(merges_keyidx);
     for (int i = 0; i < n_merges; i++) {
         const std::string_view word = loader.parser.arr_str(merges_keyidx, i);
+        std::copy(word.begin(), word.end(), pool + pool_offset);
+        const std::string_view line(pool + pool_offset, word.size());
+        pool_offset += word.size();
 
         std::string_view first;
         std::string_view second;
 
-        const size_t pos = word.find(' ', 1);
+        const size_t pos = line.find(' ', 1);
 
         if (pos != std::string_view::npos) {
-            first = word.substr(0, pos);
-            second = word.substr(pos + 1);
+            first = line.substr(0, pos);
+            second = line.substr(pos + 1);
         }
 
         pimpl_->bpe_ranks.emplace(std::make_pair(first, second), i);
@@ -424,7 +451,7 @@ void cosyvoice_vocab::tokenize(
     }
 }
 
-int cosyvoice_vocab::text_to_token(const std::string& text) const {
+int cosyvoice_vocab::text_to_token(std::string_view text) const {
     auto it = pimpl_->token_to_id.find(text);
     if (it != pimpl_->token_to_id.end()) {
         return (*it).second;
@@ -432,11 +459,11 @@ int cosyvoice_vocab::text_to_token(const std::string& text) const {
     return -1;
 }
 
-int cosyvoice_vocab::find_bpe_rank(const std::string& token_left, const std::string& token_right) const {
-    GGML_ASSERT(token_left.find(' ') == std::string::npos);
-    GGML_ASSERT(token_left.find('\n') == std::string::npos);
-    GGML_ASSERT(token_right.find(' ') == std::string::npos);
-    GGML_ASSERT(token_right.find('\n') == std::string::npos);
+int cosyvoice_vocab::find_bpe_rank(std::string_view token_left, std::string_view token_right) const {
+    GGML_ASSERT(token_left.find(' ') == std::string_view::npos);
+    GGML_ASSERT(token_left.find('\n') == std::string_view::npos);
+    GGML_ASSERT(token_right.find(' ') == std::string_view::npos);
+    GGML_ASSERT(token_right.find('\n') == std::string_view::npos);
 
     auto it = pimpl_->bpe_ranks.find(std::make_pair(token_left, token_right));
     if (it == pimpl_->bpe_ranks.end()) {

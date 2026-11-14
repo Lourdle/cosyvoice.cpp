@@ -16,8 +16,8 @@ public:
 
     void load(gguf_metadata_loader& loader);
     void tokenize(const std::string_view& raw_text, std::vector<int>& output, bool parse_special = false) const;
-    int text_to_token(const std::string& text) const;
-    int find_bpe_rank(const std::string& token_left, const std::string& token_right) const;
+    int text_to_token(std::string_view text) const;
+    int find_bpe_rank(std::string_view token_left, std::string_view token_right) const;
 
 private:
     struct impl;

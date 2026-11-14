@@ -8,6 +8,7 @@
 #include <cassert>
 #include <codecvt>
 #include <cstdint>
+#include <format>
 #include <locale>
 #include <map>
 #include <memory>
@@ -204,7 +205,8 @@ static std::vector<size_t> unicode_regex_split_pcre2_16(const std::wstring& wtex
         nullptr);
 
     if (!raw_code) {
-        throw std::runtime_error("Failed to compile regex (16-bit) at offset " + std::to_string(error_offset) + ": " + pcre2_error_message(error_code));
+        throw std::runtime_error(std::format(
+            "Failed to compile regex (16-bit) at offset {}: {}", error_offset, pcre2_error_message(error_code)));
     }
 
     std::unique_ptr<pcre2_code_16, decltype(&pcre2_code_free_16)> code(raw_code, pcre2_code_free_16);
@@ -299,7 +301,8 @@ static std::vector<size_t> unicode_regex_split_pcre2_8(const std::string& text, 
         nullptr);
 
     if (!raw_code) {
-        throw std::runtime_error("Failed to compile regex (8-bit) at offset " + std::to_string(error_offset) + ": " + pcre2_error_message(error_code));
+        throw std::runtime_error(std::format(
+            "Failed to compile regex (8-bit) at offset {}: {}", error_offset, pcre2_error_message(error_code)));
     }
 
     std::unique_ptr<pcre2_code_8, decltype(&pcre2_code_free_8)> code(raw_code, pcre2_code_free_8);
@@ -577,8 +580,6 @@ std::vector<std::string> unicode_regex_split(const std::string_view& text, const
                 regex_expr_collapsed += regex[i];
             }
 
-            //printf("text_collapsed: %s\n", text_collapsed.c_str());
-            //printf("regex_expr_collapsed: %s\n", regex_expr_collapsed.c_str());
             bpe_offsets = unicode_regex_split_pcre2_8(text_collapsed, regex_expr_collapsed, bpe_offsets);
         }
         else {
@@ -593,8 +594,6 @@ std::vector<std::string> unicode_regex_split(const std::string_view& text, const
                 }
             }
 
-            //printf("text: %s\n", text.c_str());
-            //printf("regex_expr: %s\n", regex_expr.c_str());
             bpe_offsets = unicode_regex_split_pcre2_16(wtext, wregex_expr, bpe_offsets);
         }
     }
