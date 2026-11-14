@@ -62,7 +62,7 @@ contains code adapted/referenced from external open-source projects.
 
 - Upstream: https://github.com/mackron/miniaudio
 - Local path: `vendor/miniaudio/miniaudio.h`
-- License: dual-licensed by upstream as Public Domain (The Unlicense) or MIT No Attribution (MIT-0 style text)
+- License: dual-licensed by upstream as Public Domain (The Unlicense) or MIT-0
 - License text location: embedded at the end of `vendor/miniaudio/miniaudio.h`
 
 ## PCRE2
@@ -82,7 +82,8 @@ license file is retained and distributed.
 
 - Upstream: https://github.com/mborgerding/kissfft
 - Local usage: `src/fft.cpp`, `src/fft.h`
-- Usage in this project: FFT core logic references/adapts the KissFFT mixed-radix design; SIMD optimization/integration is implemented in this project.
+- Usage in this project: FFT core logic references/adapts the KissFFT mixed-radix
+  design; SIMD optimization/integration is implemented in this project.
 - Upstream copyright: Copyright (c) 2003-2010 Mark Borgerding
 - License: BSD-3-Clause
 - License text location: https://github.com/mborgerding/kissfft/blob/master/COPYING
@@ -115,6 +116,40 @@ license file is retained and distributed.
 ## FFmpeg (optional audio backend)
 
 - Upstream: https://ffmpeg.org
-- Usage in this project: optional runtime dependency (`COSYVOICE_AUDIO_BACKEND=FFMPEG`) for multi-format audio encoding/decoding; dynamically linked when selected.
-- License: LGPL-2.1+ or GPL-2.0+ depending on the build configuration used.
-- See `FFmpeg-NOTICE.md` for details and the exact build license surface.
+- Usage in this project: optional audio backend (`COSYVOICE_AUDIO_BACKEND=FFMPEG`) for
+  multi-format audio encoding/decoding. FFmpeg is not part of this repository; it is
+  linked dynamically, and the build installs its shared libraries next to the binaries.
+- How it is obtained: on Windows, when no usable FFmpeg is found in
+  `FFMPEG_PREBUILT_DIR`, the build downloads a BtbN prebuilt package from
+  https://github.com/BtbN/FFmpeg-Builds/releases (win64 or winarm64,
+  `ffmpeg-n8.1-latest-*-lgpl-shared-8.1.zip`). On other platforms FFmpeg is located via
+  `FFMPEG_PREBUILT_DIR` or the system library search path.
+- License: the default BtbN package is LGPL-2.1-or-later and contains no GPL-only
+  components. A GPL-enabled FFmpeg is only involved if you build or supply one yourself
+  (see below).
+
+### Redistributing with the default LGPL build
+
+The repository code stays MIT-licensed. When you redistribute a package that includes
+the default LGPL FFmpeg shared libraries, you must:
+
+1. Ship this notices file and the LGPL license text that comes with FFmpeg
+2. Keep FFmpeg replaceable by a modified version of your own — dynamic linking already
+   achieves this — and make the source of any FFmpeg modifications you make available
+3. Preserve the copyright notices that ship with FFmpeg
+
+### Redistributing with a GPL-enabled FFmpeg (optional)
+
+If you build or ship a GPL-enabled FFmpeg, you must:
+
+1. License the combined work under GPL-2.0-or-later or a compatible license
+2. Provide the complete corresponding source of the combined work to all recipients
+3. State clearly that a GPL-enabled FFmpeg is included
+
+Complying with FFmpeg's licenses is the responsibility of the user/distributor, not of
+this project's maintainers.
+
+### Further reading
+
+- https://ffmpeg.org/legal.html
+- https://github.com/FFmpeg/FFmpeg/blob/master/LICENSE.md
