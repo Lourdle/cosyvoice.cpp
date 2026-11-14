@@ -113,12 +113,14 @@ if(NOT COSYVOICE_NO_ICU)
         set(_ICU_FALLBACK_VERSION "78.2")
         set(_ICU_FALLBACK_TAG "release-78.2")
         set(_ICU_RELEASE_TAG "")
+        set(_ICU_LATEST_OK FALSE)
         cosyvoice_fetch_github_latest_tag("unicode-org/icu" _ICU_RELEASE_TAG)
 
         if(_ICU_RELEASE_TAG MATCHES "^release-([0-9]+)\.([0-9]+)$")
           set(_ICU_VERSION_MAJOR "${CMAKE_MATCH_1}")
           set(_ICU_VERSION_MINOR "${CMAKE_MATCH_2}")
           set(_ICU_VERSION "${_ICU_VERSION_MAJOR}.${_ICU_VERSION_MINOR}")
+          set(_ICU_LATEST_OK TRUE)
           message(STATUS "ICU latest release: tag=${_ICU_RELEASE_TAG}, version=${_ICU_VERSION}")
         else()
           set(_ICU_VERSION "${_ICU_FALLBACK_VERSION}")
@@ -127,50 +129,83 @@ if(NOT COSYVOICE_NO_ICU)
         endif()
 
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
-          set(ICU_ZIP_URL "https://github.com/unicode-org/icu/releases/download/${_ICU_RELEASE_TAG}/icu4c-${_ICU_VERSION}-WinARM64-MSVC2022.zip")
+          set(_ICU_ASSET_ARCH "WinARM64")
         else()
-          set(ICU_ZIP_URL "https://github.com/unicode-org/icu/releases/download/${_ICU_RELEASE_TAG}/icu4c-${_ICU_VERSION}-Win64-MSVC2022.zip")
+          set(_ICU_ASSET_ARCH "Win64")
         endif()
 
-        message(STATUS "ICU download URL: ${ICU_ZIP_URL}")
+        # ICU release assets are named after the MSVC toolchain that produced
+        # them (78.x ships *-MSVC2022.zip, 79.x ships *-MSVC2026.zip). Probe
+        # both toolset names for the latest version, then fall back to the
+        # pinned version. ICU import libraries are toolset-agnostic, so a
+        # MSVC2026 build links fine with an older toolchain as well.
+        set(_ICU_CANDIDATES "")
+        if(_ICU_LATEST_OK)
+          foreach(_tc MSVC2022 MSVC2026)
+            list(APPEND _ICU_CANDIDATES "${_ICU_VERSION}|${_ICU_RELEASE_TAG}|${_tc}")
+          endforeach()
+        endif()
+        foreach(_tc MSVC2022 MSVC2026)
+          list(APPEND _ICU_CANDIDATES "${_ICU_FALLBACK_VERSION}|${_ICU_FALLBACK_TAG}|${_tc}")
+        endforeach()
+        list(REMOVE_DUPLICATES _ICU_CANDIDATES)
 
+        set(ICU_ZIP_URL "")
+        set(_ICU_ATTEMPTED "")
         file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_deps")
-        file(DOWNLOAD "${ICU_ZIP_URL}" "${CMAKE_BINARY_DIR}/_deps/icu.zip" STATUS DL_STATUS)
-        list(GET DL_STATUS 0 DL_ERR_CODE)
-
-        if(DL_ERR_CODE EQUAL 0)
-          file(MAKE_DIRECTORY "${ICU_PREBUILT_DIR}")
-          execute_process(
-            COMMAND ${CMAKE_COMMAND} -E tar xf "${CMAKE_BINARY_DIR}/_deps/icu.zip"
-            WORKING_DIRECTORY "${ICU_PREBUILT_DIR}"
-          )
-
-          # Auto-detect actual ICU root after extraction.
-          unset(_ICU_FOUND_ROOT)
-          if(EXISTS "${ICU_PREBUILT_DIR}/include/unicode/utypes.h")
-            set(_ICU_FOUND_ROOT "${ICU_PREBUILT_DIR}")
+        foreach(_candidate IN LISTS _ICU_CANDIDATES)
+          string(REPLACE "|" ";" _fields "${_candidate}")
+          list(GET _fields 0 _icu_candidate_version)
+          list(GET _fields 1 _icu_candidate_tag)
+          list(GET _fields 2 _icu_candidate_toolset)
+          set(_icu_candidate_url "https://github.com/unicode-org/icu/releases/download/${_icu_candidate_tag}/icu4c-${_icu_candidate_version}-${_ICU_ASSET_ARCH}-${_icu_candidate_toolset}.zip")
+          message(STATUS "ICU download URL: ${_icu_candidate_url}")
+          file(DOWNLOAD "${_icu_candidate_url}" "${CMAKE_BINARY_DIR}/_deps/icu.zip" STATUS DL_STATUS TLS_VERIFY ON)
+          list(GET DL_STATUS 0 DL_ERR_CODE)
+          if(DL_ERR_CODE EQUAL 0)
+            set(ICU_ZIP_URL "${_icu_candidate_url}")
+            set(_ICU_VERSION "${_icu_candidate_version}")
+            set(_ICU_RELEASE_TAG "${_icu_candidate_tag}")
+            break()
           endif()
+          list(APPEND _ICU_ATTEMPTED "  ${_icu_candidate_url}")
+        endforeach()
 
-          if(NOT _ICU_FOUND_ROOT)
-            file(GLOB _ICU_DIRS LIST_DIRECTORIES true "${ICU_PREBUILT_DIR}/*")
-            foreach(_dir IN LISTS _ICU_DIRS)
-              if(EXISTS "${_dir}/include/unicode/utypes.h")
-                set(_ICU_FOUND_ROOT "${_dir}")
-                break()
-              endif()
-            endforeach()
-          endif()
+        if(ICU_ZIP_URL STREQUAL "")
+          message(FATAL_ERROR "Failed to download ICU. Tried:\n${_ICU_ATTEMPTED}")
+        endif()
 
-          if(_ICU_FOUND_ROOT)
-            set(ICU_PREBUILT_DIR "${_ICU_FOUND_ROOT}" CACHE PATH "Path to custom prebuilt ICU" FORCE)
-            message(STATUS "Using detected ICU root: ${ICU_PREBUILT_DIR}")
-          else()
-            message(FATAL_ERROR
-              "ICU downloaded but could not locate include/unicode/utypes.h under ${CMAKE_BINARY_DIR}/_deps"
-            )
-          endif()
+        message(STATUS "Using ICU ${_ICU_VERSION} (${ICU_ZIP_URL})")
+
+        file(MAKE_DIRECTORY "${ICU_PREBUILT_DIR}")
+        execute_process(
+          COMMAND ${CMAKE_COMMAND} -E tar xf "${CMAKE_BINARY_DIR}/_deps/icu.zip"
+          WORKING_DIRECTORY "${ICU_PREBUILT_DIR}"
+        )
+
+        # Auto-detect actual ICU root after extraction.
+        unset(_ICU_FOUND_ROOT)
+        if(EXISTS "${ICU_PREBUILT_DIR}/include/unicode/utypes.h")
+          set(_ICU_FOUND_ROOT "${ICU_PREBUILT_DIR}")
+        endif()
+
+        if(NOT _ICU_FOUND_ROOT)
+          file(GLOB _ICU_DIRS LIST_DIRECTORIES true "${ICU_PREBUILT_DIR}/*")
+          foreach(_dir IN LISTS _ICU_DIRS)
+            if(EXISTS "${_dir}/include/unicode/utypes.h")
+              set(_ICU_FOUND_ROOT "${_dir}")
+              break()
+            endif()
+          endforeach()
+        endif()
+
+        if(_ICU_FOUND_ROOT)
+          set(ICU_PREBUILT_DIR "${_ICU_FOUND_ROOT}" CACHE PATH "Path to custom prebuilt ICU" FORCE)
+          message(STATUS "Using detected ICU root: ${ICU_PREBUILT_DIR}")
         else()
-          message(FATAL_ERROR "Failed to download ICU from ${ICU_ZIP_URL}")
+          message(FATAL_ERROR
+            "ICU downloaded but could not locate include/unicode/utypes.h under ${CMAKE_BINARY_DIR}/_deps"
+          )
         endif()
       else()
         find_package(PkgConfig QUIET)
