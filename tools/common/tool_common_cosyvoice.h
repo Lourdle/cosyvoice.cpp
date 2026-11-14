@@ -11,6 +11,7 @@
     #include "cosyvoice-audio.h"
 #endif
 
+#include <format>
 #include <memory>
 
 template <typename T, auto deleter>
@@ -196,10 +197,11 @@ inline std::string kv_cache_type_to_string(cosyvoice_kv_cache_type_t type)
     if (COSYVOICE_IS_SEPARATE_KV_CACHE(type))
     {
         auto fallback = COSYVOICE_KV_CACHE_FALLBACK(type);
-        auto result = "k=" + std::string(kv_cache_type_to_string(COSYVOICE_K_CACHE_TYPE(type)))
-            + ",v=" + kv_cache_type_to_string(COSYVOICE_V_CACHE_TYPE(type));
+        auto result = std::format("k={},v={}",
+            kv_cache_type_to_string(COSYVOICE_K_CACHE_TYPE(type)),
+            kv_cache_type_to_string(COSYVOICE_V_CACHE_TYPE(type)));
         if (fallback != COSYVOICE_V_CACHE_TYPE(type))
-            result += ",fallback=" + kv_cache_type_to_string(fallback);
+            result += std::format(",fallback={}", kv_cache_type_to_string(fallback));
         return result;
     }
 

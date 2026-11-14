@@ -888,45 +888,28 @@ static void print_tts_runtime_info(
 
     print_section_title("Model");
     print_kv_line_u32("sample_rate", sample_rate);
-    {
-        char buf[160];
-        snprintf(buf, sizeof(buf), "requested: %d, actual: %d (%s)",
+    print_kv_line_string("diffusion_steps",
+        std::format("requested: {}, actual: {} ({})",
             options.diffusion_steps,
             cosyvoice_get_diffusion_steps(ctx),
-            options.diffusion_steps > 0 ? "cli override" : "default");
-        print_kv_line_string("diffusion_steps", buf);
-    }
+            options.diffusion_steps > 0 ? "cli override" : "default").c_str());
     if (!options.interactive)
         if (!options.seed.empty())
-        {
-            char buf[64];
-            snprintf(buf, sizeof(buf), "%u (--seed)", context_params.seed);
-            print_kv_line_string("seed", buf);
-        }
+            print_kv_line_string("seed", std::format("{} (--seed)", context_params.seed).c_str());
         else
-        {
-            char buf[64];
-            snprintf(buf, sizeof(buf), "%u (random)", context_params.seed);
-            print_kv_line_string("seed", buf);
-        }
+            print_kv_line_string("seed", std::format("{} (random)", context_params.seed).c_str());
     print_kv_line_string("strict_seed", enabled_to_string(options.strict_seed));
-    {
-        char buf[256];
-        snprintf(buf, sizeof(buf), "requested: %s, actual: %s (%s)",
-            kv_cache_type_to_string(options.llm_kv_cache_type).c_str(),
-            kv_cache_type_to_string(context_params.llm_kv_cache_type).c_str(),
-            options.has_llm_kv_cache_type ? "cli override" : "default");
-        print_kv_line_string("llm_kv_cache_type", buf);
-    }
+    print_kv_line_string("llm_kv_cache_type",
+        std::format("requested: {}, actual: {} ({})",
+            kv_cache_type_to_string(options.llm_kv_cache_type),
+            kv_cache_type_to_string(context_params.llm_kv_cache_type),
+            options.has_llm_kv_cache_type ? "cli override" : "default").c_str());
     if (options.interactive)
     {
-        {
-            char buf[256];
-            snprintf(buf, sizeof(buf), "requested: %s (%s)",
-                kv_cache_type_to_string(options.dit_kv_cache_type).c_str(),
-                options.has_dit_kv_cache_type ? "cli override" : "default");
-            print_kv_line_string("dit_kv_cache_type", buf);
-        }
+        print_kv_line_string("dit_kv_cache_type",
+            std::format("requested: {} ({})",
+                kv_cache_type_to_string(options.dit_kv_cache_type),
+                options.has_dit_kv_cache_type ? "cli override" : "default").c_str());
         print_kv_line_u32("chunk_tokens", cosyvoice_get_chunk_tokens(ctx));
     }
     print_kv_line_string("buffer_policy", inference_buffer_policy_to_string(context_params.inference_buffer_policy));
