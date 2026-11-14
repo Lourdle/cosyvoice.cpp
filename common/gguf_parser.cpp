@@ -3,7 +3,6 @@
 #include "gguf_parser.h"
 
 #include <cstring>
-#include <string>
 #include <vector>
 #include <cstdio>
 #include <format>
@@ -48,7 +47,7 @@ static inline bool read_le(const uint8_t*& p, const uint8_t* end, T& out)
     return true;
 }
 
-static inline bool read_gguf_string(const uint8_t*& p, const uint8_t* end, std::string& out)
+static inline bool read_gguf_string(const uint8_t*& p, const uint8_t* end, std::string_view& out)
 {
     uint64_t len;
     if (!read_le(p, end, len)) return false;
@@ -62,7 +61,7 @@ static inline bool read_gguf_string(const uint8_t*& p, const uint8_t* end, std::
         LOG_ERROR("string length {} exceeds remaining buffer", len);
         return false;
     }
-    out.assign(reinterpret_cast<const char*>(p), len);
+    out = std::string_view(reinterpret_cast<const char*>(p), static_cast<size_t>(len));
     p += len;
     return true;
 }
@@ -74,7 +73,7 @@ static inline bool read_gguf_string(const uint8_t*& p, const uint8_t* end, std::
 int64_t gguf_parser::find_key(const char* key_name) const
 {
     for (int64_t i = 0; i < static_cast<int64_t>(kv.size()); ++i)
-        if (strcmp(key_name, kv[i].key.c_str()) == 0) return i;
+        if (kv[static_cast<size_t>(i)].key == key_name) return i;
     return -1;
 }
 
@@ -89,31 +88,31 @@ gguf_type gguf_parser::arr_type(int64_t id) const
 
 uint32_t gguf_parser::val_u32(int64_t id) const
 {
-    if (id < 0 || id >= (int64_t)kv.size() || kv[static_cast<size_t>(id)].data.size() < 4) return 0;
+    if (id < 0 || id >= static_cast<int64_t>(kv.size()) || kv[static_cast<size_t>(id)].data.size() < 4) return 0;
     uint32_t v; std::memcpy(&v, kv[static_cast<size_t>(id)].data.data(), 4); return v;
 }
 
 int32_t  gguf_parser::val_i32(int64_t id) const
 {
-    if (id < 0 || id >= (int64_t)kv.size() || kv[static_cast<size_t>(id)].data.size() < 4) return 0;
+    if (id < 0 || id >= static_cast<int64_t>(kv.size()) || kv[static_cast<size_t>(id)].data.size() < 4) return 0;
     int32_t v; std::memcpy(&v, kv[static_cast<size_t>(id)].data.data(), 4); return v;
 }
 
 float    gguf_parser::val_f32(int64_t id) const
 {
-    if (id < 0 || id >= (int64_t)kv.size() || kv[static_cast<size_t>(id)].data.size() < 4) return 0.f;
+    if (id < 0 || id >= static_cast<int64_t>(kv.size()) || kv[static_cast<size_t>(id)].data.size() < 4) return 0.f;
     float v; std::memcpy(&v, kv[static_cast<size_t>(id)].data.data(), 4); return v;
 }
 
-const char* gguf_parser::val_str(int64_t id) const
+std::string_view gguf_parser::val_str(int64_t id) const
 {
-    if (id < 0 || id >= static_cast<int64_t>(kv.size())) return "";
-    return kv[static_cast<size_t>(id)].str_value.c_str();
+    if (id < 0 || id >= static_cast<int64_t>(kv.size())) return {};
+    return kv[static_cast<size_t>(id)].str_value;
 }
 
 size_t gguf_parser::arr_n(int64_t id) const
 {
-    if (id < 0 || id >= (int64_t)kv.size()) return 0;
+    if (id < 0 || id >= static_cast<int64_t>(kv.size())) return 0;
     const auto& e = kv[static_cast<size_t>(id)];
     if (e.type == GGUF_TYPE_STRING && e.is_array) return e.arr_strings.size();
     return e.arr_len;
@@ -121,15 +120,15 @@ size_t gguf_parser::arr_n(int64_t id) const
 
 const void* gguf_parser::arr_data(int64_t id) const
 {
-    if (id < 0 || id >= (int64_t)kv.size()) return nullptr;
+    if (id < 0 || id >= static_cast<int64_t>(kv.size())) return nullptr;
     const auto& e = kv[static_cast<size_t>(id)];
     if (e.type == GGUF_TYPE_STRING) return nullptr;
-    return e.arr_data.data();
+    return e.arr_owned.empty() ? static_cast<const void*>(e.arr_view) : e.arr_owned.data();
 }
 
 std::string_view gguf_parser::arr_str(int64_t id, size_t i) const
 {
-    if (id < 0 || id >= (int64_t)kv.size()) return "";
+    if (id < 0 || id >= static_cast<int64_t>(kv.size())) return "";
     const auto& e = kv[static_cast<size_t>(id)];
     if (i < e.arr_strings.size()) return e.arr_strings[i];
     return "";
@@ -181,6 +180,19 @@ bool gguf_parser::parse(const uint8_t* _buffer, size_t _size, ggml_context** out
         return false;
     }
 
+    // Reject counts that cannot fit in the remaining buffer before reserving:
+    // every KV pair needs at least 10 bytes, every tensor record at least 24.
+    if (static_cast<uint64_t>(n_kv) > _size / 10)
+    {
+        LOG_ERROR("kv count {} exceeds buffer size", n_kv);
+        return false;
+    }
+    if (static_cast<uint64_t>(n_tensors) > _size / 24)
+    {
+        LOG_ERROR("tensor count {} exceeds buffer size", n_tensors);
+        return false;
+    }
+
     auto buffer = _buffer;
     auto size = _size;
     kv.reserve(static_cast<size_t>(n_kv));
@@ -210,23 +222,39 @@ bool gguf_parser::parse(const uint8_t* _buffer, size_t _size, ggml_context** out
 
             if (elem_type == GGUF_TYPE_STRING)
             {
+                // Each string needs at least an 8-byte length field.
+                if (arr_len > static_cast<uint64_t>(end - p) / 8)
+                {
+                    LOG_ERROR("string array length {} exceeds buffer", arr_len);
+                    return false;
+                }
                 kv.arr_strings.resize(static_cast<size_t>(arr_len));
                 for (uint64_t j = 0; j < arr_len; ++j)
-                {
-                    uint64_t slen;
-                    if (!read_le(p, end, slen)) return false;
-                    if (static_cast<size_t>(end - p) < slen) return false;
-                    kv.arr_strings[static_cast<size_t>(j)] = std::string_view(reinterpret_cast<const char*>(p), slen);
-                    p += slen;
-                }
+                    if (!read_gguf_string(p, end, kv.arr_strings[static_cast<size_t>(j)])) return false;
             }
             else
             {
-                size_t elem_sz = gguf_type_size(elem_type);
-                kv.arr_data.resize(elem_sz * static_cast<size_t>(arr_len));
-                if (static_cast<size_t>(end - p) < kv.arr_data.size()) return false;
-                std::memcpy(kv.arr_data.data(), p, kv.arr_data.size());
-                p += kv.arr_data.size();
+                const size_t elem_sz = gguf_type_size(elem_type);
+                if (elem_sz == 0)
+                {
+                    LOG_ERROR("invalid array element type");
+                    return false;
+                }
+                if (arr_len > SIZE_MAX / elem_sz)
+                {
+                    LOG_ERROR("array length {} overflows", arr_len);
+                    return false;
+                }
+                const size_t total = elem_sz * static_cast<size_t>(arr_len);
+                if (static_cast<size_t>(end - p) < total) return false;
+
+                // Zero-copy view; copy only when the buffer view would be misaligned.
+                if (total > 0 && reinterpret_cast<uintptr_t>(p) % elem_sz != 0)
+                    kv.arr_owned.assign(reinterpret_cast<const int8_t*>(p),
+                        reinterpret_cast<const int8_t*>(p) + total);
+                else
+                    kv.arr_view = reinterpret_cast<const int8_t*>(p);
+                p += total;
             }
         }
         else
@@ -255,14 +283,14 @@ bool gguf_parser::parse(const uint8_t* _buffer, size_t _size, ggml_context** out
 
         // Name
         {
-            std::string name;
+            std::string_view name;
             if (!read_gguf_string(p, end, name)) return false;
             if (name.size() >= GGML_MAX_NAME)
             {
-                LOG_ERROR("tensor name {} too long", i);
+                LOG_ERROR("tensor '{}' name too long", name);
                 return false;
             }
-            std::strcpy(ti.t.name, name.c_str());
+            std::memcpy(ti.t.name, name.data(), name.size());
         }
 
         // Dimensions

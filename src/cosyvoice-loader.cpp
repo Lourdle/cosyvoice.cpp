@@ -1056,10 +1056,10 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     id = loader.parser.find_key("cosyvoice.instruction_prefix");
     if (id != -1)
     {
-        auto str = loader.parser.val_str(id);
-        auto len = strlen(str) + 1;
-        shared->instruction_prefix.reset(new char[len]);
-        memcpy(shared->instruction_prefix.get(), str, len);
+        const auto str = loader.parser.val_str(id);
+        shared->instruction_prefix.reset(new char[str.size() + 1]);
+        std::memcpy(shared->instruction_prefix.get(), str.data(), str.size());
+        shared->instruction_prefix.get()[str.size()] = '\0';
     }
 
     shared->config.temperature = 1.f;
@@ -1156,7 +1156,8 @@ void cosyvoice_model_3::load(gguf_loader& loader)
 
     auto arch = loader.get_string("general.architecture");
     shared->architecture.reset(new char[arch.size() + 1]);
-    memcpy(shared->architecture.get(), arch.data(), arch.size() + 1);
+    std::memcpy(shared->architecture.get(), arch.data(), arch.size());
+    shared->architecture.get()[arch.size()] = '\0';
     shared->hift_overlap = hift.overlap_length();
 
     ggml_backend_synchronize(backend);

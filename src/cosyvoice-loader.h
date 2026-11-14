@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <utility>
 #include <format>
@@ -64,7 +65,7 @@ struct gguf_metadata_loader
     {
         int64_t id = parser.find_key(key_name);
         GGML_ASSERT(id >= 0);
-        return std::string_view(parser.val_str(id));
+        return parser.val_str(id);
     }
 
     int64_t find_key(const char* key_name) const

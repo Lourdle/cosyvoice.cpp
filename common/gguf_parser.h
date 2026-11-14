@@ -6,20 +6,24 @@
 #include <gguf.h>
 
 #include <cstdint>
-#include <string>
+#include <string_view>
 #include <vector>
 
 // ---------------------------------------------------------------------------
 // Parsed GGUF context
+//
+// String and array views point directly into the buffer passed to parse();
+// that buffer must outlive the parser and any views taken from it.
 // ---------------------------------------------------------------------------
 
 struct gguf_kv_entry {
-    std::string key;
+    std::string_view key;
     bool is_array = false;
     enum gguf_type type = GGUF_TYPE_UINT8;
     std::vector<int8_t> data;
-    std::string str_value;
-    std::vector<int8_t> arr_data;
+    std::string_view str_value;
+    const int8_t* arr_view = nullptr; // zero-copy view into the parse buffer
+    std::vector<int8_t> arr_owned;    // copy used when arr_view would be misaligned
     size_t arr_len = 0;
     std::vector<std::string_view> arr_strings;
 };
@@ -48,7 +52,7 @@ public:
     uint32_t val_u32(int64_t id) const;
     int32_t  val_i32(int64_t id) const;
     float    val_f32(int64_t id) const;
-    const char* val_str(int64_t id) const;
+    std::string_view val_str(int64_t id) const;
 
     size_t arr_n(int64_t id) const;
     const void* arr_data(int64_t id) const;
