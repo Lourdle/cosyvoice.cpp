@@ -1,9 +1,5 @@
 # Tooling Guide
 
-Language: [中文](TOOLS_zh.md)
-
-Back to root: [README.md](../README.md)
-
 ## Quantization Tool (`tools/quantize`)
 Executable name: `quantize`
 
@@ -94,7 +90,7 @@ The server runs in **two modes**:
 | **WebUI** (default) | no `--api` flag, or explicit `--webui` | Serves a full-featured web interface for model/speaker management, TTS generation, and speaker extraction. |
 | **API** | `--api` flag | Headless OpenAI Speech-compatible API server. |
 
-The default mode is `WEBUI` (unless the server was compiled with `COSYVOICE_SERVER_DEFAULT_MODE=API`). When the default is `API` and insufficient arguments are given for API mode, the server falls back to WebUI instead of exiting with an error.
+The default mode is `WebUI` (unless the server was compiled with `COSYVOICE_SERVER_DEFAULT_MODE=API`). When the default is `API` and insufficient arguments are given for API mode, the server falls back to WebUI instead of exiting with an error.
 
 ### Quick Start
 
@@ -147,7 +143,7 @@ The WebUI provides a modern single-page application with the following capabilit
 - **Audio trimmer**: visual waveform with start/end markers for fine-grained selection before extraction.
 - **Save speaker**: export a registered speaker's prompt speech as a `.gguf` file.
 - **Delete speaker**: remove a registered speaker from the server.
-- **persistent state**: speaker names and settings are recovered from `localStorage` across page reloads.
+- **Persistent state**: speaker names and settings are recovered from `localStorage` across page reloads.
 
 #### TTS Generation
 - **Text input** with configurable voice, mode (zero-shot / instruct / cross-lingual), and output format.
@@ -158,7 +154,7 @@ The WebUI provides a modern single-page application with the following capabilit
 - **Audio playback**: generated audio plays directly in the browser with a live waveform visualizer. Streaming mode uses MediaSource for true progressive playback.
 - **Download**: save generated audio as a file.
 - **History panel**: recent generations are cached up to 20 entries; click to replay or re-download.
-- **Responsive output formats**: `wav`, `mp3`, `flac`, `opus`, `aac`, `m4a`, `pcm` (subset depends on FFmpeg runtime). Streaming via the WebUI browser player requires MP3, Opus, AAC or FLAC (the MediaSource API does not support WAV progressive playback; WAV streaming via the API works through chunked transfer with a placeholder header).
+- **Multiple output formats**: `wav`, `mp3`, `flac`, `opus`, `aac`, `m4a`, `pcm` (subset depends on FFmpeg runtime). Streaming via the WebUI browser player requires MP3, Opus, AAC or FLAC (the MediaSource API does not support WAV progressive playback; WAV streaming via the API works through chunked transfer with a placeholder header).
 - **Theme toggle**: light / dark mode, persisted in `localStorage`.
 
 #### Drag & Drop
@@ -214,7 +210,7 @@ If provided at startup, the WebUI pre-populates the frontend configuration field
 
 | Option | Description |
 |--------|-------------|
-| `--max-llm-len <value>` | Maximum LLM sequence length. Default: `2048`. |
+| `--max-llm-len <value>` | Maximum LLM sequence length. Default: `4096`. |
 | `--threads, -j <value>` | CPU thread count. Default: `0` (hardware concurrency). |
 | `--inference-buffer-policy <shared\|balanced\|dedicated>` | Inference buffer policy. Default: `dedicated`. |
 | `--llm-kv-cache-type <f32\|f16\|q8_0\|q5_1\|q5_0\|q4_1\|q4_0\|k=<type>,v=<type>[,fallback=<type>]>` | LLM KV cache type. Single type (e.g. `q8_0`) uses the same format for K and V. Default: `k=q8_0,v=q4_0,fallback=q8_0`. |
@@ -318,7 +314,7 @@ Returns server status as JSON:
   "model": "cosyvoice-3",
   "sample_rate": 24000,
   "strict_seed": true,
-  "max_llm_len": 2048,
+  "max_llm_len": 4096,
   "k_cache_type": "Q8_0",
   "v_cache_type": "Q4_0",
   "buffer_policy": "dedicated",
@@ -410,7 +406,7 @@ Returns `{"success": true}` on `200`, or `409` with `{"error": "No model loaded"
 Returns default model parameters as JSON (field set varies based on loaded model):
 ```json
 {
-  "max_llm_len": 2048,
+  "max_llm_len": 4096,
   "strict_seed_mode": true,
   "temperature": 1.0,
   "top_k": 50,
@@ -422,7 +418,7 @@ Returns default model parameters as JSON (field set varies based on loaded model
   "default_dit_kv_offloadable_slots": 0,
   "default_dit_kv_actual_fixed_slots": 0,
   "default_dit_kv_actual_offloadable_slots": 0,
-  "default_dit_kv_cache_length": 20480,
+  "default_dit_kv_cache_length": 40960,
   "default_diffusion_steps": 0,
   ...
 }
@@ -438,7 +434,7 @@ Loads a model into the server at runtime. JSON body:
   "model_path": "/data/models/cosyvoice-3.gguf",
   "backend": "auto",
   "n_threads": 8,
-  "max_llm_len": 2048,
+  "max_llm_len": 4096,
   "buffer_policy": "dedicated",
   "k_cache_type": "q8_0",
   "v_cache_type": "q4_0",
@@ -771,7 +767,7 @@ Core options:
 - `--seed <value>`: Random seed for sampling and internal noise generation. Must be an unsigned 32-bit integer. Default: random.
 - `--seed-policy <auto|fixed|random>`: Seed strategy. `auto` = `fixed` if `--seed` is given, otherwise `random`. Default: `auto`. Ignored in `--frontend-only` mode (warning will be printed).
 - `--strict-seed <0|1>`: Strictly guarantee identical audio for the same sampler seed, at the cost of a small extra prefill pass. Disable for a slightly faster prefill (strict seed reproducibility is then no longer guaranteed). Default: `1` (enabled).
-- `--max-llm-len <value>`: Maximum input token count for LLM (`n_max_seq`). Default: `2048`. Must be a positive integer.
+- `--max-llm-len <value>`: Maximum input token count for LLM (`n_max_seq`). Default: `4096`. Must be a positive integer.
 - `--threads, -j <value>`: CPU thread count for model inference. Must be an unsigned 32-bit integer. Default: `0` (use current hardware concurrency).
 - `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>`: LLM KV cache type. Single type (e.g. `q8_0`) uses the same format for K and V. Use separate K/V types (e.g. `k=q8_0,v=q4_0`) for different formats. Default: `k=q8_0,v=q4_0,fallback=q8_0`.
 - `--inference-buffer-policy <shared|balanced|dedicated>`: Inference buffer policy. Only effective in interactive mode; non-interactive mode always uses `shared` for minimal memory footprint and fastest single-shot synthesis. Default: `dedicated`.
@@ -843,7 +839,7 @@ Required vs optional:
 - Required for normal TTS: `--model`, `--text`, `--output`, and one prompt source (`--prompt-speech` OR frontend inputs).
 - Required for `--frontend-only`: `--speech-tokenizer`, `--campplus`, audio input, `--prompt-speech-output`.
 - Optional parameters use defaults from CLI or model metadata:
-  - CLI defaults: `--speed=1.0`, `--max-llm-len=2048`, `--threads=0` (hardware concurrency), `--llm-kv-cache-type=k=q8_0,v=q4_0,fallback=q8_0`, `--mode=auto`.
+  - CLI defaults: `--speed=1.0`, `--max-llm-len=4096`, `--threads=0` (hardware concurrency), `--llm-kv-cache-type=k=q8_0,v=q4_0,fallback=q8_0`, `--mode=auto`.
   - Sampling defaults (`temperature`, `top_k`, `top_p`, `win_size`, `tau_r`, token/text ratios) come from model config unless overridden by CLI.
 
 ## CLI Quick Reference
@@ -863,7 +859,7 @@ Required vs optional:
 |---|---|---|
 | `--mode` | `auto` | CLI |
 | `--speed` | `1.0` | CLI |
-| `--max-llm-len` | `2048` | CLI |
+| `--max-llm-len` | `4096` | CLI |
 | `--threads` | `0` (hardware concurrency) | CLI |
 | `--llm-kv-cache-type` | `k=q8_0,v=q4_0,fallback=q8_0` | CLI |
 | `--inference-buffer-policy` | `dedicated` (interactive) / `shared` (non-interactive) | CLI |

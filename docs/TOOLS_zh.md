@@ -1,9 +1,5 @@
 ﻿# 工具使用说明
 
-语言： [English](TOOLS.md)
-
-返回仓库主页：[README_zh.md](../README_zh.md)
-
 ## 量化工具（`tools/quantize`）
 可执行文件名：`quantize`
 
@@ -94,7 +90,7 @@ quantize -f model.gguf -o model-q4_k_s.gguf -t Q4_K -M tools/quantize/profiles/c
 | **WebUI**（默认） | 不加 `--api`，或显式加 `--webui` | 提供完整的 Web 界面，支持模型/音色管理、TTS 生成、音色提取等功能。 |
 | **API** | 加 `--api` | 无界面 OpenAI Speech 兼容 API 服务。 |
 
-默认模式为 `WEBUI`（除非使用 `COSYVOICE_SERVER_DEFAULT_MODE=API` 编译）。当默认模式为 API 但命令行参数不足以启动 API 时，服务会自动回退到 WebUI 模式而非报错退出。
+默认模式为 `WebUI`（除非使用 `COSYVOICE_SERVER_DEFAULT_MODE=API` 编译）。当默认模式为 API 但命令行参数不足以启动 API 时，服务会自动回退到 WebUI 模式而非报错退出。
 
 ### 快速开始
 
@@ -213,7 +209,7 @@ WebUI 是一个现代化的单页应用，提供以下功能：
 
 | 参数 | 说明 |
 |------|------|
-| `--max-llm-len <value>` | LLM 最大序列长度，默认 `2048`。 |
+| `--max-llm-len <value>` | LLM 最大序列长度，默认 `4096`。 |
 | `--threads, -j <value>` | CPU 线程数，默认 `0`（硬件并发数）。 |
 | `--concurrency, -c <value>` | 并发请求槽数，默认 `1`（仅 API 模式；WebUI 模式始终为单槽）。 |
 | `--inference-buffer-policy <shared\|balanced\|dedicated>` | 推理缓冲区策略，默认 `dedicated`。 |
@@ -318,7 +314,7 @@ WebUI 暴露以下 REST 接口，由前端 JavaScript 调用：
   "model": "cosyvoice-3",
   "sample_rate": 24000,
   "strict_seed": true,
-  "max_llm_len": 2048,
+  "max_llm_len": 4096,
   "k_cache_type": "Q8_0",
   "v_cache_type": "Q4_0",
   "buffer_policy": "dedicated",
@@ -410,7 +406,7 @@ JSON 请求体：
 返回模型默认参数 JSON（字段集因已加载模型而异）：
 ```json
 {
-  "max_llm_len": 2048,
+  "max_llm_len": 4096,
   "strict_seed_mode": true,
   "temperature": 1.0,
   "top_k": 50,
@@ -422,7 +418,7 @@ JSON 请求体：
   "default_dit_kv_offloadable_slots": 0,
   "default_dit_kv_actual_fixed_slots": 0,
   "default_dit_kv_actual_offloadable_slots": 0,
-  "default_dit_kv_cache_length": 20480,
+  "default_dit_kv_cache_length": 40960,
   "default_diffusion_steps": 0,
   …
 }
@@ -438,7 +434,7 @@ DiT KV cache 默认值从加载后的生效配置中获取。`chunk_tokens` 反�
   "model_path": "/data/models/cosyvoice-3.gguf",
   "backend": "auto",
   "n_threads": 8,
-  "max_llm_len": 2048,
+  "max_llm_len": 4096,
   "buffer_policy": "dedicated",
   "k_cache_type": "q8_0",
   "v_cache_type": "q4_0",
@@ -749,7 +745,7 @@ cosyvoice-cli \
 - `--seed <value>`：采样与内部噪声生成的随机种子，必须是无符号 32 位整数；默认随机。
 - `--seed-policy <auto|fixed|random>`：seed 策略。`auto` 表示给出 `--seed` 时按 `fixed`、否则按 `random`。默认 `auto`。`--frontend-only` 模式下忽略（会打印警告）。
 - `--strict-seed <0|1>`：严格保证相同 sampler seed 生成完全一致的音频，代价是多一次较小的 prefill 通道；关闭后 prefill 略快，但不再严格保证 seed 可复现。默认 `1`（启用）。
-- `--max-llm-len <value>`：LLM 最大输入 token 数（`n_max_seq`），默认 `2048`，必须为正整数。
+- `--max-llm-len <value>`：LLM 最大输入 token 数（`n_max_seq`），默认 `4096`，必须为正整数。
 - `--threads, -j <value>`：模型推理使用的 CPU 线程数，必须是无符号 32 位整数；默认 `0`（使用当前硬件并发数）。
 - `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>`：LLM KV cache 类型。单一类型（如 `q8_0`）为 K 和 V 使用相同格式。可使用独立 K/V 类型（如 `k=q8_0,v=q4_0`）指定不同格式。默认 `k=q8_0,v=q4_0,fallback=q8_0`。
 - `--inference-buffer-policy <shared|balanced|dedicated>`：推理缓冲区策略。仅在交互模式下生效；非交互模式始终使用 `shared` 以最小化内存占用并获得最快的单次合成速度。默认 `dedicated`。
@@ -821,7 +817,7 @@ cosyvoice-cli \
 - 常规 TTS 必填：`--model`、`--text`、`--output`，以及一个提示源（`--prompt-speech` 或前端输入）。
 - `--frontend-only` 必填：`--speech-tokenizer`、`--campplus`、音频输入、`--prompt-speech-output`。
 - 可选参数默认值来自 CLI 或模型元数据：
-  - CLI 默认：`--speed=1.0`、`--max-llm-len=2048`、`--threads=0`（硬件并发数）、`--llm-kv-cache-type=k=q8_0,v=q4_0,fallback=q8_0`、`--mode=auto`。
+  - CLI 默认：`--speed=1.0`、`--max-llm-len=4096`、`--threads=0`（硬件并发数）、`--llm-kv-cache-type=k=q8_0,v=q4_0,fallback=q8_0`、`--mode=auto`。
   - 采样默认（`temperature/top_k/top_p/win_size/tau_r/token-text ratio`）来自模型配置，未传参数时不变。
 
 ## CLI 快速索引
@@ -841,7 +837,7 @@ cosyvoice-cli \
 |---|---|---|
 | `--mode` | `auto` | CLI |
 | `--speed` | `1.0` | CLI |
-| `--max-llm-len` | `2048` | CLI |
+| `--max-llm-len` | `4096` | CLI |
 | `--threads` | `0`（硬件并发数） | CLI |
 | `--llm-kv-cache-type` | `k=q8_0,v=q4_0,fallback=q8_0` | CLI |
 | `--inference-buffer-policy` | `dedicated`（交互模式）/ `shared`（非交互模式） | CLI |

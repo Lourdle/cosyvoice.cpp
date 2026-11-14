@@ -1,6 +1,6 @@
 ﻿# SIMD 层级架构（开发者参考）
 
-面向用户的概述见 [README_zh.md — SIMD 加速](../README_zh.md#simd-加速)。本文覆盖内部结构：文件布局、能力模型、分派规则、AVX10 策略与构建期开关。
+面向用户的概述见 [README_zh.md — 功能特性](../README_zh.md#功能特性) 中的 SIMD 行、[TOOLS_zh.md](TOOLS_zh.md) 中的 `--simd-level` 选项，以及 [ENVIRONMENT_zh.md](ENVIRONMENT_zh.md#cosyvoice_simd_level) 中的 `COSYVOICE_SIMD_LEVEL` 运行时开关。本文覆盖内部结构：文件布局、能力模型、分派规则、AVX10 策略与构建期开关。
 
 ## 文件布局
 

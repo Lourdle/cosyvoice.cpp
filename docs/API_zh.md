@@ -1,4 +1,4 @@
-# CosyVoice API 参考（中文）
+﻿# CosyVoice API 参考（中文）
 
 本索引按头文件拆分列出 API 文档。
 

@@ -24,13 +24,9 @@
 ## 目录
 - [功能特性](#功能特性)
 - [快速开始](#快速开始)
+- [基本用法](#基本用法)
 - [预转换模型](#预转换模型)
 - [推理流程](#推理流程)
-- [工具使用说明](#工具使用说明)
-- [构建](#构建)
-- [SIMD 加速](#simd-加速)
-- [流式 TTS 与 DiT KV 缓存](#流式-tts-与-dit-kv-缓存)
-- [模型转 GGUF](#模型转-gguf)
 - [后端测试情况](#后端测试情况)
 - [故障排查](#故障排查)
 - [文档](#文档)
@@ -60,7 +56,7 @@
 | **推理 Buffer 策略** | `shared` / `balanced` / `dedicated` 三种模式，权衡内存与吞吐 |
 | **文本拆分与淡入** | 长文本智能拆分与可配置的输出淡入后处理 |
 | **多后端支持** | CPU、CUDA、Metal、Vulkan、SYCL（见[后端测试情况](#后端测试情况)） |
-| **自适应 SIMD 分派** | CPU DSP 热点（FFT、mel/频谱 kernel、log/sincos）按指令集分层编译——标量、SSE4.2、AVX、AVX2（+FMA3）、AVX-512、AVX10.1——运行时经 CPUID 探测自动选择 CPU 支持的最快层级；ARM64 可选通过 SIMDe 在 NEON 上模拟 SSE4.2+FMA3。单一二进制全平台通用（见 [SIMD 加速](#simd-加速)） |
+| **自适应 SIMD 分派** | CPU DSP 热点按指令集分层编译（标量、SSE4.2、AVX、AVX2+FMA3、AVX-512、AVX10.1），运行时自动选择——见 [docs/SIMD_zh.md](docs/SIMD_zh.md) |
 | **跨平台** | Windows (x64)、Linux (x86_64)、macOS (arm64) — 均在 CI 中测试 |
 
 ## 快速开始
@@ -77,9 +73,9 @@
 
 > **系统库：** `icu=ON` 与 `audio=FFMPEG` 变体会动态链接 `libicuuc`/`libicui18n` 与 `libav*`/`libswresample`，这些库已从发布包中剥离——请自行安装（或直接放到可执行文件旁）。`no_icu`、`miniaudio` 与 `no_audio` 变体除 GGML 外无其他依赖。
 
-> **macOS（Metal）上的 GGML 版本要求：** Metal 的 `GGML_OP_PAD` 内核必须支持 beg（左侧）填充。上游在 [ggml-org/llama.cpp#29561](https://github.com/ggml-org/llama.cpp/pull/29561)（ggml 提交 `46fc5b3b`，2026-09-28）中加入了该支持，因此请使用该日期之后构建的 `llama.cpp` release。更旧的 GGML 在任一 beg 填充非零时会把 `GGML_OP_PAD` 判定为不支持，推理会直接中止：覆盖 Flow 解码器 PAD 节点的 CPU 回退并未应用到每一个含 `PAD` 的图——LLM 输入嵌入所在的图就没有。Windows/Linux 无此版本约束，但建议仍保持版本一致。
+> **macOS（Metal）上的 GGML 版本要求：** Metal 的 `GGML_OP_PAD` 内核必须支持 beg（左侧）填充。上游在 [ggml-org/llama.cpp#29561](https://github.com/ggml-org/llama.cpp/pull/29561)（ggml 提交 `46fc5b3b`，2026-09-28）中加入了该支持，因此请使用该日期之后构建的 `llama.cpp` release。更旧的 GGML 在任一 beg 填充非零时会把 `GGML_OP_PAD` 判定为不支持，推理会直接中止。Windows/Linux 无此版本约束，但建议仍保持版本一致。
 
-> **预编译 GGML CUDA 后端已知问题（Issue [#15](https://github.com/Lourdle/cosyvoice.cpp/issues/15)）：** 有用户反馈使用 `llama.cpp` 预编译发布版的 GGML CUDA 后端时，生成的音频存在噪音。测试确认了预编译 GGML CUDA 版本存在此问题，而自行从源码编译的 GGML 则未出现该问题。如果您在使用 CUDA 后端配合预编译 GGML 时遇到噪音，建议参考本文[构建](#构建)章节，将本项目与 GGML 一同从源码编译。如果不想自行编译，也可以直接改用 **Vulkan 后端**——它与 llama.cpp 的预编译 GGML 发布包配合良好，开箱即用。
+> **预编译 GGML CUDA 后端已知问题（Issue [#15](https://github.com/Lourdle/cosyvoice.cpp/issues/15)）：** 有用户反馈使用 `llama.cpp` 预编译发布版的 GGML CUDA 后端时，生成的音频存在噪音。测试确认了预编译 GGML CUDA 版本存在此问题，而自行从源码编译的 GGML 则未出现该问题。如果您在使用 CUDA 后端配合预编译 GGML 时遇到噪音，建议将本项目与 GGML 一同从源码编译。如果不想自行编译，也可以直接改用 **Vulkan 后端**——它与 llama.cpp 的预编译 GGML 发布包配合良好，开箱即用。
 
 ### 从源码构建
 
@@ -88,7 +84,38 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
 ```
 
-构建产物在 `build/bin`（可执行文件）和 `build/lib`（库文件）。详细构建选项、服务端特殊要求和后端配置见[构建](#构建)章节。
+构建产物在 `build/bin`（可执行文件）和 `build/lib`（库文件）。详细构建选项、服务端特殊要求和后端配置见 [docs/BUILD_zh.md](docs/BUILD_zh.md)。
+
+## 基本用法
+
+```bash
+# zero-shot TTS：前端 + TTS 一条命令完成
+cosyvoice-cli --model model.gguf \
+  --speech-tokenizer speech_tokenizer.onnx --campplus campplus.onnx \
+  --prompt-audio ref.wav --prompt-text "参考文本" \
+  --text "目标文本" --output out.wav
+
+# 复用预编码的 prompt_speech（跳过 ONNX 前端）
+cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf \
+  --text "hello" --output out.wav
+
+# 预编码 prompt_speech，供后续复用
+cosyvoice-cli --frontend-only --speech-tokenizer speech_tokenizer.onnx \
+  --campplus campplus.onnx --prompt-audio ref.wav \
+  --prompt-text "参考文本" --prompt-speech-output prompt_speech.gguf
+
+# 交互模式
+cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --interactive
+
+# OpenAI 兼容 API 服务，含 WebUI
+cosyvoice-server --model model.gguf \
+  --voice-prompt alloy=prompt_alloy.gguf --host 0.0.0.0 --port 8080
+
+# 量化 GGUF 模型
+quantize -f model.gguf -o model-q4k.gguf -t Q4_K
+```
+
+完整命令、参数和示例见 [docs/TOOLS_zh.md](docs/TOOLS_zh.md)。
 
 ## 预转换模型
 
@@ -97,7 +124,7 @@ cmake --build build --config Release
 - **ModelScope**：<https://modelscope.cn/models/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
 - **Hugging Face**：<https://huggingface.co/Lourdle/Fun-CosyVoice3-0.5B-2512-GGUF>
 
-上述链接包含 Q2_K 到 F16 的多种量化变体。
+上述链接包含 Q2_K 到 F16 的多种量化变体。如需自行转换上游模型权重，见 [docs/CONVERT_zh.md](docs/CONVERT_zh.md)。
 
 ## 推理流程
 
@@ -124,354 +151,7 @@ flowchart TD
   - `zero-shot` 模式需要 `--prompt-text`；`instruct` / `cross-lingual` 模式忽略它。
 - **路径 2（复用）**：通过 `--frontend-only` / `--prompt-speech-output` 运行一次前端，后续合成跳过 ONNX 模型。适合批量/重复合成。
 
-## 工具使用说明
-
-本仓库包含 3 个面向使用者的工具：
-- `cosyvoice-cli`：本地文件式 TTS 合成（支持复用 prompt_speech，以及前端 + TTS 一体流程）。
-- `cosyvoice-server`：OpenAI Speech 兼容 HTTP API 服务，适合服务化接入。
-- `quantize`：GGUF 量化工具，用于将模型转换为更小/更快的量化格式。支持通过 PCRE2 正则逐 tensor 指定量化类型（`-M/--tensor-map`）。预置的 CosyVoice3-2512 profile 见 `tools/quantize/profiles/`。
-
-完整命令、参数和示例见 [docs/TOOLS_zh.md](docs/TOOLS_zh.md)。
-
-## 构建
-
-### 环境要求
-- CMake >= 3.28
-- 支持 C++20 的 C/C++ 编译器
-- Git（当本地缺少 GGML 源码时用于自动拉取）
-- 不要求特定的 x86 指令集：CPU DSP 路径通过运行时分派自动选择 CPU 支持的最快层级，最低可回退到纯 x86-64 标量基线（见 [SIMD 加速](#simd-加速)）
-- SIMD 数学路径（如 `log`、三角函数）在所有受支持的工具链上均按层级编译（MSVC `/arch:...`、GCC/Clang `-m...`）；非 x86 平台可选 SIMDe 模拟 SSE4.2+FMA3 类，否则回退为标量实现
-
-后端/运行时依赖会随构建选项变化（CUDA/Vulkan/CPU、ONNX Runtime、ICU 等）。
-
-### 基本构建
-
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
-```
-
-构建产物默认输出到：
-- `build/bin`（可执行文件与运行时 DLL）
-- `build/lib`（库文件）
-
-### Server 构建须知（非 Windows 平台）
-
-在 Linux/macOS 上编译 `cosyvoice-server` 需在以下两方面额外留意：
-
-**C23 `#embed` 嵌入 WebUI 资源**
-WebUI 资源嵌入通过 C23 `#embed` 指令将 HTML/CSS/JS 打包到可执行文件中，因此需要 **C 编译器**支持 C23——即 GCC 15+ 或 Clang 19+。Windows 通过原生 RC 工具嵌入资源，无需特殊编译器。
-
-示例——指定支持 C23 的 C 编译器：
-```bash
-# Ubuntu/Debian — 用 clang-20 作为 C 编译器
-sudo apt install clang-20
-cmake -B build -DCMAKE_C_COMPILER=clang-20 -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
-```
-
-**C++20 模块**
-服务端使用了 C++20 模块接口（封装 nlohmann/json 和 cpp-httplib）。**建议**使用 **Ninja** 生成器（1.11+）配合较新的 C++ 编译器（GCC 14+ / Clang 16+ / MSVC 14.34+）以获得完整的模块扫描支持：
-- 在 cmake 配置时添加 `-G Ninja`。
-- Windows：Visual Studio 生成器完整支持模块扫描——无需额外参数。
-- 不支持的生成器或旧版编译器：CMake 会自动检测并**回退到预编译头（PCH）**。
-
-Linux/macOS 推荐配置：
-```bash
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
-```
-
-### CMake 选项
-
-**项目选项**
-
-| 选项 | 取值 | 默认值 | 说明 |
-|---|---|---|---|
-| `BUILD_SHARED_LIBS` | ON / OFF | ON | 构建为共享库 |
-| `COSYVOICE_NO_AUDIO` | ON / OFF | OFF | 关闭音频辅助 API |
-| `COSYVOICE_NO_FRONTEND` | ON / OFF | OFF | 关闭 ONNX 前端 |
-| `COSYVOICE_NO_ICU` | ON / OFF | OFF | 关闭 ICU 文本规范化 |
-| `COSYVOICE_AUDIO_BACKEND` | MINIAUDIO / FFMPEG | MINIAUDIO | 音频编解码后端 |
-| `COSYVOICE_CLI_NO_PLAYBACK` | ON / OFF | 未设置（跟随 `COSYVOICE_NO_AUDIO`） | 关闭 CLI 播放功能 |
-| `COSYVOICE_SERVER_NO_WEBUI` | ON / OFF | OFF | 关闭嵌入式 WebUI，仅以 API 模式运行；非 Windows 平台可移除 C23 `#embed` 依赖 |
-| `COSYVOICE_SERVER_DEFAULT_MODE` | WEBUI / API | WEBUI | 命令行未指定 `--api` 或 `--webui` 时的默认模式。设为 `API` 可用于纯后端部署 |
-
-**后端选项**
-
-GGML 后端选项可直接从根工程透传。常见示例：
-
-```bash
-# CUDA 后端
-cmake -B build -DGGML_CUDA=ON
-
-# Vulkan 后端
-cmake -B build -DGGML_VULKAN=ON
-```
-
-完整后端选项列表及推荐配置请参考 [GGML 文档](https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md)。
-
-**Metal 后端（`GGML_METAL`）**
-
-- `GGML_METAL` 在 Apple Silicon 上**默认为 ON**（见 ggml 自身 CMakeLists），也可用 `-DGGML_METAL=ON/OFF` 强制指定。
-- GGML 本身对 Metal 无需任何特殊处理：所有平台统一浅克隆（`--depth=1`）最新 master，且不应用任何补丁。此前需要打补丁的 Metal PAD beg-padding 支持已进入上游 [ggml-org/llama.cpp#29561](https://github.com/ggml-org/llama.cpp/pull/29561)（ggml 提交 `46fc5b3b`），该提交还一并加入了 circular 填充与 permute 源的支持。
-- 若已有的 `vendor/ggml` 早于该提交，CMake 会发出警告（不中断），因为它的 Metal PAD 内核会导致推理中止——删掉 `vendor/ggml` 并重新运行 CMake 即可拉取新版本。
-
-```bash
-# 强制开启/关闭 Metal（Apple Silicon 默认开启）
-cmake -B build -DGGML_METAL=ON
-```
-
-**依赖路径选项**
-
-| 选项 | 说明 |
-|---|---|
-| `GGML_SOURCE_DIR=<path>` | GGML 源码路径（默认 `vendor/ggml`），目录不存在时自动克隆 |
-| `ICU_PREBUILT_DIR=<path>` | ICU 预编译二进制路径（默认 `<build_dir>/_deps/icu`） |
-| `ORT_PREBUILT_DIR=<path>` | ONNX Runtime 预编译二进制路径（默认 `<build_dir>/_deps/onnxruntime`） |
-| `FFMPEG_PREBUILT_DIR=<path>` | FFmpeg 预编译二进制路径 |
-| `SIMDE_INCLUDE_DIR=<path>` | ARM64/aarch64（含 Android 交叉编译）的 SIMDe 头文件目录（可选，未提供时自动降级为纯标量）——见 [SIMDe（SIMD Everywhere）](#simdesimd-everywhere) |
-
-**链接时优化（LTO）**
-
-默认启用（`CMAKE_INTERPROCEDURAL_OPTIMIZATION=TRUE`）。通过折叠完全相同的 SIMD tier 函数体和内联跨 TU 小函数，减少约 3% 二进制体积。已在 MSVC、GCC、Clang 上验证安全——各编译单元的 `/arch` 标记在 LTO codegen 中保持隔离。
-
-```bash
-# 需要更快迭代时可禁用
-cmake -B build -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF
-```
-
-### 常见构建矩阵
-
-| 场景 | 推荐 CMake 参数 |
-|---|---|
-| CUDA 后端 | `-DGGML_CUDA=ON` |
-| Vulkan 后端 | `-DGGML_VULKAN=ON` |
-| 仅 CPU | 通常不需要额外后端参数 |
-| 仅核心能力（无 frontend / ICU） | `-DCOSYVOICE_NO_FRONTEND=ON -DCOSYVOICE_NO_ICU=ON` |
-| 关闭音频辅助 API | `-DCOSYVOICE_NO_AUDIO=ON` |
-| 关闭 CLI 播放功能 | `-DCOSYVOICE_CLI_NO_PLAYBACK=ON` |
-
-常见组合示例：
-
-```bash
-# 仅核心功能构建（关闭 ONNX 前端与 ICU 文本规范化）
-cmake -B build-core -DCMAKE_BUILD_TYPE=Release -DCOSYVOICE_NO_FRONTEND=ON -DCOSYVOICE_NO_ICU=ON
-
-# 无音频辅助 API 构建（CLI 走 WAV 输出回退路径）
-cmake -B build-noaudio -DCMAKE_BUILD_TYPE=Release -DCOSYVOICE_NO_AUDIO=ON
-
-# 关闭 CLI 播放功能（音频辅助 API 仍可用）
-cmake -B build-noplay -DCMAKE_BUILD_TYPE=Release -DCOSYVOICE_CLI_NO_PLAYBACK=ON
-```
-
-### 依赖解析方式
-
-顶层 CMake 按以下顺序解析依赖：
-
-- **PCRE2**：从 `vendor/pcre2` 构建静态库（`pcre2-8`、`pcre2-16`）。
-- **GGML**：使用 `GGML_SOURCE_DIR`（默认 `vendor/ggml`）。若目录不存在，会自动克隆 `https://github.com/ggml-org/ggml.git`。
-- **ICU**（用于文本规范化，除非通过 `COSYVOICE_NO_ICU` 关闭）：解析顺序：`ICU_PREBUILT_DIR` → `find_package(ICU)` → Windows 自动下载 → Linux/macOS 使用系统 ICU。
-- **ONNX Runtime**（用于前端，除非通过 `COSYVOICE_NO_FRONTEND` 关闭）：解析顺序：`ORT_PREBUILT_DIR` → `find_package(onnxruntime)` → 自动下载。
-
-Windows 下预编译依赖 DLL 会复制到可执行文件旁。
-
-### 使用自定义依赖
-
-可以通过缓存变量指定自定义依赖路径：
-
-```bash
-cmake -B build \
-  -DGGML_SOURCE_DIR=/path/to/ggml \
-  -DICU_PREBUILT_DIR=/path/to/icu \
-  -DORT_PREBUILT_DIR=/path/to/onnxruntime \
-  -DSIMDE_INCLUDE_DIR=/path/to/simde
-```
-
-也可以直接使用构建目录下的默认预编译依赖位置：
-- `<build_dir>/_deps/icu`
-- `<build_dir>/_deps/onnxruntime`
-
-只要按期望目录结构把文件放进去，CMake 会自动识别（不需要额外 `-D`）。
-
-期望的关键目录/文件：
-- ICU：`include/unicode/utypes.h`（以及 `lib*` / `bin*` 下的库和 DLL）
-- ONNX Runtime：`include/onnxruntime_c_api.h`（以及 `lib` 下的运行库文件）
-
-### SIMDe（SIMD Everywhere）
-
-[SIMD 加速](#simd-加速)一节描述的各层级代码按 x86 内联函数编写。[SIMDe](https://github.com/simd-everywhere/simde) 是一个纯头文件库，可将这些 x86 内联函数翻译到其他指令集——在 ARM64/aarch64 上，模拟的 SSE4.2+FMA3 类代码无需修改即可编译为 NEON。
-
-CMake 的处理方式（`CMakeLists.txt`）：
-
-- **x86_64**：完全不需要 SIMDe——每个层级都在自己的指令集上原生执行。
-- **ARM64/aarch64（含 Android 交叉编译）**：SIMDe 为**可选**。CMake 会在 `/opt/homebrew/include`、`/usr/local/include`、`/usr/include`、`vendor/simde/`（或 `-DSIMDE_INCLUDE_DIR=<path>`）中查找 `simde/x86/sse4.2.h`：找到时经 NEON 模拟 SSE4.2+FMA3 类（此时标量层甚至不会被编译——非 x86 的分派总是直接选择模拟类）；找不到时自动降级为纯标量内核。
-
-获取 SIMDe：
-
-```bash
-# macOS
-brew install simde
-
-# Debian/Ubuntu（部分发行版可能没有该包）
-apt install libsimde-dev
-
-# 通用方式——克隆并用 SIMDE_INCLUDE_DIR 指向
-git clone --depth=1 https://github.com/simd-everywhere/simde.git
-cmake -B build -DSIMDE_INCLUDE_DIR=/path/to/simde
-```
-
-Android 相关细节见 [docs/build-android.md](docs/build-android.md)。
-
-### 音频后端与 FFmpeg
-
-本项目的音频辅助 API 支持两种后端：
-
-- `MINIAUDIO`（默认）：提供 WAV I/O 与基本 PCM 帮助函数。
-- `FFMPEG`（可选）：在链接的 FFmpeg 运行时提供所需编码器时，启用更多编码/解码格式。
-
-通过 CMake 配置音频后端：将 `COSYVOICE_AUDIO_BACKEND` 设为 `MINIAUDIO` 或 `FFMPEG`。默认值为 `MINIAUDIO`。
-
-示例：
-```bash
-cmake -B build -DCOSYVOICE_AUDIO_BACKEND=MINIAUDIO
-cmake -B build -DCOSYVOICE_AUDIO_BACKEND=FFMPEG
-cmake -B build -DCOSYVOICE_AUDIO_BACKEND=FFMPEG -DFFMPEG_PREBUILT_DIR=/path/to/ffmpeg
-```
-
-如果启用 FFmpeg 支持，公开音频 API 的函数名保持不变。可使用 `cosyvoice_audio_supported_encoding_formats()` 查询当前链接的 FFmpeg 运行时真正支持哪些格式。
-
-FFmpeg 使用要点：
-
-- 在 Windows 上，构建脚本默认在未提供 `FFMPEG_PREBUILT_DIR` 时下载 BtbN 的预编译 FFmpeg。
-- 在 Linux/macOS 上，若系统提供 FFmpeg（apt/homebrew），项目会优先使用系统库；否则可通过 `FFMPEG_PREBUILT_DIR` 指定预编译位置。
-- API 层支持 `wav`、`mp3`、`aac`、`flac`、`m4a`、`opus`，但具体可用格式取决于当前链接的 FFmpeg 构建。库会在运行时探测可用编码器，并通过 API / CLI / server 帮助文本暴露支持集合。
-- `m4a` 是这里提供的非标准便捷扩展。OpenAI Speech 标准并没有定义 `m4a`，只在你的客户端/服务端理解这个扩展时使用。
-- 如果客户端请求了运行时不可用的格式，服务/CLI 会建议回退到 `wav` 或 `pcm`。
-- 在 Windows 上，构建脚本会把找到的 FFmpeg 运行时 DLL 复制到可执行文件目录。若你使用自定义预编译 FFmpeg，请确认其 `bin` / `lib` 目录结构符合 `cmake/Dependencies.cmake` 的预期。
-
-许可证提醒：
-
-- 本仓库代码采用 MIT 许可。FFmpeg 预编译包可能是 LGPL 或 GPL，取决于编译选项。使用包含 GPL 编码器的 FFmpeg 构建并重新分发时，可能会对你的发行物带来 GPL 约束。详见 [FFmpeg-NOTICE.md](FFmpeg-NOTICE.md)。
-
-## SIMD 加速
-
-CPU 侧 DSP 路径（FFT、mel/频谱 kernel、log/sincos 数学助手）全部用内联函数手写，按**编译期层级（tier）**组织，由**运行时分派**按 CPUID 探测结果选择。因此单一二进制就能在从 SSE4.2 时代到 AVX10 的所有机器上自动跑出最快的可用路径，无需分发多个版本，也不会在旧机器上触发非法指令。
-
-- 层级：**标量**、**SSE4.2（+FMA3）**、**AVX**、**AVX2**、**AVX-512**（需 F+BW+DQ+VL 与操作系统启用配套状态）、**AVX10.1**——Panther Lake / Nova Lake 及以后的型号经 CPUID leaf 0x24H 独立检测；其 512 位模式直接复用 AVX-512 层，只有 256 位类是独立层。无需任何配置：枚举出 AVX10 的 CPU 会自动获得对应路径。
-- ARM64（含 Android）上，SSE4.2+FMA3 层可通过 [SIMDe](#simdesimd-everywhere) 在 NEON 上模拟；没有 SIMDe 时自动降级为纯标量。
-
-构建期开关（默认全部 ON）：`-DCOSYVOICE_NO_SIMD=ON` 关闭全部 SIMD；`-DCOSYVOICE_HAS_SCALAR`、`_SSE42`、`_AVX`、`_AVX2`、`_AVX512`、`_AVX10_1` 逐类关闭（关闭 SSE4.2 会级联关闭更高的 legacy 层；AVX10-256 层需要工具链认识其编译参数，否则静默跳过）。Debug 构建启动时会打印检测到的能力集合。
-
-运行时控制（仅 x86-64）：`cosyvoice.h` 中的 `cosyvoice_get_simd_info()` /
-`cosyvoice_set_simd_level()` 可查询检测到的能力，并在运行时给分派层级封顶
-（例如调试时强制标量、或禁用 AVX-512 规避降频），无需重新编译；工具支持
-`--simd-level` 参数，环境变量 `COSYVOICE_SIMD_LEVEL`（库加载时读取一次）对
-所有接入方生效——见 [docs/SIMD_zh.md](docs/SIMD_zh.md)——运行时控制 API。
-层级布局、分派规则与 AVX10 策略的完整细节见
-[docs/SIMD_zh.md](docs/SIMD_zh.md)。
-
-## 流式 TTS 与 DiT KV 缓存
-
-流式 TTS 在合成过程中通过回调函数逐段交付音频，无需等待完整语句生成完毕即可开始播放，从而实现实时播放与更低的主观延迟。
-
-每个块都要跑完 DiT 的扩散步（默认 10 步）——若无缓存，每个新块的每一步都会对此前已产出的整个音频序列重算注意力。**DiT KV 缓存**按扩散步保存已产出位置的注意力 key/value（每个扩散步一个缓存槽位），新块只计算自己新增的位置：每个位置在每个步上只计算一次，之后的所有块直接复用。
-
-### 槽位组织
-
-DiT KV 缓存按 **槽位（slot）** 组织，每个槽位对应一个扩散步的 KV 缓存。默认 10 个扩散步，因此至多 10 个设备槽位（每步一个）。
-
-槽位分为三类：
-
-| 类别 | 内存位置 | 行为 |
-|----------|--------|------|
-| **固定** | 常驻设备（GPU） | 最快，从不卸载 |
-| **可卸载** | 不使用时卸载到 CPU | 节省设备显存，但增加传输开销 |
-| **不缓存** | 不存储 | 每步全量重算注意力，无额外内存开销 |
-
-**步-槽位映射。** 扩散步按顺序排列——不缓存步在最前，然后是可卸载步，最后是固定步。固定步各独占一个设备槽位；可卸载步共享同一个设备临时槽（设备槽 0），并各自持有一个 CPU 缓冲区来拷贝 KV。可卸载槽数恰好为 1 时会被归一化为固定槽位（`offloadable=1 → fixed+1`），且两个数量都会被裁剪，保证 `fixed + offloadable` 不超过扩散步数。总缓存步数 = `固定 + 可卸载`，其余步全量重算。内部槽位/调度布局详见 [docs/API_zh_cosyvoice.md — DiT KV 缓存概念](docs/API_zh_cosyvoice.md#dit-kv-缓存概念)。
-
-相邻扩散步也可通过 `--dit-kv-actual-fixed-slots` / `--dit-kv-actual-offloadable-slots` **共享**一份物理缓存：固定步与可卸载步各自被划分为该数量的分组，每组共享一个设备槽位 / CPU 缓冲区，缓存缩小为名义值的 `实际/名义`。组内各步读取的历史为组内最后写入者的结果（一种很小的近似），且 CPU 往返从每步一次变为每组一次。
-
-KV 缓存占用较大，因此默认 0 个槽位（全部 10 步全量重算）。启用缓存后，若序列长度超过配置的缓存长度，会丢弃部分位置——推理可正常继续，但输出质量可能下降。可卸载槽位需要和设备与 CPU 间传输数据，可能无法带来速度提升，甚至比全量重算更慢。
-
-> DiT KV 缓存**仅在流式 TTS 时使用**；非流式调用忽略此缓存。
-
-### 配置
-
-DiT KV 缓存参数通过 CLI/server 的 `--dit-kv-*` 参数配置（context 参数——CLI 侧作用于交互/流式模式）：
-
-- `--dit-kv-cache-type`：缓存存储格式——`f32`/`f16`/`q8_0`/`q5_1`/`q5_0`/`q4_1`/`q4_0`，或 K/V 独立指定的非对称格式（`k=<type>,v=<type>[,fallback=<type>]`，与 `--llm-kv-cache-type` 同风格）。
-- `--dit-kv-fixed-slots`：常驻设备内存的槽位数。默认：`0`。
-- `--dit-kv-offloadable-slots`：可卸载到 CPU 的槽位数。默认：`0`。
-- `--dit-kv-actual-fixed-slots`：支撑固定槽位的物理设备槽位数（相邻步共享一份）。`0` = 不共享。默认：`0`。
-- `--dit-kv-actual-offloadable-slots`：支撑可卸载槽位的物理 CPU 缓冲区数（相邻步共享一个）。`0` = 不共享。默认：`0`。
-- `--dit-kv-cache-length`：缓存保留的最大序列位置数。默认：`0` = 最大 LLM 长度 × 10。
-
-扩散步数来自模型的 `decoder.diffusion_steps` GGUF 元数据（缺失时默认为 10）。可在加载时通过 `cosyvoice_context_params_v4_t::diffusion_steps` 覆盖——CLI/Server 对应 `--diffusion-steps`（传 `<= 0` 表示沿用元数据值）；任何取值都会被裁剪到运行时上限 50。实际生效值可用 `cosyvoice_get_diffusion_steps()` 查询。
-
-建议的起点（共 10 个扩散步）：
-
-| 目标 | `--dit-kv-fixed-slots` | `--dit-kv-offloadable-slots` |
-|------|------------------------|------------------------------|
-| 禁用缓存（默认） | `0` | `0` |
-| 最快，显存充足 | `10` | `0` |
-| 速度/显存均衡 | `2` | `0` |
-| 提速并降低显存占用 | `1` | `9` |
-| 显存占用最小（较慢） | `0` | `9` |
-
-流式输出通过 `--stream` 标志启用。分块粒度由 `--chunk-tokens` 控制。
-
-## 推理 Buffer 策略
-
-推理引擎使用 buffer 策略控制中间张量的分配方式（默认 `dedicated`；CLI 非交互单次合成路径始终使用 `shared`）：
-
-- `shared`：LLM KV 缓存与 DiT 部分中间 buffer 共享内存。每次推理 LLM 模块都会完整运行一次。节省内存，但在未启用 Flash Attention 时 CUDA 上运行不稳定。
-- `balanced`：与 `shared` 类似，但在 LLM 推理完成后将下次可复用的 LLM KV 缓存卸载到 CPU。
-- `dedicated`：完全独立分配。LLM KV 缓存驻留设备可快速复用——流式推理建议使用此模式。
-
-## 模型转 GGUF
-
-可使用本仓库的转换脚本 `convert_model_to_gguf.py`，将上游 CosyVoice 模型权重转换为 `cosyvoice.cpp` 可用的 GGUF。
-
-先安装 Python 依赖：
-```bash
-pip install -r requirements.txt
-```
-
-最小用法：
-```bash
-python convert_model_to_gguf.py \
-  --yaml_config /path/to/cosyvoice.yaml \
-  --ftype f16 \
-  --gguf_model /path/to/CosyVoice3-2512_F16.gguf
-```
-
-完整参数示例：
-```bash
-python convert_model_to_gguf.py \
-  --yaml_config /path/to/cosyvoice.yaml \
-  --llm_model /path/to/llm.pt \
-  --blank_llm /path/to/CosyVoice-BlankEN \
-  --flow_model /path/to/flow.pt \
-  --hift_model /path/to/hift.pt \
-  --gguf_model /path/to/CosyVoice3-2512_Q8_0.gguf \
-  --ftype q8_0 \
-  --tag 2512
-```
-
-`--ftype` 可选值：
-- `default`, `f32`, `f16`, `q8_0`, `q5_0`, `q5_1`, `q4_0`, `q4_1`
-
-未显式传入时的默认路径规则：
-- `--llm_model` -> `<yaml_dir>/llm.pt`
-- `--blank_llm` -> `<yaml_dir>/CosyVoice-BlankEN`
-- `--flow_model` -> `<yaml_dir>/flow.pt`
-- `--hift_model` -> `<yaml_dir>/hift.pt`
-
-转换后建议：
-1. 先确认生成的 `.gguf` 文件可用。
-2. （可选）再使用本仓库 `quantize` 工具量化。
+流式 TTS、DiT KV 缓存与推理 Buffer 策略的详细说明见 [docs/STREAMING_zh.md](docs/STREAMING_zh.md)。
 
 ## 后端测试情况
 
@@ -488,16 +168,23 @@ python convert_model_to_gguf.py \
 | 其它 | 未测试 | |
 
 ## 故障排查
-- CMake 找不到 GGML：设置 `-DGGML_SOURCE_DIR=...`，或使用默认 `vendor/ggml` 并确保本机可用 Git（用于自动克隆）。
+- CMake 找不到 GGML：设置 `-DGGML_SOURCE_DIR=...`，或使用默认 `vendor/ggml` 并确保本机可用 Git（用于自动克隆）。另见 [docs/BUILD_zh.md](docs/BUILD_zh.md)。
 - ICU/ONNX Runtime 检测失败：可安装系统包（适用平台），或将预编译文件放到 `<build_dir>/_deps/icu` 与 `<build_dir>/_deps/onnxruntime`。
 - Windows 运行时缺库：检查 `build/bin` 下是否存在构建后复制的依赖 DLL。
+- 运行时调优开关（SIMD 层级、权重缓冲大小、HiFT 日志、mel 导出）：见 [docs/ENVIRONMENT_zh.md](docs/ENVIRONMENT_zh.md)。
 - 后端相关情况见[后端测试情况](#后端测试情况)。
 
 ## 文档
-- API 索引：[docs/API_zh.md](docs/API_zh.md)
-- 工具说明：[docs/TOOLS_zh.md](docs/TOOLS_zh.md)
-- SIMD 层级架构（开发者参考）：[docs/SIMD_zh.md](docs/SIMD_zh.md)
-- Android 构建指南：[docs/build-android_zh.md](docs/build-android_zh.md)
+- **构建指南：** [docs/BUILD_zh.md](docs/BUILD_zh.md)
+- **工具说明：** [docs/TOOLS_zh.md](docs/TOOLS_zh.md)
+- **流式 TTS / DiT KV 缓存 / Buffer 策略：** [docs/STREAMING_zh.md](docs/STREAMING_zh.md)
+- **模型转 GGUF：** [docs/CONVERT_zh.md](docs/CONVERT_zh.md)
+- **环境变量：** [docs/ENVIRONMENT_zh.md](docs/ENVIRONMENT_zh.md)
+- **API 索引：** [docs/API_zh.md](docs/API_zh.md)
+- **SIMD 层级架构（开发者参考）：** [docs/SIMD_zh.md](docs/SIMD_zh.md)
+- **开发者指南（工具/测试约定）：** [docs/DEVELOPING_zh.md](docs/DEVELOPING_zh.md)
+- **Android 构建指南：** [docs/build-android_zh.md](docs/build-android_zh.md)
+- **测试：** [tests/README.md](tests/README.md)
 
 ## AI 使用说明
 - 核心库代码主要由作者手工实现。
@@ -505,10 +192,7 @@ python convert_model_to_gguf.py \
 - 仍可能存在少量错误或与实现不同步的情况；如有疑问请以源码与头文件为准，也欢迎提交 Issue/PR 纠正。
 
 ## 第三方许可说明
-- 已打包依赖的许可证信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-- 核心张量计算库：**GGML**（MIT，vendored/自动克隆）——从 llama.cpp 拆分出的底座；直接使用未经修改的上游代码。
-- **llama.cpp**（MIT）：tokenizer 实现基于其改造；**ONNX Runtime**（MIT）、**ICU**（Unicode 许可）与 **SIMDe**（MIT，可选）分别支撑前端与 SIMD 模拟。
-- FFT 实现参考/改造自 KissFFT（BSD-3-Clause），并加入了项目内 SIMD 优化；详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+- 第三方依赖与改造代码的许可证信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 许可证说明
 - **本仓库代码**：MIT（见 `LICENSE`）。
@@ -525,3 +209,5 @@ python convert_model_to_gguf.py \
 - 文档与工具改进
 
 如果根因在 GGML，请优先向上游 GGML 提交修复补丁。
+
+新增工具与测试请遵循开发者约定（`tool_entry` 入口点与 `tools_common` 链接要求），详见 [docs/DEVELOPING_zh.md](docs/DEVELOPING_zh.md)。

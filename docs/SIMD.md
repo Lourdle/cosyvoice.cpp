@@ -1,6 +1,6 @@
 # SIMD Tier Architecture (Developer Reference)
 
-User-facing overview: [README.md — SIMD Acceleration](../README.md#simd-acceleration).
+User-facing overview: the SIMD row in [README.md — Features](../README.md#features), the `--simd-level` options in [TOOLS.md](TOOLS.md), and the `COSYVOICE_SIMD_LEVEL` runtime knob in [ENVIRONMENT.md](ENVIRONMENT.md#cosyvoice_simd_level).
 This document covers the internal layout: file structure, capability model,
 dispatch rules, the AVX10 policy, and the build-time inclusion knobs.
 

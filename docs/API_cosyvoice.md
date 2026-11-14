@@ -840,7 +840,7 @@ Extends `cosyvoice_context_params_v2_t` with DiT (diffusion) KV cache configurat
 
 ### DiT KV Cache Concept
 
-See [README.md — Streaming TTS](../README.md#streaming-tts--dit-kv-cache) for a user-facing overview. This section documents how the cache is laid out internally.
+See [STREAMING.md — DiT KV Cache](STREAMING.md#dit-kv-cache) for a user-facing overview. This section documents how the cache is laid out internally.
 
 **Slot layout.** The device cache allocates `n_slots = actual_fixed_slots + (offloadable_slots > 0 ? 1 : 0)` physical slots, where `actual_fixed_slots` defaults to `fixed_slots` unless KV sharing is enabled (see `cosyvoice_context_params_v4_t`). When offloading is enabled, slot index 0 is a dedicated **scratch** slot shared by all offloadable steps; fixed groups then occupy slot indices `1..actual_fixed_slots`. When offloading is disabled, the fixed groups occupy indices `0..actual_fixed_slots-1`.
 

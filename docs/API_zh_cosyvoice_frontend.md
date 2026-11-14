@@ -1,4 +1,4 @@
-# cosyvoice-frontend.h API 参考
+﻿# cosyvoice-frontend.h API 参考
 
 本文档覆盖 `include/cosyvoice-frontend.h` 中声明的全部公开符号。
 

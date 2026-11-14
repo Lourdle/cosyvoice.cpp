@@ -835,7 +835,7 @@ struct cosyvoice_context_params_v3_cpp : cosyvoice_context_params_v2_cpp
 
 ### DiT KV 缓存概念
 
-面向用户的概述见 [README_zh.md — 流式 TTS 与 DiT KV 缓存](../README_zh.md#流式-tts-与-dit-kv-缓存)；以下说明内部布局。
+面向用户的概述见 [STREAMING_zh.md — DiT KV 缓存](STREAMING_zh.md#dit-kv-缓存)；以下说明内部布局。
 
 **槽位布局。** 设备缓存分配 `n_slots = actual_fixed_slots + (offloadable_slots > 0 ? 1 : 0)` 个物理槽位，其中 `actual_fixed_slots` 在未启用 KV 共享时等于 `fixed_slots`（见 `cosyvoice_context_params_v4_t`）。启用卸载时，槽位 0 是专用 **临时（scratch）槽位**，由所有可卸载步共享；固定组占用槽位 `1..actual_fixed_slots`。未启用卸载时，固定组占用槽位 `0..actual_fixed_slots-1`。
 

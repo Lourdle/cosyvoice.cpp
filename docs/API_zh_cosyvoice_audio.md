@@ -1,4 +1,4 @@
-# cosyvoice-audio.h API 参考
+﻿# cosyvoice-audio.h API 参考
 
 本文档覆盖 `include/cosyvoice-audio.h` 中声明的全部公开符号。
 
