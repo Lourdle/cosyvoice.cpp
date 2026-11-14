@@ -1251,6 +1251,8 @@ static void run_interactive_loop(
 
         std::chrono::steady_clock::time_point gen_start;
         std::chrono::steady_clock::time_point gen_end;
+        double latency_ms = -1.0;
+        const char* latency_label = "total";
 
 #ifndef COSYVOICE_CLI_NO_PLAYBACK
         if (streaming)
@@ -1261,6 +1263,8 @@ static void run_interactive_loop(
                 uint32_t sample_rate;
                 uint32_t cursor = 0;
                 std::mutex mutex;
+                bool first_packet_seen = false;
+                std::chrono::steady_clock::time_point first_packet_time;
             };
             stream_play_state play_state{ &entry, sample_rate };
 
@@ -1268,6 +1272,11 @@ static void run_interactive_loop(
             {
                 auto state = static_cast<stream_play_state*>(user_data);
                 std::lock_guard<std::mutex> lock(state->mutex);
+                if (!state->first_packet_seen)
+                {
+                    state->first_packet_seen = true;
+                    state->first_packet_time = std::chrono::steady_clock::now();
+                }
                 state->entry->pcm.insert(state->entry->pcm.end(), audio, audio + n_samples);
                 return !is_playback_interrupted();
             };
@@ -1318,6 +1327,12 @@ static void run_interactive_loop(
                     print_error_log("Error: TTS streaming generation failed.\n");
                 continue;
             }
+
+            if (play_state.first_packet_seen)
+            {
+                latency_ms = elapsed_ms(gen_start, play_state.first_packet_time);
+                latency_label = "first-packet";
+            }
         }
         else
 #endif
@@ -1344,6 +1359,8 @@ static void run_interactive_loop(
             }
             entry.pcm.insert(entry.pcm.end(), pcm.data, pcm.data + pcm.length);
             gen_end = std::chrono::steady_clock::now();
+            latency_ms = elapsed_ms(gen_start, gen_end);
+            latency_label = "total";
         }
 
         const auto id = cache.next_id++;
@@ -1352,7 +1369,11 @@ static void run_interactive_loop(
         cache.items.emplace(id, std::move(entry));
         const double elapsed_sec = elapsed_ms(gen_start, gen_end) / 1000.0;
         const double rtf = (duration > 0.0) ? (elapsed_sec / duration) : 0.0;
-        printf("Generated audio %u (%.2fs, rtf=%.2f), seed=%u.\n", cache.last_success_id, duration, rtf, used_seed);
+        if (latency_ms >= 0.0)
+            printf("Generated audio %u (%.2fs, rtf=%.2f, %s=%.1fms), seed=%u.\n",
+                cache.last_success_id, duration, rtf, latency_label, latency_ms, used_seed);
+        else
+            printf("Generated audio %u (%.2fs, rtf=%.2f), seed=%u.\n", cache.last_success_id, duration, rtf, used_seed);
     }
 }
 
