@@ -213,8 +213,8 @@ WebUI 是一个现代化的单页应用，提供以下功能：
 | `--threads, -j <value>` | CPU 线程数，默认 `0`（硬件并发数）。 |
 | `--concurrency, -c <value>` | 并发请求槽数，默认 `1`（仅 API 模式；WebUI 模式始终为单槽）。 |
 | `--inference-buffer-policy <shared\|balanced\|dedicated>` | 推理缓冲区策略，默认 `dedicated`。 |
-| `--llm-kv-cache-type <f32\|f16\|q8_0\|q5_1\|q5_0\|q4_1\|q4_0\|k=<type>,v=<type>[,fallback=<type>]>` | LLM KV cache 类型。单一类型（如 `q8_0`）为 K 和 V 使用相同格式。默认 `k=q8_0,v=q4_0,fallback=q8_0`。 |
-| `--dit-kv-cache-type <f32\|f16\|q8_0\|q5_1\|q5_0\|q4_1\|q4_0\|k=<type>,v=<type>[,fallback=<type>]>` | DiT（flow matching）KV cache 类型。格式同 LLM KV cache。默认 `k=q8_0,v=q4_0,fallback=q8_0`。 |
+| `--llm-kv-cache-type <f32\|f16\|bf16\|f8_e4m3\|q8_0\|q5_1\|q5_0\|q4_1\|q4_0\|k=<type>,v=<type>[,fallback=<type>]>` | LLM KV cache 类型。单一类型（如 `q8_0`）为 K 和 V 使用相同格式。默认 `k=q8_0,v=q4_0,fallback=q8_0`。 |
+| `--dit-kv-cache-type <f32\|f16\|bf16\|f8_e4m3\|q8_0\|q5_1\|q5_0\|q4_1\|q4_0\|k=<type>,v=<type>[,fallback=<type>]>` | DiT（flow matching）KV cache 类型。格式同 LLM KV cache。默认 `k=q8_0,v=q4_0,fallback=q8_0`。 |
 | `--dit-kv-fixed-slots <value>` | 固定（不可卸载）DiT KV cache 槽位数。每个固定步独占一个设备槽位，映射到扩散步的尾部。默认 `0`（禁用）。 |
 | `--dit-kv-offloadable-slots <value>` | 可 CPU 卸载的 DiT KV cache 槽位数。所有可卸载步共享一个设备临时槽位，每个槽位各对应一个 CPU 缓冲区来拷贝 KV。默认 `0`（禁用）。值为 `1` 时归一化为固定槽位；`fixed + offloadable` 会被裁剪到不超过扩散步数。 |
 | `--dit-kv-actual-fixed-slots <value>` | 支撑固定 DiT KV 槽位的物理设备槽位数。相邻固定步分组共享一份缓存，减少常驻 DiT KV 内存。`0` = 不共享（每个固定步一个槽位）；裁剪到 `[1, --dit-kv-fixed-slots]`。默认 `0`。 |
@@ -771,11 +771,11 @@ Generated audio 4 (4.20s, rtf=0.85, total=3570.0ms), seed=42.
 - `--strict-seed <0|1>`：严格保证相同 sampler seed 生成完全一致的音频，代价是多一次较小的 prefill 通道；关闭后 prefill 略快，但不再严格保证 seed 可复现。默认 `1`（启用）。
 - `--max-llm-len <value>`：LLM 最大输入 token 数（`n_max_seq`），默认 `4096`，必须为正整数。
 - `--threads, -j <value>`：模型推理使用的 CPU 线程数，必须是无符号 32 位整数；默认 `0`（使用当前硬件并发数）。
-- `--llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>`：LLM KV cache 类型。单一类型（如 `q8_0`）为 K 和 V 使用相同格式。可使用独立 K/V 类型（如 `k=q8_0,v=q4_0`）指定不同格式。默认 `k=q8_0,v=q4_0,fallback=q8_0`。
+- `--llm-kv-cache-type <f32|f16|bf16|f8_e4m3|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>`：LLM KV cache 类型。单一类型（如 `q8_0`）为 K 和 V 使用相同格式。可使用独立 K/V 类型（如 `k=q8_0,v=q4_0`）指定不同格式。默认 `k=q8_0,v=q4_0,fallback=q8_0`。16 位存储优先用 `f16`（尾数更多、后端支持更广）；仅当模型激活值过大导致 `f16` 溢出时才用 `bf16`，以精度换取 fp32 级动态范围。
 - `--inference-buffer-policy <shared|balanced|dedicated>`：推理缓冲区策略。仅在交互模式下生效；非交互模式始终使用 `shared` 以最小化内存占用并获得最快的单次合成速度。默认 `dedicated`。
 - `--mode <zero-shot|instruct|cross-lingual>`：TTS 模式。默认按 `--instruction` 自动判定。
 - `--instruction, -i <text>`：instruct 模式指令文本。
-- `--dit-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>`：DiT KV cache 类型（仅交互模式）。格式同 `--llm-kv-cache-type`。默认 `k=q8_0,v=q4_0,fallback=q8_0`。
+- `--dit-kv-cache-type <f32|f16|bf16|f8_e4m3|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>`：DiT KV cache 类型（仅交互模式）。格式同 `--llm-kv-cache-type`。默认 `k=q8_0,v=q4_0,fallback=q8_0`。
 - `--dit-kv-fixed-slots <value>`：固定（不可卸载）DiT KV cache 槽位数（仅交互模式）。每个固定步独占一个设备槽位，映射到扩散步尾部。默认 `0`（禁用）。
 - `--dit-kv-offloadable-slots <value>`：可 CPU 卸载的 DiT KV cache 槽位数（仅交互模式）。所有可卸载步共享一个设备临时槽位，每槽各对应一个 CPU 缓冲区。默认 `0`（禁用）。值为 `1` 归一化为固定槽位；`fixed + offloadable` 裁剪到不超过扩散步数。
 - `--dit-kv-actual-fixed-slots <value>`：支撑固定 DiT KV 槽位的物理设备槽位数（仅交互模式）。相邻固定步分组共享一份缓存，减少常驻 DiT KV 内存。`0` = 不共享；裁剪到 `[1, --dit-kv-fixed-slots]`。默认 `0`。

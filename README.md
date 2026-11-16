@@ -49,7 +49,7 @@ This project provides:
 | **DiT KV Cache** | Reuses attention key/values of already-emitted positions per diffusion step during streaming, so each new chunk computes only its fresh positions — configurable fixed (device), offloadable (CPU), and uncached slot categories to trade memory vs. speed |
 | **Flash Attention** | LLM and Flow flash attention support (`--llm-flash-attn`, `--flow-flash-attn`) for reduced memory and faster inference when the backend supports it |
 | **Chunk Tokens Control** | Tune streaming latency vs. overhead tradeoff via `--chunk-tokens` — smaller chunks reduce first-chunk latency, larger chunks reduce RTF |
-| **KV Cache Quantization** | Reduce LLM memory usage via `--llm-kv-cache-type` (f32 / f16 / q8_0 / q5_1 / q4_0 / ...). Supports asymmetric quantization with separate K/V types (e.g. `k=q8_0,v=q4_0`). |
+| **KV Cache Quantization** | Reduce LLM memory usage via `--llm-kv-cache-type` (f32 / f16 / bf16 / f8_e4m3 / q8_0 / ...). Supports asymmetric quantization with separate K/V types (e.g. `k=q8_0,v=q4_0`). |
 | **Prompt Speech Reuse** | Pre-encode reference voice once, reuse across multiple synthesis runs — no ONNX overhead |
 | **Audio Backend Plugins** | Choose MINIAUDIO (default) or FFMPEG for multi-format encoding (WAV, MP3, AAC, FLAC, OPUS, M4A) |
 | **UMA Detection** | Detects unified memory architecture and reports the result (e.g. `uma: yes/no`) for reference; does not alter buffer policy |

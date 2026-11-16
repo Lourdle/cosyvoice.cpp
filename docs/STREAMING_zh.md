@@ -34,7 +34,7 @@ KV 缓存占用较大，因此默认 0 个槽位（全部 10 步全量重算）�
 
 DiT KV 缓存参数通过 CLI/server 的 `--dit-kv-*` 参数配置（context 参数——CLI 侧作用于交互/流式模式）：
 
-- `--dit-kv-cache-type`：缓存存储格式——`f32`/`f16`/`q8_0`/`q5_1`/`q5_0`/`q4_1`/`q4_0`，或 K/V 独立指定的非对称格式（`k=<type>,v=<type>[,fallback=<type>]`，与 `--llm-kv-cache-type` 同风格）。
+- `--dit-kv-cache-type`：缓存存储格式——`f32`/`f16`/`bf16`/`f8_e4m3`/`q8_0`/`q5_1`/`q5_0`/`q4_1`/`q4_0`，或 K/V 独立指定的非对称格式（`k=<type>,v=<type>[,fallback=<type>]`，与 `--llm-kv-cache-type` 同风格）。
 - `--dit-kv-fixed-slots`：常驻设备内存的槽位数。默认：`0`。
 - `--dit-kv-offloadable-slots`：可卸载到 CPU 的槽位数。默认：`0`。
 - `--dit-kv-actual-fixed-slots`：支撑固定槽位的物理设备槽位数（相邻步共享一份）。`0` = 不共享。默认：`0`。

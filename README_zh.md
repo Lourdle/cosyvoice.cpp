@@ -49,7 +49,7 @@
 | **DiT KV 缓存** | 流式分块合成时，按扩散步缓存已产出位置的注意力 KV，新块只计算新增位置——可配置固定（设备内存）、可卸载（CPU）、不缓存三种槽位类型 |
 | **Flash Attention** | LLM 与 Flow 模块均支持 flash attention（`--llm-flash-attn`、`--flow-flash-attn`），后端支持时可降低显存并加速推理 |
 | **分块 Token 控制** | 通过 `--chunk-tokens` 调节流式推理的延迟与开销平衡——较小分块降低首块延迟，较大分块降低 RTF |
-| **KV Cache 量化** | 通过 `--llm-kv-cache-type` 降低 LLM 内存占用（f32 / f16 / q8_0 / q5_1 / q4_0 / ...）。支持非对称量化，K 和 V 可独立指定类型（如 `k=q8_0,v=q4_0`）。 |
+| **KV Cache 量化** | 通过 `--llm-kv-cache-type` 降低 LLM 内存占用（f32 / f16 / bf16 / f8_e4m3 / q8_0 / ...）。支持非对称量化，K 和 V 可独立指定类型（如 `k=q8_0,v=q4_0`）。 |
 | **Prompt Speech 复用** | 一次编码参考音色，后续合成直接复用，无需再跑 ONNX |
 | **音频后端可切换** | 可选 MINIAUDIO（默认）或 FFMPEG，支持 WAV、MP3、AAC、FLAC、OPUS、M4A |
 | **UMA 检测** | 检测统一内存架构并报告结果（如 `uma: yes/no`）供参考；不会改变 buffer policy |

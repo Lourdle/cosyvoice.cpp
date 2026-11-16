@@ -43,6 +43,8 @@ typedef enum cosyvoice_kv_cache_type
     COSYVOICE_KV_CACHE_TYPE_Q5_0,
     COSYVOICE_KV_CACHE_TYPE_Q4_1,
     COSYVOICE_KV_CACHE_TYPE_Q4_0,
+    COSYVOICE_KV_CACHE_TYPE_BF16,
+    COSYVOICE_KV_CACHE_TYPE_F8_E4M3,
     COSYVOICE_KV_CACHE_TYPE_COUNT
 } cosyvoice_kv_cache_type_t, cosyvoice_llm_kv_cache_type_t;
 ```
@@ -60,6 +62,8 @@ are provided as backward-compatibility aliases:
 #define COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0  COSYVOICE_KV_CACHE_TYPE_Q5_0
 #define COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1  COSYVOICE_KV_CACHE_TYPE_Q4_1
 #define COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0  COSYVOICE_KV_CACHE_TYPE_Q4_0
+#define COSYVOICE_LLM_KV_CACHE_TYPE_BF16  COSYVOICE_KV_CACHE_TYPE_BF16
+#define COSYVOICE_LLM_KV_CACHE_TYPE_F8_E4M3 COSYVOICE_KV_CACHE_TYPE_F8_E4M3
 #define COSYVOICE_LLM_KV_CACHE_TYPE_COUNT COSYVOICE_KV_CACHE_TYPE_COUNT
 ```
 
@@ -76,6 +80,8 @@ Specifies supported KV-cache storage formats. Used by both the LLM and DiT modul
 - `COSYVOICE_KV_CACHE_TYPE_Q5_0`: GGML `Q5_0` quantized cache.
 - `COSYVOICE_KV_CACHE_TYPE_Q4_1`: GGML `Q4_1` quantized cache.
 - `COSYVOICE_KV_CACHE_TYPE_Q4_0`: GGML `Q4_0` quantized cache.
+- `COSYVOICE_KV_CACHE_TYPE_BF16`: 16-bit bfloat floating-point cache.
+- `COSYVOICE_KV_CACHE_TYPE_F8_E4M3`: 8-bit floating-point cache (E4M3).
 - `COSYVOICE_KV_CACHE_TYPE_COUNT`: Sentinel value, not a runtime mode.
 
 ### Separate K/V Cache Macros

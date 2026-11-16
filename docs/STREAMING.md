@@ -1,4 +1,4 @@
-# Streaming TTS, DiT KV Cache & Buffer Policies
+﻿# Streaming TTS, DiT KV Cache & Buffer Policies
 
 ## Streaming TTS
 
@@ -34,7 +34,7 @@ The cache is large, so the default is 0 slots (all 10 steps fully recomputed). W
 
 DiT KV cache parameters are configured via CLI/server `--dit-kv-*` flags (context parameters — on the CLI they apply to interactive/streaming mode):
 
-- `--dit-kv-cache-type`: Storage format for the cache — `f32`/`f16`/`q8_0`/`q5_1`/`q5_0`/`q4_1`/`q4_0`, or asymmetric with separate K and V formats (`k=<type>,v=<type>[,fallback=<type>]`, same style as `--llm-kv-cache-type`).
+- `--dit-kv-cache-type`: Storage format for the cache — `f32`/`f16`/`bf16`/`f8_e4m3`/`q8_0`/`q5_1`/`q5_0`/`q4_1`/`q4_0`, or asymmetric with separate K and V formats (`k=<type>,v=<type>[,fallback=<type>]`, same style as `--llm-kv-cache-type`).
 - `--dit-kv-fixed-slots`: Number of device-resident slots. Default: `0`.
 - `--dit-kv-offloadable-slots`: Number of CPU-offloadable slots. Default: `0`.
 - `--dit-kv-actual-fixed-slots`: Physical device slots backing the fixed slots (adjacent steps share one). `0` = no sharing. Default: `0`.
