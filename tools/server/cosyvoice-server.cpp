@@ -139,14 +139,14 @@ static void print_usage(const char* argv0)
     printf("  --concurrency, -c <value>                   Concurrent request slots. Default: 1.\n");
     printf("  --inference-buffer-policy <shared|balanced|dedicated>\n");
     printf("                                              Inference buffer policy. Default: dedicated.\n");
-    printf("  --llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>\n");
+    printf("  --llm-kv-cache-type <f32|f16|bf16|f8_e4m3|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>\n");
     printf("                                              KV cache type. Single type (e.g. q8_0) uses the same format for K and V.\n");
     printf("                                              Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
     printf("  --seed <value>                              Default random seed for built-in sampler.\n");
     printf("  --strict-seed <0|1>                         Strictly guarantee identical audio for the same sampler\n");
     printf("                                              seed. Disable for a slightly faster prefill pass.\n");
     printf("                                              Default: 1.\n");
-    printf("  --dit-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>\n");
+    printf("  --dit-kv-cache-type <f32|f16|bf16|f8_e4m3|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>\n");
     printf("                                              DiT KV cache type. Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
     printf("  --dit-kv-fixed-slots <value>                DiT KV fixed slots (0 = auto).\n");
     printf("  --dit-kv-offloadable-slots <value>          DiT KV offloadable slots (0 = auto).\n");
