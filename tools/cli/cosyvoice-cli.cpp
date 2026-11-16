@@ -390,12 +390,12 @@ static void print_usage(const char* argv0)
     printf("  --speed, -s <value>                         Speech speed. Default: 1.0.\n");
     printf("  --max-llm-len <value>                       Maximum LLM sequence length. Default: " COSYVOICE_DEFAULT_LLM_MAX_SEQ_LEN_STR ".\n");
     printf("  --threads, -j <value>                       CPU thread count. Default: 0 (hardware concurrency).\n");
-    printf("  --llm-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>\n");
+    printf("  --llm-kv-cache-type <f32|f16|bf16|f8_e4m3|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>\n");
     printf("                                              KV cache type. Single type (e.g. q8_0) uses the same format for K and V.\n");
     printf("                                              Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
     printf("  --inference-buffer-policy <shared|balanced|dedicated>\n");
     printf("                                              Inference buffer policy (interactive only). Default: dedicated.\n");
-    printf("  --dit-kv-cache-type <f32|f16|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>\n");
+    printf("  --dit-kv-cache-type <f32|f16|bf16|f8_e4m3|q8_0|q5_1|q5_0|q4_1|q4_0|k=<type>,v=<type>[,fallback=<type>]>\n");
     printf("                                              DiT KV cache type (interactive only).\n");
     printf("                                              Default: k=q8_0,v=q4_0,fallback=q8_0.\n");
     printf("  --dit-kv-fixed-slots <value>                Number of fixed (non-offloadable) DiT KV slots (interactive only). Default: 0.\n");
@@ -1592,7 +1592,7 @@ static bool validate_options(cli_options& options)
         && !COSYVOICE_IS_SEPARATE_KV_CACHE(options.llm_kv_cache_type)
         && (options.llm_kv_cache_type < 0 || options.llm_kv_cache_type >= COSYVOICE_KV_CACHE_TYPE_COUNT))
     {
-        print_error_log("Error: invalid --llm-kv-cache-type. Allowed values: f32, f16, q8_0, q5_1, q5_0, q4_1, q4_0 or k=<type>,v=<type>.\n");
+        print_error_log("Error: invalid --llm-kv-cache-type. Allowed values: f32, f16, bf16, f8_e4m3, q8_0, q5_1, q5_0, q4_1, q4_0 or k=<type>,v=<type>.\n");
         ok = false;
     }
 
@@ -1600,7 +1600,7 @@ static bool validate_options(cli_options& options)
         && !COSYVOICE_IS_SEPARATE_KV_CACHE(options.dit_kv_cache_type)
         && (options.dit_kv_cache_type < 0 || options.dit_kv_cache_type >= COSYVOICE_KV_CACHE_TYPE_COUNT))
     {
-        print_error_log("Error: invalid --dit-kv-cache-type. Allowed values: f32, f16, q8_0, q5_1, q5_0, q4_1, q4_0 or k=<type>,v=<type>.\n");
+        print_error_log("Error: invalid --dit-kv-cache-type. Allowed values: f32, f16, bf16, f8_e4m3, q8_0, q5_1, q5_0, q4_1, q4_0 or k=<type>,v=<type>.\n");
         ok = false;
     }
 
