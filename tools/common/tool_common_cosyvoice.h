@@ -158,6 +158,10 @@ inline bool parse_kv_cache_type_arg(const std::string& value, cosyvoice_kv_cache
         *result = COSYVOICE_KV_CACHE_TYPE_Q4_1;
     else if (lowered == "q4_0")
         *result = COSYVOICE_KV_CACHE_TYPE_Q4_0;
+    else if (lowered == "bf16")
+        *result = COSYVOICE_KV_CACHE_TYPE_BF16;
+    else if (lowered == "f8_e4m3")
+        *result = COSYVOICE_KV_CACHE_TYPE_F8_E4M3;
     else
         return false;
     return true;
@@ -221,6 +225,10 @@ inline std::string kv_cache_type_to_string(cosyvoice_kv_cache_type_t type)
         return "q4_1";
     case COSYVOICE_KV_CACHE_TYPE_Q4_0:
         return "q4_0";
+    case COSYVOICE_KV_CACHE_TYPE_BF16:
+        return "bf16";
+    case COSYVOICE_KV_CACHE_TYPE_F8_E4M3:
+        return "f8_e4m3";
     default:
         return "unknown";
     }
