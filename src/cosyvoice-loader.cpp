@@ -478,6 +478,8 @@ static ggml_type cosyvoice_kv_cache_type_to_ggml(cosyvoice_kv_cache_type_t t)
     case COSYVOICE_KV_CACHE_TYPE_Q5_0: return GGML_TYPE_Q5_0;
     case COSYVOICE_KV_CACHE_TYPE_Q4_1: return GGML_TYPE_Q4_1;
     case COSYVOICE_KV_CACHE_TYPE_Q4_0: return GGML_TYPE_Q4_0;
+    case COSYVOICE_KV_CACHE_TYPE_BF16: return GGML_TYPE_BF16;
+    case COSYVOICE_KV_CACHE_TYPE_F8_E4M3: return GGML_TYPE_F8_E4M3;
     default: GGML_ABORT("unexpected kv cache type");
     }
 }
@@ -493,6 +495,8 @@ static cosyvoice_kv_cache_type_t cosyvoice_ggml_to_kv_cache_type(ggml_type t)
     case GGML_TYPE_Q5_0: return COSYVOICE_KV_CACHE_TYPE_Q5_0;
     case GGML_TYPE_Q4_1: return COSYVOICE_KV_CACHE_TYPE_Q4_1;
     case GGML_TYPE_Q4_0: return COSYVOICE_KV_CACHE_TYPE_Q4_0;
+    case GGML_TYPE_BF16: return COSYVOICE_KV_CACHE_TYPE_BF16;
+    case GGML_TYPE_F8_E4M3: return COSYVOICE_KV_CACHE_TYPE_F8_E4M3;
     default: GGML_ABORT("unexpected ggml type for kv cache");
     }
 }
@@ -507,6 +511,8 @@ static ggml_type cosyvoice_get_kv_fallback_type(ggml_type t)
     case GGML_TYPE_Q5_1: return GGML_TYPE_Q8_0;
     case GGML_TYPE_Q8_0: return GGML_TYPE_F16;
     case GGML_TYPE_F16:  return GGML_TYPE_F32;
+    case GGML_TYPE_BF16: return GGML_TYPE_F16;
+    case GGML_TYPE_F8_E4M3: return GGML_TYPE_Q8_0;
     default: GGML_ABORT("fatal error");
     }
 }

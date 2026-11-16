@@ -31,14 +31,16 @@ extern "C" {
  */
 typedef enum cosyvoice_kv_cache_type
 {
-    COSYVOICE_KV_CACHE_TYPE_F32,   ///< Store KV cache in 32-bit floating point format.
-    COSYVOICE_KV_CACHE_TYPE_F16,   ///< Store KV cache in 16-bit floating point format.
-    COSYVOICE_KV_CACHE_TYPE_Q8_0,  ///< Store KV cache in GGML Q8_0 quantized format.
-    COSYVOICE_KV_CACHE_TYPE_Q5_1,  ///< Store KV cache in GGML Q5_1 quantized format.
-    COSYVOICE_KV_CACHE_TYPE_Q5_0,  ///< Store KV cache in GGML Q5_0 quantized format.
-    COSYVOICE_KV_CACHE_TYPE_Q4_1,  ///< Store KV cache in GGML Q4_1 quantized format.
-    COSYVOICE_KV_CACHE_TYPE_Q4_0,  ///< Store KV cache in GGML Q4_0 quantized format.
-    COSYVOICE_KV_CACHE_TYPE_COUNT  // Sentinel value.
+    COSYVOICE_KV_CACHE_TYPE_F32,      ///< Store KV cache in 32-bit floating point format.
+    COSYVOICE_KV_CACHE_TYPE_F16,      ///< Store KV cache in 16-bit floating point format.
+    COSYVOICE_KV_CACHE_TYPE_Q8_0,     ///< Store KV cache in GGML Q8_0 quantized format.
+    COSYVOICE_KV_CACHE_TYPE_Q5_1,     ///< Store KV cache in GGML Q5_1 quantized format.
+    COSYVOICE_KV_CACHE_TYPE_Q5_0,     ///< Store KV cache in GGML Q5_0 quantized format.
+    COSYVOICE_KV_CACHE_TYPE_Q4_1,     ///< Store KV cache in GGML Q4_1 quantized format.
+    COSYVOICE_KV_CACHE_TYPE_Q4_0,     ///< Store KV cache in GGML Q4_0 quantized format.
+    COSYVOICE_KV_CACHE_TYPE_BF16,     ///< Store KV cache in 16-bit bfloat floating point format.
+    COSYVOICE_KV_CACHE_TYPE_F8_E4M3,  ///< Store KV cache in 8-bit floating point format (E4M3).
+    COSYVOICE_KV_CACHE_TYPE_COUNT     // Sentinel value.
 } cosyvoice_kv_cache_type_t, cosyvoice_llm_kv_cache_type_t;
 
 #define COSYVOICE_LLM_KV_CACHE_TYPE_F32 COSYVOICE_KV_CACHE_TYPE_F32
@@ -48,6 +50,8 @@ typedef enum cosyvoice_kv_cache_type
 #define COSYVOICE_LLM_KV_CACHE_TYPE_Q5_0 COSYVOICE_KV_CACHE_TYPE_Q5_0
 #define COSYVOICE_LLM_KV_CACHE_TYPE_Q4_1 COSYVOICE_KV_CACHE_TYPE_Q4_1
 #define COSYVOICE_LLM_KV_CACHE_TYPE_Q4_0 COSYVOICE_KV_CACHE_TYPE_Q4_0
+#define COSYVOICE_LLM_KV_CACHE_TYPE_BF16 COSYVOICE_KV_CACHE_TYPE_BF16
+#define COSYVOICE_LLM_KV_CACHE_TYPE_F8_E4M3 COSYVOICE_KV_CACHE_TYPE_F8_E4M3
 #define COSYVOICE_LLM_KV_CACHE_TYPE_COUNT COSYVOICE_KV_CACHE_TYPE_COUNT
 
 /**
