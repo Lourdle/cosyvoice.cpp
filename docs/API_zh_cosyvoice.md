@@ -2038,7 +2038,7 @@ typedef struct cosyvoice_memory_usage
 - `token2wav`：token2wav 中间缓冲占用。
 - `buffers`：内部缓冲占用。
 - `cpu_buffers`：CPU 缓冲占用。
-- `offloaded_kv_cache`：下放到 CPU 的 KV 缓存占用。
+- `offloaded_kv_cache`：下放到 CPU 的 KV 缓存占用（LLM 与 DiT 缓存合计）。
 - `random_noise`：随机噪声缓冲占用。
 
 ## cosyvoice_get_memory_usage

@@ -2055,7 +2055,7 @@ Reports memory usage components for a loaded context.
 - `token2wav`: Memory used by token2wav intermediates on main device.
 - `buffers`: Internal buffer memory on main device.
 - `cpu_buffers`: Host-side buffer memory.
-- `offloaded_kv_cache`: KV-cache memory offloaded to CPU.
+- `offloaded_kv_cache`: KV-cache memory offloaded to CPU (LLM and DiT caches combined).
 - `random_noise`: CPU memory used by random-noise buffers.
 
 ## cosyvoice_get_memory_usage
