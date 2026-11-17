@@ -145,7 +145,7 @@ void cosyvoice_kv_cache::reset_buffer(ggml_backend_buffer* buffer)
     }
 }
 
-void cosyvoice_kv_cache::offload_cache(ggml_backend_t backend, ggml_backend_sched* sched, uint32_t n_tokens)
+bool cosyvoice_kv_cache::offload_cache(ggml_backend_t backend, ggml_backend_sched* sched, uint32_t n_tokens)
 {
     const auto batch_size = kv_cache_layers[0].k->ne[2];
     const size_t k_nbytes = kv_cache_layers[0].k->nb[1] * n_tokens;
@@ -188,17 +188,22 @@ void cosyvoice_kv_cache::offload_cache(ggml_backend_t backend, ggml_backend_sche
             offloaded_layer.v_tensor = v;
         }
 
-        ggml_backend_sched_alloc_graph(sched, gf);
-        ggml_backend_sched_graph_compute_async(sched, gf);
+        if (!ggml_backend_sched_alloc_graph(sched, gf)
+            || ggml_backend_sched_graph_compute_async(sched, gf) != GGML_STATUS_SUCCESS)
+        {
+            offloaded_cache->len = 0;
+            return false;
+        }
 
         for (auto& layer : std::span(offloaded_cache->offloaded_kv_layers, layers))
             ggml_backend_tensor_get_async(backend, layer.v_tensor, layer.v, 0, v_nbytes * batch_size);
     }
 
     ggml_backend_sched_synchronize(sched);
+    return true;
 }
 
-void cosyvoice_kv_cache::load_cache(ggml_backend_t backend, ggml_backend_sched* sched)
+bool cosyvoice_kv_cache::load_cache(ggml_backend_t backend, ggml_backend_sched* sched)
 {
     cur_len = offloaded_cache->len;
     const auto batch_size = kv_cache_layers[0].k->ne[2];
@@ -206,7 +211,7 @@ void cosyvoice_kv_cache::load_cache(ggml_backend_t backend, ggml_backend_sched* 
     const size_t v_nbytes = fattn ? kv_cache_layers[0].v->nb[1] * cur_len : ggml_row_size(kv_cache_layers[0].v->type, cur_len) * kv_cache_layers[0].v->ne[1];
     const size_t kv_nbytes = (k_nbytes + v_nbytes) * batch_size;
 
-    if (cur_len == 0) return;
+    if (cur_len == 0) return true;
 
     if (!fattn)
     {
@@ -223,11 +228,19 @@ void cosyvoice_kv_cache::load_cache(ggml_backend_t backend, ggml_backend_sched* 
             ggml_build_forward_expand(gf, ggml_cpy(offloaded_cache->ctx, v, v_view));
         }
 
-        ggml_backend_sched_alloc_graph(sched, gf);
+        if (!ggml_backend_sched_alloc_graph(sched, gf))
+        {
+            cur_len = 0;
+            return false;
+        }
         for (auto& layer : std::span(offloaded_cache->offloaded_kv_layers, layers))
             ggml_backend_tensor_set_async(backend, layer.v_tensor, layer.v, 0, v_nbytes * batch_size);
 
-        ggml_backend_sched_graph_compute_async(sched, gf);
+        if (ggml_backend_sched_graph_compute_async(sched, gf) != GGML_STATUS_SUCCESS)
+        {
+            cur_len = 0;
+            return false;
+        }
     }
 
     for (int i = 0; i != layers; ++i)
@@ -243,6 +256,7 @@ void cosyvoice_kv_cache::load_cache(ggml_backend_t backend, ggml_backend_sched* 
     }
 
     ggml_backend_sched_synchronize(sched);
+    return true;
 }
 
 size_t cosyvoice_kv_cache::get_offloaded_cache_size() const
@@ -251,8 +265,8 @@ size_t cosyvoice_kv_cache::get_offloaded_cache_size() const
     {
         size_t nbytes = 0;
         auto object_size = get_offloaded_kv_cache_struct_size(layers);
-        for (auto i = 0; i != layers; ++i)
-            nbytes += advance_ptr(offloaded_cache, object_size)->buffer.capacity();
+        for (int i = 0; i != n_offloaded_kv_slots; ++i)
+            nbytes += advance_ptr(offloaded_cache, static_cast<std::ptrdiff_t>(object_size * i))->buffer.capacity();
         return nbytes;
     }
     else return 0;
@@ -260,33 +274,33 @@ size_t cosyvoice_kv_cache::get_offloaded_cache_size() const
 
 void cosyvoice_kv_cache::clear_offloaded_cache()
 {
-    if (offloaded_cache)
+    if (!offloaded_cache) return;
+
+    auto object_size = get_offloaded_kv_cache_struct_size(layers);
+    for (int i = 0; i != n_offloaded_kv_slots; ++i)
     {
-        ggml_free(offloaded_cache->ctx);
-        auto object_size = get_offloaded_kv_cache_struct_size(layers);
-        for (auto i = 0; i != layers; ++i)
-        {
-            auto cur = advance_ptr(offloaded_cache, object_size);
-            std::vector<char>().swap(cur->buffer);
-            cur->len = 0;
-        }
+        auto cur = advance_ptr(offloaded_cache, static_cast<std::ptrdiff_t>(object_size * i));
+        std::vector<char>().swap(cur->buffer);
+        cur->len = 0;
     }
 }
 
-void cosyvoice_kv_cache::offload_slot(ggml_backend_t backend, ggml_backend_sched* sched, int offloaded_slot_idx, uint32_t n_tokens)
+bool cosyvoice_kv_cache::offload_slot(ggml_backend_t backend, ggml_backend_sched* sched, int offloaded_slot_idx, uint32_t n_tokens)
 {
     auto offset = static_cast<std::ptrdiff_t>(get_offloaded_kv_cache_struct_size(layers) * offloaded_slot_idx);
     offloaded_cache = advance_ptr(offloaded_cache, offset);
-    offload_cache(backend, sched, n_tokens);
+    const bool ok = offload_cache(backend, sched, n_tokens);
     offloaded_cache = advance_ptr(offloaded_cache, -offset);
+    return ok;
 }
 
-void cosyvoice_kv_cache::load_slot(ggml_backend_t backend, ggml_backend_sched* sched, int offloaded_slot_idx)
+bool cosyvoice_kv_cache::load_slot(ggml_backend_t backend, ggml_backend_sched* sched, int offloaded_slot_idx)
 {
     auto offset = static_cast<std::ptrdiff_t>(get_offloaded_kv_cache_struct_size(layers) * offloaded_slot_idx);
     offloaded_cache = advance_ptr(offloaded_cache, offset);
-    load_cache(backend, sched);
+    const bool ok = load_cache(backend, sched);
     offloaded_cache = advance_ptr(offloaded_cache, -offset);
+    return ok;
 }
 
 cosyvoice_kv_cache::~cosyvoice_kv_cache()

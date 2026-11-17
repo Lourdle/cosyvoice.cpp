@@ -887,7 +887,7 @@ typedef struct cosyvoice_memory_usage
     size_t token2wav;          ///< Memory used for the active worker's token2wav intermediates. On the main device.
     size_t buffers;            ///< Memory used for the active worker's internal buffers. On the main device.
     size_t cpu_buffers;        ///< Memory used for the active worker's CPU buffers. On CPU.
-    size_t offloaded_kv_cache; ///< Memory offloaded for the active worker's KV cache. On CPU.
+    size_t offloaded_kv_cache; ///< Memory offloaded for the active worker's LLM and DiT KV caches. On CPU.
     size_t random_noise;       ///< Memory used for shared random-noise buffers. On CPU.
 } cosyvoice_memory_usage_t;
 

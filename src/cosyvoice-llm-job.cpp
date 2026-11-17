@@ -27,7 +27,11 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
     if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
     {
         ggml_backend_sched_reset(sched.get());
-        worker->llm_kv_cache.load_cache(worker->backend.get(), sched.get());
+        if (!worker->llm_kv_cache.load_cache(worker->backend.get(), sched.get()))
+        {
+            cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR, "failed to load the LLM KV cache.\n");
+            return false;
+        }
     }
 
     try
@@ -218,9 +222,13 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
     {
         llm_set_kv_cache_len(1 + static_cast<uint32_t>(prompt->prompt_text.size()));
         llm_offload_kv_cache();
+        if (worker->status != GGML_STATUS_SUCCESS) return false;
     }
     else if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED && max_new_tokens != UINT32_MAX && !stop_reached)
+    {
         llm_offload_kv_cache();
+        if (worker->status != GGML_STATUS_SUCCESS) return false;
+    }
 
     // Reset RNG on stop (matches non-streaming behavior)
     if (stop_reached && params.builtin_sampler_rng_policy == COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION)

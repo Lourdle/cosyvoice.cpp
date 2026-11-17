@@ -277,7 +277,12 @@ bool cosyvoice_model_3::llm_prefill(
             causal_mask->data = nullptr;
         }
         set_graph_backend(gf, worker->sched.get(), worker->backend.get(), worker->cpu_backend.get());
-        ggml_backend_sched_alloc_graph(worker->sched.get(), gf);
+        if (!ggml_backend_sched_alloc_graph(worker->sched.get(), gf))
+        {
+            worker->status = GGML_STATUS_ALLOC_FAILED;
+            cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR, "failed to allocate the LLM graph.\n");
+            return false;
+        }
         if (causal_mask)
             build_causal_mask(reinterpret_cast<ggml_fp16_t*>(causal_mask->data), n_tokens, total_len);
         if (emb_pos)
@@ -357,7 +362,12 @@ bool cosyvoice_model_3::llm_prefill_logits(
     causal_mask->buffer = nullptr;
     causal_mask->data = nullptr;
     set_graph_backend(gf, worker->sched.get(), worker->backend.get(), worker->cpu_backend.get());
-    ggml_backend_sched_alloc_graph(worker->sched.get(), gf);
+    if (!ggml_backend_sched_alloc_graph(worker->sched.get(), gf))
+    {
+        worker->status = GGML_STATUS_ALLOC_FAILED;
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR, "failed to allocate the LLM graph.\n");
+        return false;
+    }
     build_causal_mask(reinterpret_cast<ggml_fp16_t*>(causal_mask->data), n_tokens, total_len);
     if (emb_pos)
         ggml_backend_tensor_set_async(worker->backend.get(), emb_pos, shared->full_position_ids.get(), 0, n_tokens * sizeof(int32_t));
@@ -429,7 +439,12 @@ bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
 
         build_probs_tail(worker, shared, cv3_shared, ctx0, gf, hidden_states);
 
-        ggml_backend_sched_alloc_graph(worker->sched.get(), gf);
+        if (!ggml_backend_sched_alloc_graph(worker->sched.get(), gf))
+        {
+            worker->status = GGML_STATUS_ALLOC_FAILED;
+            cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR, "failed to allocate the LLM graph.\n");
+            return false;
+        }
         if (emb_pos)
             ggml_backend_tensor_set_async(worker->backend.get(), emb_pos, shared->full_position_ids.get(), 0, sizeof(int32_t));
         kv_cache->set_input_v_idxs(worker->backend.get(), shared->full_position_ids.get() + kv_cache->cur_len, 1, 1);

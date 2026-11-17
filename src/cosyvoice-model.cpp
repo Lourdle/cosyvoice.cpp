@@ -1,3 +1,4 @@
+#include "cosyvoice-internal.h"
 #include "cosyvoice-model.h"
 #include "common.h"
 
@@ -263,6 +264,7 @@ void cosyvoice_model::empty_buffer_cache()
     }
 
     worker->llm_kv_cache.clear_offloaded_cache();
+    worker->dit_kv_cache.clear_offloaded_cache();
     worker->prompt_crc32 = 0;
 }
 
@@ -273,7 +275,8 @@ void cosyvoice_model_3::get_memory_usage(cosyvoice_memory_usage_t* usage)
         usage->parameters += ggml_backend_buffer_get_size(buffer.get());
     usage->buffers = ggml_backend_sched_get_buffer_size(worker->sched.get(), worker->backend.get());
     usage->cpu_buffers = ggml_backend_sched_get_buffer_size(worker->sched.get(), worker->cpu_backend.get());
-    usage->offloaded_kv_cache = worker->llm_kv_cache.get_offloaded_cache_size();
+    usage->offloaded_kv_cache = worker->llm_kv_cache.get_offloaded_cache_size()
+        + worker->dit_kv_cache.get_offloaded_cache_size();
     usage->random_noise = sizeof(float) * shared->rand_noise_len;
     usage->kv_cache = worker->llm_kv_buffer.get() ? ggml_backend_buffer_get_size(worker->llm_kv_buffer.get()) : 0;
     usage->token2wav = cv3_worker->token2wav_buffer.get() ? ggml_backend_buffer_get_size(cv3_worker->token2wav_buffer.get()) : 0;
@@ -596,7 +599,11 @@ void cosyvoice_model::llm_offload_kv_cache()
     auto sched = worker->sched.get();
     auto& kv_cache = worker->llm_kv_cache;
     ggml_backend_sched_reset(sched);
-    kv_cache.offload_cache(worker->backend.get(), sched, kv_cache.cur_len);
+    if (!kv_cache.offload_cache(worker->backend.get(), sched, kv_cache.cur_len))
+    {
+        worker->status = GGML_STATUS_FAILED;
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR, "failed to offload the LLM KV cache.\n");
+    }
 }
 
 void cosyvoice_model::llm_load_kv_cache()
@@ -604,5 +611,9 @@ void cosyvoice_model::llm_load_kv_cache()
     auto sched = worker->sched.get();
     auto& kv_cache = worker->llm_kv_cache;
     ggml_backend_sched_reset(sched);
-    kv_cache.load_cache(worker->backend.get(), sched);
+    if (!kv_cache.load_cache(worker->backend.get(), sched))
+    {
+        worker->status = GGML_STATUS_FAILED;
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR, "failed to load the LLM KV cache.\n");
+    }
 }

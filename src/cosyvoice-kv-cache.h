@@ -43,13 +43,13 @@ public:
     ggml_backend_buffer* initialize_buffer(ggml_backend_t backend, int k_head_dim, int v_head_dim, uint32_t max_seq, int batch_size);
     void reset_buffer(ggml_backend_buffer* buffer);
 
-    void offload_cache(ggml_backend_t backend, ggml_backend_sched* sched, uint32_t n_tokens);
-    void load_cache(ggml_backend_t backend, ggml_backend_sched* sched);
+    bool offload_cache(ggml_backend_t backend, ggml_backend_sched* sched, uint32_t n_tokens);
+    bool load_cache(ggml_backend_t backend, ggml_backend_sched* sched);
     size_t get_offloaded_cache_size() const;
     void clear_offloaded_cache();
 
-    void offload_slot(ggml_backend_t backend, ggml_backend_sched* sched, int offloaded_slot_idx, uint32_t n_tokens);
-    void load_slot(ggml_backend_t backend, ggml_backend_sched* sched, int offloaded_slot_idx);
+    bool offload_slot(ggml_backend_t backend, ggml_backend_sched* sched, int offloaded_slot_idx, uint32_t n_tokens);
+    bool load_slot(ggml_backend_t backend, ggml_backend_sched* sched, int offloaded_slot_idx);
 
     uint32_t cur_len;
 private:

@@ -323,7 +323,12 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     ggml_build_forward_expand(gf, feat);
     set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps);
     ggml_backend_sched_synchronize(sched.get());
-    ggml_backend_sched_alloc_graph(sched.get(), gf);
+    if (!ggml_backend_sched_alloc_graph(sched.get(), gf))
+    {
+        worker->status = GGML_STATUS_ALLOC_FAILED;
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR, "failed to allocate the token2wav graph.\n");
+        return false;
+    }
 
     auto stage_build_after = [&](int step)
     {
@@ -385,19 +390,17 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     memcpy(prompt_feat->data, prompt->prompt_speech_feat.data, prompt_feat->nb[2]);
     memcpy(embedding->data, prompt->flow_embedding.data, embedding->nb[2]);
 
-    auto load_kv = [&](int step)
+    auto load_kv = [&](int step) -> bool
     {
-        if (config[step].load)
-        {
-            const auto kv_len = kv_cache->cur_len;
-            kv_cache->load_slot(backend.get(), sched.get(), config[step].off_group);
-            kv_cache->cur_len = kv_len;
-            return true;
-        }
-        return false;
+        if (!config[step].load) return true;
+
+        const auto kv_len = kv_cache->cur_len;
+        const bool ok = kv_cache->load_slot(backend.get(), sched.get(), config[step].off_group);
+        kv_cache->cur_len = kv_len;
+        return ok;
     };
 
-    load_kv(0);
+    if (!load_kv(0)) return false;
 
     worker->status = ggml_backend_sched_graph_compute(sched.get(), gf);
     shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_FLOW, noise_req, noise_buffer, shared->noise_callback_ctx);
@@ -406,7 +409,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     if (worker->status != GGML_STATUS_SUCCESS)
         return false;
 
-    auto stage_compute_after = [&](int step)
+    auto stage_compute_after = [&](int step) -> bool
     {
         if (config[step].offload)
         {
@@ -418,13 +421,18 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
             // Only the last step of an offload group round-trips to CPU; earlier
             // steps leave their state in the scratch slot for the group to overwrite.
             if (config[step].store && full_len < params.dit_kv_cache_length)
-                kv_cache->offload_slot(backend.get(), sched.get(), config[step].off_group, kv_cache->cur_len + static_cast<uint32_t>(position_ids->ne[0]));
+            {
+                if (!kv_cache->offload_slot(backend.get(), sched.get(), config[step].off_group, kv_cache->cur_len + static_cast<uint32_t>(position_ids->ne[0])))
+                    return false;
+            }
         }
         if (config[step].slide)
             kv_cache->slide_kv_slot();
+
+        return true;
     };
 
-    stage_compute_after(0);
+    if (!stage_compute_after(0)) return false;
 
     for (auto tensor : std::span(&ditctx.mu_in, 3))
     {
@@ -466,14 +474,23 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
             ggml_reset(ctx0.get());
             ggml_backend_sched_reset(sched.get());
 
-            if (load_kv(step) && !kv_cache->can_reuse())
-                ggml_backend_sched_reset(sched.get());
+            if (config[step].load)
+            {
+                if (!load_kv(step)) return false;
+                if (!kv_cache->can_reuse())
+                    ggml_backend_sched_reset(sched.get());
+            }
 
             gf = new_cgraph(ctx0.get());
             feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, step + 1, op_caps, config[step].cut_len, t_leaf, position_ids, gf, config[step].cache_kv ? kv_cache : nullptr, config[step].mask ? &attn_mask : nullptr);
             ggml_build_forward_expand(gf, feat);
             set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps);
-            ggml_backend_sched_alloc_graph(sched.get(), gf);
+            if (!ggml_backend_sched_alloc_graph(sched.get(), gf))
+            {
+                worker->status = GGML_STATUS_ALLOC_FAILED;
+                cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR, "failed to allocate the token2wav graph.\n");
+                return false;
+            }
             stage_build_after(step);
         }
         else
@@ -485,14 +502,14 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
             reinterpret_cast<float*>(t_leaf->op_params)[op_caps.fill ? 0 : 1] = t;
             reinterpret_cast<float*>(scale_node->op_params)[0] = dt;
 
-            load_kv(step);
+            if (!load_kv(step)) return false;
         }
 
         worker->status = ggml_backend_sched_graph_compute(sched.get(), gf);
         if (worker->status != GGML_STATUS_SUCCESS)
             return false;
 
-        stage_compute_after(step);
+        if (!stage_compute_after(step)) return false;
     }
 
     // Phase 3: Copy flow output to speech_feat (persistent buffer)
@@ -573,7 +590,12 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     ggml_build_forward_expand(gf, generated_speech);
     set_graph_backends(gf, sched.get(), backend.get(), cpu_backend.get(), op_caps);
 
-    ggml_backend_sched_alloc_graph(sched.get(), gf);
+    if (!ggml_backend_sched_alloc_graph(sched.get(), gf))
+    {
+        worker->status = GGML_STATUS_ALLOC_FAILED;
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR, "failed to allocate the token2wav graph.\n");
+        return false;
+    }
 
     for (auto node : ggml_cgraph_node_iterator(gf))
         if (node->op == GGML_OP_IM2COL && node->ne[1] > 0xFFFF)
