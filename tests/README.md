@@ -10,7 +10,7 @@ configure time and are not run by a plain `ctest`.
 
 ```sh
 cmake -S . -B build -DCOSYVOICE_BUILD_TESTS=ON
-cmake --build build --config Release --target test-llm-graph-reuse test-tts-stream
+cmake --build build --config Release --target test-llm-graph-reuse test-tts-stream test-kv-offload
 ```
 
 The executables land in `build/bin/<config>/` next to the shared library they
@@ -123,3 +123,22 @@ build/bin/test-tts-stream CosyVoice3-2512_F32.gguf CUDA0 14 out \
 build/bin/test-tts-stream CosyVoice3-2512_Q4_K_M.gguf CPU 28 out \
     "Hello world." - "" 1.0 42 0 8 no-save
 ```
+
+## `test-kv-offload`
+
+Regression for the KV cache offload paths. It runs in two phases:
+
+1. Dedicated buffer policy with two offloadable DiT KV slots — checks that the
+   offloaded DiT cache is reported by `cosyvoice_get_memory_usage()` and is
+   released by `cosyvoice_empty_buffer_cache()`.
+2. Balanced buffer policy (LLM KV cache offload slot) — clears the buffer cache,
+   twice, and synthesizes again. This catches the freed-context use and the
+   double free on destruction that used to happen after
+   `cosyvoice_empty_buffer_cache()`.
+
+```sh
+build/bin/test-kv-offload /path/to/CosyVoice3-2512_Q4_K_M.gguf CPU prompt_speech.gguf "你好。"
+```
+
+The model is loaded twice (once per phase), so the DiT KV cache length and the
+LLM sequence length are kept small; it prints `PASS` on success.
