@@ -6,6 +6,7 @@
 |---|---|---|
 | `COSYVOICE_SIMD_LEVEL` | 库加载时 | CPU DSP SIMD 分派层级封顶（仅 x86-64） |
 | `COSYVOICE_MAX_WEIGHT_BUFFER_SIZE` | 模型加载时 | 覆盖单块权重缓冲的最大分配字节数 |
+| `COSYVOICE_NO_MMAP_ZEROCOPY` | 模型加载时 | 关闭从文件映射直接使用权重（CPU 后端） |
 | `COSYVOICE_HIFT_PHASE_LOG` | 流式 TTS | 输出 HiFT 流式帧统计日志 |
 | `COSYVOICE_DUMP_MEL` | 流式 TTS | 将新增 mel 帧追加写入文件，用于连续性调试 |
 
@@ -32,6 +33,13 @@ COSYVOICE_SIMD_LEVEL=avx2 cosyvoice-cli --model model.gguf --prompt-speech promp
 ```
 
 仅适用于 x86-64。非 x86 构建（包括 ARM64 上的 SIMDe 模拟）在编译期固定层级，忽略此变量。
+
+## `COSYVOICE_NO_MMAP_ZEROCOPY`
+
+在模型加载时读取。当模型从文件加载时，CPU 后端会直接使用文件映射：权重张量指向映射的 GGUF，而不是复制到单独的 CPU 缓冲区。这样可大约省下一份模型大小的常驻内存，并加快加载。将该变量设为除 `0` 以外的任意值可强制回退到旧的拷贝行为。
+
+- 仅在当前设备为 CPU 后端且支持 `buffer_from_host_ptr` 时生效；GPU 加载始终把权重拷贝到设备。
+- 上下文存活期间映射文件保持打开。Windows 上该文件以 `FILE_SHARE_DELETE` 打开，因此仍可被改名或删除；删除会在上下文释放时生效，在此之前原映射仍可正常读取。
 
 ## `COSYVOICE_MAX_WEIGHT_BUFFER_SIZE`
 

@@ -6,6 +6,7 @@ The runtime library (`cosyvoice`) and its tools read a small set of environment 
 |---|---|---|
 | `COSYVOICE_SIMD_LEVEL` | Library load | Cap the CPU DSP SIMD dispatch tier (x86-64 only) |
 | `COSYVOICE_MAX_WEIGHT_BUFFER_SIZE` | Model load | Override the largest per-buffer weight allocation, in bytes |
+| `COSYVOICE_NO_MMAP_ZEROCOPY` | Model load | Disable using weights zero-copy from the file mapping (CPU backends) |
 | `COSYVOICE_HIFT_PHASE_LOG` | Streaming TTS | Log HiFT streaming frame accounting |
 | `COSYVOICE_DUMP_MEL` | Streaming TTS | Append new mel frames to a file for continuity debugging |
 
@@ -32,6 +33,13 @@ COSYVOICE_SIMD_LEVEL=avx2 cosyvoice-cli --model model.gguf --prompt-speech promp
 ```
 
 Only applicable on x86-64. Non-x86 builds (including SIMDe-on-ARM64) fix the tier at compile time and ignore this variable.
+
+## `COSYVOICE_NO_MMAP_ZEROCOPY`
+
+Read at model load. When a model is loaded from a file, CPU backends use the file mapping in place: weight tensors point into the mapped GGUF instead of being copied into a separate CPU buffer. This saves roughly one model-sized copy of resident memory and speeds up loading. Set this variable to any value other than `0` to force the previous copy behavior.
+
+- Only applies when the active device is the CPU backend and it supports `buffer_from_host_ptr`; GPU loads always copy the weights to the device.
+- While the context is alive the mapped file stays open. On Windows the file is opened with `FILE_SHARE_DELETE`, so it can still be renamed or deleted; the deletion takes effect when the context is released, and the original mapping stays readable until then.
 
 ## `COSYVOICE_MAX_WEIGHT_BUFFER_SIZE`
 
