@@ -828,6 +828,30 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     auto buft = ggml_backend_get_default_buffer_type(backend);
     auto alignment = ggml_backend_buft_get_alignment(buft);
 
+    // When the loader owns the file mapping (cosyvoice_load_from_file_ext), weights can be
+    // used in place: the host buffer below wraps the mapping and tensors point into it
+    // without an upload. Only the CPU device advertises buffer_from_host_ptr; GPUs and
+    // caller-owned buffers keep using the copy path.
+    auto mmap_zero_copy = [&](const ggml_tensor* tensor)
+    {
+        return shared->mmap && get_tensor_eps(tensor) == 0.f;
+    };
+
+    if (shared->mmap)
+    {
+        size_t max_tensor_size = 0;
+        for (const auto& [name, tensor] : tensors)
+            max_tensor_size = std::max(max_tensor_size, ggml_nbytes(*tensor));
+
+        shared->mmap_buffer.reset(ggml_backend_dev_buffer_from_host_ptr(
+            ggml_backend_get_device(backend),
+            const_cast<void*>(shared->mmap.data()),
+            shared->mmap.size(),
+            max_tensor_size));
+        if (!shared->mmap_buffer)
+            throw std::runtime_error("Failed to map the model weights from the file mapping.\n");
+    }
+
     const int mel_dim = flow.decoder.estimator.mel_dim;
     size_t mem_size = get_aligned_size(sizeof(float) * half_dim, alignment)
         + get_aligned_size(sizeof(float) * (hift.nfft / 2 + 1), alignment)
@@ -835,7 +859,8 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         + get_aligned_size(sizeof(int) * shared->params.n_batch, alignment) * shared->params.n_workers;
     for (const auto& [name, tensor] : tensors)
         if (tensor != &llm.embed_tokens_weight
-            && tensor != &llm.speech_embedding_weight)
+            && tensor != &llm.speech_embedding_weight
+            && !mmap_zero_copy(*tensor))
             mem_size += get_aligned_size(ggml_backend_buft_get_alloc_size(buft, *tensor), alignment);
 
     // Split the packed weights over as many buffers as needed: some backends
@@ -924,9 +949,10 @@ void cosyvoice_model_3::load(gguf_loader& loader)
 
     shared->ctx.reset(ggml_init(params));
 
-    mem_size = ggml_backend_buft_get_alloc_size(ggml_backend_cpu_buffer_type(), llm.embed_tokens_weight)
-        + ggml_backend_buft_get_alloc_size(ggml_backend_cpu_buffer_type(), llm.speech_embedding_weight)
-        + sizeof(float) * hift.nfft;
+    mem_size = sizeof(float) * hift.nfft;
+    if (!shared->mmap)
+        mem_size += ggml_backend_buft_get_alloc_size(ggml_backend_cpu_buffer_type(), llm.embed_tokens_weight)
+            + ggml_backend_buft_get_alloc_size(ggml_backend_cpu_buffer_type(), llm.speech_embedding_weight);
     shared->cpu_buffer.reset(ggml_backend_buft_alloc_buffer(ggml_backend_get_default_buffer_type(cpu_backend), mem_size));
     auto cpu_buffer_base = reinterpret_cast<char*>(ggml_backend_buffer_get_base(shared->cpu_buffer.get()));
 
@@ -951,9 +977,16 @@ void cosyvoice_model_3::load(gguf_loader& loader)
         if (tensor == &llm.embed_tokens_weight
             || tensor == &llm.speech_embedding_weight)
         {
-            ggml_backend_tensor_alloc(shared->cpu_buffer.get(), new_tensor, cpu_buffer_base);
-            set_cpu_tensor(new_tensor, ggml_get_data(*tensor), tensor_size);
+            if (shared->mmap)
+                ggml_backend_tensor_alloc(shared->mmap_buffer.get(), new_tensor, ggml_get_data(*tensor));
+            else
+            {
+                ggml_backend_tensor_alloc(shared->cpu_buffer.get(), new_tensor, cpu_buffer_base);
+                set_cpu_tensor(new_tensor, ggml_get_data(*tensor), tensor_size);
+            }
         }
+        else if (mmap_zero_copy(*tensor))
+            ggml_backend_tensor_alloc(shared->mmap_buffer.get(), new_tensor, ggml_get_data(*tensor));
         else
         {
             alloc_device_tensor(new_tensor);

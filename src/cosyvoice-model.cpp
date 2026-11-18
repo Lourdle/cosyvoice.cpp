@@ -273,6 +273,8 @@ void cosyvoice_model_3::get_memory_usage(cosyvoice_memory_usage_t* usage)
     usage->parameters = 0;
     for (auto& buffer : shared->buffers)
         usage->parameters += ggml_backend_buffer_get_size(buffer.get());
+    if (shared->mmap_buffer)
+        usage->parameters += ggml_backend_buffer_get_size(shared->mmap_buffer.get());
     usage->buffers = ggml_backend_sched_get_buffer_size(worker->sched.get(), worker->backend.get());
     usage->cpu_buffers = ggml_backend_sched_get_buffer_size(worker->sched.get(), worker->cpu_backend.get());
     usage->offloaded_kv_cache = worker->llm_kv_cache.get_offloaded_cache_size()

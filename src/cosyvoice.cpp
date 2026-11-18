@@ -7,6 +7,8 @@
 #include <ggml-backend.h>
 
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <random>
 #include <format>
@@ -147,7 +149,20 @@ void cosyvoice_log_callback_default(ggml_log_level level, const char* text, void
 #endif
 }
 
-cosyvoice_context_t cosyvoice_load_ext(const void* data, size_t size, const cosyvoice_context_params_t* params, ggml_backend_t backend, uint32_t n_threads, uint32_t version)
+static bool mmap_zero_copy_eligible(ggml_backend_t backend)
+{
+    if (const char* env = std::getenv("COSYVOICE_NO_MMAP_ZEROCOPY"); env && *env && std::strcmp(env, "0") != 0)
+        return false;
+
+    auto* dev = ggml_backend_get_device(backend);
+    if (!dev) return false;
+
+    ggml_backend_dev_props props = {};
+    ggml_backend_dev_get_props(dev, &props);
+    return props.type == GGML_BACKEND_DEVICE_TYPE_CPU && props.caps.buffer_from_host_ptr;
+}
+
+static cosyvoice_context_t cosyvoice_load_impl(const void* data, size_t size, const cosyvoice_context_params_t* params, ggml_backend_t backend, uint32_t n_threads, uint32_t version, file_mmap* mmap_owner)
 {
     gguf_parser parser;
     gguf_loader loader(parser, data, size);
@@ -207,6 +222,9 @@ cosyvoice_context_t cosyvoice_load_ext(const void* data, size_t size, const cosy
         ctx = new cosyvoice_context_3(params_v4,
             backend ? backend : ggml_backend_init_best()
         );
+        if (mmap_owner && mmap_zero_copy_eligible(ctx->worker->backend.get()))
+            ctx->shared->mmap = std::move(*mmap_owner);
+
         ctx->cosyvoice_model_3::load(loader);
         ctx->cosyvoice_tokenizer::load(loader);
 
@@ -229,6 +247,11 @@ cosyvoice_context_t cosyvoice_load_ext(const void* data, size_t size, const cosy
     return ctx;
 }
 
+cosyvoice_context_t cosyvoice_load_ext(const void* data, size_t size, const cosyvoice_context_params_t* params, ggml_backend_t backend, uint32_t n_threads, uint32_t version)
+{
+    return cosyvoice_load_impl(data, size, params, backend, n_threads, version, nullptr);
+}
+
 cosyvoice_context_t cosyvoice_load_from_file_ext(
     const char* filename,
     const cosyvoice_context_params_t* params,
@@ -237,7 +260,7 @@ cosyvoice_context_t cosyvoice_load_from_file_ext(
     uint32_t version)
 {
     file_mmap mmap(filename);
-    return mmap ? cosyvoice_load_ext(mmap.data(), mmap.size(), params, backend, n_threads, version) : nullptr;
+    return mmap ? cosyvoice_load_impl(mmap.data(), mmap.size(), params, backend, n_threads, version, &mmap) : nullptr;
 }
 
 cosyvoice_context_t cosyvoice_load_from_file(const char* filename)

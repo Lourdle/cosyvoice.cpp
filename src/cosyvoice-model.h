@@ -4,6 +4,7 @@
 #include "cosyvoice-lowlevel.h"
 #include "cosyvoice-interface.h"
 #include "cosyvoice-kv-cache.h"
+#include "common.h"
 
 #include <ggml-cpp.h>
 
@@ -19,6 +20,12 @@ struct cosyvoice_model_shared
     cosyvoice_model_shared(const cosyvoice_context_params_v4_cpp& params);
 
     ggml_context_ptr ctx;
+
+    // Keeps the model file mapping alive when weights are used zero-copy from it.
+    file_mmap mmap;
+    // Read-only view over `mmap`; does not own the memory. Declared after `mmap` so it is
+    // destroyed first.
+    ggml_backend_buffer_ptr mmap_buffer;
 
     std::vector<ggml_backend_buffer_ptr> buffers;
     ggml_backend_buffer_ptr cpu_buffer;
