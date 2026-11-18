@@ -1,5 +1,6 @@
 #pragma once
 
+#include <utility>
 #include <fstream>
 #include <string>
 
@@ -35,8 +36,23 @@ std::ofstream open_ofstream_utf8(const char* path, std::ios::openmode mode = std
 class file_mmap
 {
 public:
+    file_mmap() noexcept;
     file_mmap(const char* filename);
+    file_mmap(file_mmap&& other) noexcept;
     ~file_mmap() noexcept;
+
+    file_mmap(const file_mmap&) = delete;
+    file_mmap& operator=(const file_mmap&) = delete;
+
+    file_mmap& operator=(file_mmap&& other) noexcept
+    {
+        if (this != &other)
+        {
+            this->~file_mmap();
+            new(this) file_mmap(std::move(other));
+        }
+        return *this;
+    }
 
     operator bool() const;
     const void* data() const { return data_; }

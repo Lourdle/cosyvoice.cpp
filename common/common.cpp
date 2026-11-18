@@ -26,8 +26,10 @@ std::wstring utf8_to_wstr(const char* utf8)
     return wide;
 }
 
+file_mmap::file_mmap() noexcept : data_(nullptr), size_(0), hFile(INVALID_HANDLE_VALUE), hFileMapping(nullptr) {}
+
 file_mmap::file_mmap(const char* pFileName) : hFileMapping(INVALID_HANDLE_VALUE), data_(nullptr),
-hFile(CreateFileW(utf8_to_wstr(pFileName).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr))
+hFile(CreateFileW(utf8_to_wstr(pFileName).c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr))
 {
     if (hFile != INVALID_HANDLE_VALUE)
     {
@@ -40,6 +42,14 @@ hFile(CreateFileW(utf8_to_wstr(pFileName).c_str(), GENERIC_READ, FILE_SHARE_READ
                 data_ = MapViewOfFile(hFileMapping, FILE_MAP_READ, 0, 0, 0);
         }
     }
+}
+
+file_mmap::file_mmap(file_mmap&& other) noexcept : data_(other.data_), size_(other.size_), hFile(other.hFile), hFileMapping(other.hFileMapping)
+{
+    other.data_ = nullptr;
+    other.size_ = 0;
+    other.hFile = INVALID_HANDLE_VALUE;
+    other.hFileMapping = nullptr;
 }
 
 file_mmap::~file_mmap() noexcept
@@ -59,6 +69,8 @@ file_mmap::operator bool() const
 
 #else
 
+file_mmap::file_mmap() noexcept : data_(MAP_FAILED), size_(0), fd(-1) {}
+
 file_mmap::file_mmap(const char* path) : fd(open(path, O_RDONLY)), data_(MAP_FAILED)
 {
     if (fd >= 0)
@@ -70,6 +82,13 @@ file_mmap::file_mmap(const char* path) : fd(open(path, O_RDONLY)), data_(MAP_FAI
             data_ = mmap(nullptr, size_, PROT_READ, MAP_SHARED, fd, 0);
         }
     }
+}
+
+file_mmap::file_mmap(file_mmap&& other) noexcept : data_(other.data_), size_(other.size_), fd(other.fd)
+{
+    other.data_ = MAP_FAILED;
+    other.size_ = 0;
+    other.fd = -1;
 }
 
 file_mmap::~file_mmap() noexcept
