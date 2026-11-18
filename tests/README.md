@@ -10,7 +10,7 @@ configure time and are not run by a plain `ctest`.
 
 ```sh
 cmake -S . -B build -DCOSYVOICE_BUILD_TESTS=ON
-cmake --build build --config Release --target test-llm-graph-reuse test-tts-stream test-kv-offload
+cmake --build build --config Release --target test-llm-graph-reuse test-tts-stream test-kv-offload test-mmap-zerocopy test-mmap-delete
 ```
 
 The executables land in `build/bin/<config>/` next to the shared library they
@@ -142,3 +142,36 @@ build/bin/test-kv-offload /path/to/CosyVoice3-2512_Q4_K_M.gguf CPU prompt_speech
 
 The model is loaded twice (once per phase), so the DiT KV cache length and the
 LLM sequence length are kept small; it prints `PASS` on success.
+
+## `test-mmap-zerocopy`
+
+Regression for using the model file mapping in place on CPU backends. It loads
+the model twice - once with the default zero-copy path and once with
+`COSYVOICE_NO_MMAP_ZEROCOPY=1` forcing the copy path - and requires
+bit-identical audio for the same text and seed.
+
+```sh
+build/bin/test-mmap-zerocopy /path/to/CosyVoice3-2512_Q4_K_M.gguf CPU prompt_speech.gguf "你好。"
+```
+
+It also prints the `parameters` memory usage of both loads; the zero-copy load
+reports at least the size of the model file because the mapping backs the
+weights. Only CPU backends use the zero-copy path, so pass `CPU` as the backend.
+
+## `test-mmap-delete`
+
+Checks that deleting the model file while a zero-copy context is alive is safe.
+It copies the given model to a work file, loads the copy on a CPU backend,
+synthesizes once, deletes the work file, and synthesizes again. The second pass
+must succeed and produce bit-identical audio, and the work file name must be
+gone once the context is released. On Windows this relies on the mapping being
+opened with `FILE_SHARE_DELETE`.
+
+```sh
+build/bin/test-mmap-delete model-Q4_0.gguf work.gguf CPU prompt_speech.gguf "你好。"
+```
+
+The work file is copied from the source model when it does not exist yet, so it
+can be pointed at any writable location with room for one model copy. If the work
+file already exists it is used as is, which allows hard-linking it to the model on
+space-constrained drives.
