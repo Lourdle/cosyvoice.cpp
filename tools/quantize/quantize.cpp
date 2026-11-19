@@ -112,7 +112,7 @@ static const OptionDef s_options[OPT_COUNT] = {
     { "--help",         'h', 0, "Show this help message and exit." },
     { "--file",         'f', 1, "Input GGUF file path." },
     { "--output-file",  'o', 1, "Output GGUF file path." },
-    { "--type",         't', 1, "Default quantization type. Supported: F16, Q8_0, Q5_0, Q5_1, Q4_0, Q4_1, MXFP4, Q6_K, Q5_K, Q4_K, Q3_K, Q2_K, Q2_0, Q1_0, COPY." },
+    { "--type",         't', 1, "Default quantization type. Supported: F16, Q8_0, Q5_0, Q5_1, Q4_0, Q4_1, MXFP4, Q6_K, Q5_K, Q4_K, Q3_K, Q2_K, Q2_0, Q1_0, F8_E4M3, COPY." },
     { "--custom-string",'c', 2, "Custom metadata key-value pair (repeatable). Usage: -c <key> <value>" },
     { "--tensor-map",   'M', 1, "JSON file mapping tensor name regex to quantization type. Unlisted tensors use --type default." },
 };
@@ -152,6 +152,7 @@ static ggml_ftype parse_ftype(const char* s)
     if (str_casecmp(s, "Q2_K") == 0) return GGML_FTYPE_MOSTLY_Q2_K;
     if (str_casecmp(s, "Q2_0") == 0) return GGML_FTYPE_MOSTLY_Q2_0;
     if (str_casecmp(s, "Q1_0") == 0) return GGML_FTYPE_MOSTLY_Q1_0;
+    if (str_casecmp(s, "F8_E4M3") == 0) return GGML_FTYPE_MOSTLY_F8_E4M3;
     if (str_casecmp(s, "COPY") == 0) return GGML_FTYPE_UNKNOWN;
     return static_cast<ggml_ftype>(-2);
 }
