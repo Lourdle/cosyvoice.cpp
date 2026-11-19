@@ -14,8 +14,10 @@ quantize --help
 ```
 
 Supported quantization types:
-- `F16`, `Q8_0`, `Q6_K`, `Q5_1`, `Q5_K`, `Q5_0`, `Q4_K`, `Q4_1`, `Q4_0`, `MXFP4`, `Q3_K`, `Q2_K`, `Q2_0`, `Q1_0`
+- `F16`, `Q8_0`, `Q6_K`, `Q5_1`, `Q5_K`, `Q5_0`, `Q4_K`, `Q4_1`, `Q4_0`, `MXFP4`, `Q3_K`, `Q2_K`, `Q2_0`, `Q1_0`, `F8_E4M3`
 - `COPY`
+
+`F8_E4M3` weights require a backend with F8 matrix multiplication kernels (CPU and CUDA). Loading an `F8_E4M3` model on a backend without them (for example Metal, Vulkan, or SYCL) fails with an error. `F8_E4M3` stores values without per-block scaling, so small-magnitude weights lose most of their precision; on CosyVoice3-2512 the generated audio collapses to near-silence. Treat it as experimental and prefer `Q8_0`/`Q6_K`.
 
 ### Options
 
