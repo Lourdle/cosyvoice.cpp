@@ -10,7 +10,7 @@ configure time and are not run by a plain `ctest`.
 
 ```sh
 cmake -S . -B build -DCOSYVOICE_BUILD_TESTS=ON
-cmake --build build --config Release --target test-llm-graph-reuse test-tts-stream test-kv-offload test-mmap-zerocopy test-mmap-delete
+cmake --build build --config Release --target test-llm-graph-reuse test-tts-stream test-kv-offload test-llm-prefill-stop test-mmap-zerocopy test-mmap-delete
 ```
 
 The executables land in `build/bin/<config>/` next to the shared library they
@@ -142,6 +142,22 @@ build/bin/test-kv-offload /path/to/CosyVoice3-2512_Q4_K_M.gguf CPU prompt_speech
 
 The model is loaded twice (once per phase), so the DiT KV cache length and the
 LLM sequence length are kept small; it prints `PASS` on success.
+
+## `test-llm-prefill-stop`
+
+Regression for stopping the LLM while it prefills a prompt. It runs a short
+decode twice - once before and once after a long prefill that is interrupted by
+`cosyvoice_request_stop()` from another thread - and requires identical tokens.
+The interrupted prefill must report failure, generate no tokens, and leave the
+LLM KV cache empty so the next job starts from a clean state.
+
+```sh
+build/bin/test-llm-prefill-stop /path/to/CosyVoice3-2512_Q4_K_M.gguf CPU prompt_speech.gguf
+```
+
+Unlike the TTS tests, it drives the low-level LLM API and needs neither the flow
+decoder nor the vocoder. The stop is requested 100 ms after the long prefill
+starts; the test fails if the prefill already finished by then.
 
 ## `test-mmap-zerocopy`
 

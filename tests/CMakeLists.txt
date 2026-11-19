@@ -10,6 +10,10 @@ add_executable(test-kv-offload kv-cache-offload.cpp)
 target_link_libraries(test-kv-offload PRIVATE cosyvoice common tools_common ggml)
 target_include_directories(test-kv-offload PRIVATE ../include)
 
+add_executable(test-llm-prefill-stop llm-prefill-stop.cpp)
+target_link_libraries(test-llm-prefill-stop PRIVATE cosyvoice common tools_common ggml)
+target_include_directories(test-llm-prefill-stop PRIVATE ../include)
+
 add_executable(test-mmap-zerocopy mmap-zerocopy.cpp)
 target_link_libraries(test-mmap-zerocopy PRIVATE cosyvoice common tools_common ggml)
 target_include_directories(test-mmap-zerocopy PRIVATE ../include)
