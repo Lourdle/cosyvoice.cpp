@@ -7,6 +7,11 @@
 #include <stdexcept>
 #include <vector>
 
+namespace
+{
+struct prefill_stopped {};
+}
+
 bool cosyvoice_model_3::llm_job(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt)
 {
     llm_clear_accepted_tokens();
@@ -56,6 +61,9 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
 
             auto prefill_embedding = [&](const char* data, int token_id, uint32_t row_size, ggml_type type)
             {
+                if (is_stop_requested())
+                    throw prefill_stopped{};
+
                 memcpy(batch_buffer.get() + offset++ * row_size, data + token_id * row_size, row_size);
 
                 if (offset == n_batch)
@@ -79,6 +87,8 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
 
                 if (params.strict_seed_mode && offset != 0)
                 {
+                    if (is_stop_requested())
+                        throw prefill_stopped{};
                     if (!llm_prefill(token_type, batch_buffer.get(), offset))
                         throw std::runtime_error("Failed to prefill LLM KV cache.\n");
                     offset = 0;
@@ -97,8 +107,13 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
 
             if (token_type != speech_type)
             {
-                if (offset != 0 && !llm_prefill(token_type, batch_buffer.get(), offset))
-                    throw std::runtime_error("Failed to prefill LLM KV cache.\n");
+                if (offset != 0)
+                {
+                    if (is_stop_requested())
+                        throw prefill_stopped{};
+                    if (!llm_prefill(token_type, batch_buffer.get(), offset))
+                        throw std::runtime_error("Failed to prefill LLM KV cache.\n");
+                }
                 offset = 0;
             }
 
@@ -126,6 +141,8 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
             // Prefill the remaining tokens together with `cur` (the input of
             // the first decode step) in a single fused pass that also computes
             // the logits of the next token.
+            if (is_stop_requested())
+                throw prefill_stopped{};
             memcpy(batch_buffer.get() + offset * speech_row_size, cur, speech_row_size);
             if (!llm_prefill_logits(speech_type, batch_buffer.get(), offset + 1))
                 throw std::runtime_error("Failed to prefill LLM KV cache and compute logits.\n");
@@ -203,6 +220,17 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
             if (!llm_decode(speech_type, cur))
                 throw std::runtime_error("Failed to decode LLM output.\n");
         }
+    }
+    catch (const prefill_stopped&)
+    {
+        worker->llm_input = nullptr;
+        // The KV cache holds a partial prompt. Drop it so the next job starts
+        // from a clean state instead of appending to the partial prefill.
+        llm_set_kv_cache_len(0);
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, "LLM prefill stopped by user.\n");
+        if (params.builtin_sampler_rng_policy == COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION)
+            reset_builtin_sampler_rng();
+        return false;
     }
     catch (const std::exception& e)
     {
