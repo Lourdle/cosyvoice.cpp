@@ -138,6 +138,18 @@ bool backend_looks_uma(ggml_backend_t backend, ggml_backend_buffer* buffer)
 #endif
 }
 
+// Query the backend for the exact operation shape that the inference graphs use
+// (F8_E4M3 weight x F32 activation), so backends that lack the kernels are
+// rejected without hardcoding backend names. The context is borrowed from the
+// worker and must outlive the probe.
+static bool supports_mul_mat(ggml_backend_t backend, ggml_context* ctx, ggml_type type)
+{
+    auto weight = ggml_new_tensor_2d(ctx, type, 256, 256);
+    auto input = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, 256, 8);
+    auto result = ggml_mul_mat(ctx, weight, input);
+    return ggml_backend_supports_op(backend, result);
+}
+
 #define LOAD_SUBMODULE_EX(name, module) do {\
     auto& _module = module;\
     _module.OnLoad(loader, combine_prefix(prefix, name));\
@@ -827,6 +839,19 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     auto cpu_backend = worker->cpu_backend.get();
     auto buft = ggml_backend_get_default_buffer_type(backend);
     auto alignment = ggml_backend_buft_get_alignment(buft);
+
+    const auto has_f8_weights = std::any_of(tensors.begin(), tensors.end(),
+        [](const auto& entry) { return (*entry.second)->type == GGML_TYPE_F8_E4M3; });
+    if (has_f8_weights && !supports_mul_mat(backend, worker->ctx0.get(), GGML_TYPE_F8_E4M3))
+    {
+        ggml_backend_dev_props props;
+        ggml_backend_dev_get_props(ggml_backend_get_device(backend), &props);
+        throw std::runtime_error(std::format(
+            "The model contains F8_E4M3 weight tensors, but the {} backend does not support "
+            "matrix multiplication with F8_E4M3 weights. Re-quantize the model with a type "
+            "supported by this backend (for example F16 or Q8_0).\n",
+            props.name));
+    }
 
     // When the loader owns the file mapping (cosyvoice_load_from_file_ext), weights can be
     // used in place: the host buffer below wraps the mapping and tensors point into it
