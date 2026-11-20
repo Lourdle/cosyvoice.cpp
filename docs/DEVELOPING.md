@@ -79,6 +79,7 @@ The project targets C++20, and the core library already follows these idioms —
 - **String views**: use `std::string_view` for read-only string parameters in library/tool internals; keep `const char*` at the C API boundary (`cosyvoice.h` and friends are C interfaces).
 - **RAII**: prefer `std::unique_ptr` (including the `*_handle` aliases in `tool_common_cosyvoice.h`) and `std::vector` / `std::string` over raw `new`/`delete` / owning raw pointers. The C API `create`/`free` pairs are the exception, since they are part of the C ABI.
 - **Numeric parsing**: use `std::from_chars` for input parsing rather than `strtol` / `strtof` families (see the `COSYVOICE_MAX_WEIGHT_BUFFER_SIZE` handling in `src/cosyvoice-loader.cpp`).
+- **Timing**: for elapsed-time measurements use `ggml_time_us()` / `ggml_time_ms()` (`<ggml.h>`) instead of `std::chrono`; they are monotonic and already back the UMA probe and the stage diagnostics. Keep `std::chrono::system_clock` only where wall-clock semantics are required, such as random seed generation.
 - **Idioms**: prefer `nullptr` over `NULL`/`0`, `static_cast`/`reinterpret_cast` over C-style casts, `if` with initializer, structured bindings, and `enum class` over plain `enum` in non-C-API code.
 
 New code should follow these; simple `printf`-style console output does not need rewriting.

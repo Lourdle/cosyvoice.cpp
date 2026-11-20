@@ -79,6 +79,7 @@ target_include_directories(my-tool PRIVATE ../include)
 - **字符串视图**：库/工具内部只读字符串参数用 `std::string_view`；C API 边界（`cosyvoice.h` 等为 C 接口）保持 `const char*`。
 - **RAII**：优先使用 `std::unique_ptr`（含 `tool_common_cosyvoice.h` 中的 `*_handle` 别名）和 `std::vector` / `std::string`，避免裸 `new`/`delete` 与拥有型裸指针。C API 的 `create`/`free` 配对属于 C ABI 的一部分，属例外。
 - **数字解析**：输入解析用 `std::from_chars`，避免 `strtol` / `strtof` 家族（参考 `src/cosyvoice-loader.cpp` 中 `COSYVOICE_MAX_WEIGHT_BUFFER_SIZE` 的处理）。
+- **计时**：测量耗时优先使用 `ggml_time_us()` / `ggml_time_ms()`（`<ggml.h>`），不要用 `std::chrono`；它们单调，且已用于 UMA probe 与阶段耗时诊断。仅在有墙钟语义时（如随机种子）才用 `std::chrono::system_clock`。
 - **惯用法**：优先 `nullptr` 而非 `NULL`/`0`，`static_cast`/`reinterpret_cast` 而非 C 风格强转，善用 if-初始化语句、结构化绑定，非 C API 代码用 `enum class` 而非普通 `enum`。
 
 以上针对新代码；简单的 printf 风格控制台输出不必重写。
