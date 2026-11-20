@@ -7,8 +7,10 @@ The runtime library (`cosyvoice`) and its tools read a small set of environment 
 | `COSYVOICE_SIMD_LEVEL` | Library load | Cap the CPU DSP SIMD dispatch tier (x86-64 only) |
 | `COSYVOICE_MAX_WEIGHT_BUFFER_SIZE` | Model load | Override the largest per-buffer weight allocation, in bytes |
 | `COSYVOICE_NO_MMAP_ZEROCOPY` | Model load | Disable using weights zero-copy from the file mapping (CPU backends) |
+| `COSYVOICE_LOG_VERBOSE` | Logging | Print INFO/DEBUG log output in Release builds |
 | `COSYVOICE_HIFT_PHASE_LOG` | Streaming TTS | Log HiFT streaming frame accounting |
 | `COSYVOICE_DUMP_MEL` | Streaming TTS | Append new mel frames to a file for continuity debugging |
+| `COSYVOICE_STAGE_TIMING` | TTS inference | Log per-stage inference timings |
 
 ## `COSYVOICE_SIMD_LEVEL`
 
@@ -58,9 +60,15 @@ Example:
 COSYVOICE_MAX_WEIGHT_BUFFER_SIZE=268435456 cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --text "hello" --output out.wav
 ```
 
+## `COSYVOICE_LOG_VERBOSE`
+
+Controls whether INFO/DEBUG messages from the library are printed. Debug builds (`_DEBUG`) enable it by default; Release builds keep it off unless the variable is set (any value, even an empty one) or one of the diagnostics below (`COSYVOICE_STAGE_TIMING`, `COSYVOICE_HIFT_PHASE_LOG`) is set. Warning and error messages are always printed.
+
+All output goes through the active GGML log callback; the default callback prints these levels to stdout.
+
 ## `COSYVOICE_HIFT_PHASE_LOG`
 
-Setting the variable to any value (even an empty one) enables HiFT streaming frame accounting — the code only checks that the variable is *set* (`getenv` returns non-null), so to disable it the variable must be unset. While streaming, each chunk logs a line with `prompt_frames`, `input_frames`, `new_frames`, `cache_frames`, `emitted_frames`, and `emitted_total` to both the GGML log callback and stderr. Intended for debugging HiFT cache/streaming seams.
+Setting the variable to any value (even an empty one) enables HiFT streaming frame accounting — the code only checks that the variable is *set* (`getenv` returns non-null), so to disable it the variable must be unset. While streaming, each chunk logs a line with `prompt_frames`, `input_frames`, `new_frames`, `cache_frames`, `emitted_frames`, and `emitted_total` through the GGML log callback at INFO. Setting this variable also enables verbose output (see `COSYVOICE_LOG_VERBOSE`). Intended for debugging HiFT cache/streaming seams.
 
 Example:
 
@@ -85,3 +93,20 @@ COSYVOICE_DUMP_MEL=/tmp/mel.bin cosyvoice-cli --model model.gguf --prompt-speech
 ```
 
 This is a debugging aid; the format is not a stable API and may change without notice.
+
+## `COSYVOICE_STAGE_TIMING`
+
+Setting the variable to any value (even an empty one) enables per-stage inference timing. The library times the pipeline and prints each line through the GGML log callback at INFO; setting this variable also enables verbose output, so the lines are visible in Release builds.
+
+- `stage timing: text: ...` — once per high-level TTS call: emoji stripping, text normalization and tokenization.
+- `stage timing: ...` — once per synthesis round (one LLM job plus one vocoder pass): LLM prefill/decode/epilogue, flow encode, DiT diffusion, mel assembly and HiFT, including per-token/per-step averages and the number of graphs that had to be rebuilt. In streaming mode the line is prefixed with the chunk index; the first chunk's time is the time to first audio.
+- `stage timing: stream: ...` — summary of a streaming request: chunk count, total wall time and per-stage sums.
+- `stage timing: sched re-reserved ...` — the graph scheduler had to reserve its compute buffers again, which synchronizes the backends; the round line counts these events as `sched_reallocs`.
+
+While the variable is unset the instrumentation only costs one branch per stage boundary and never reads the clock.
+
+Example:
+
+```bash
+COSYVOICE_STAGE_TIMING=1 cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --text "hello" --output out.wav --stream
+```

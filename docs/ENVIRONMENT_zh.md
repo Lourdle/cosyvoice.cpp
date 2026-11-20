@@ -7,8 +7,10 @@
 | `COSYVOICE_SIMD_LEVEL` | 库加载时 | CPU DSP SIMD 分派层级封顶（仅 x86-64） |
 | `COSYVOICE_MAX_WEIGHT_BUFFER_SIZE` | 模型加载时 | 覆盖单块权重缓冲的最大分配字节数 |
 | `COSYVOICE_NO_MMAP_ZEROCOPY` | 模型加载时 | 关闭从文件映射直接使用权重（CPU 后端） |
+| `COSYVOICE_LOG_VERBOSE` | 日志 | 在 Release 构建中输出 INFO/DEBUG 日志 |
 | `COSYVOICE_HIFT_PHASE_LOG` | 流式 TTS | 输出 HiFT 流式帧统计日志 |
 | `COSYVOICE_DUMP_MEL` | 流式 TTS | 将新增 mel 帧追加写入文件，用于连续性调试 |
+| `COSYVOICE_STAGE_TIMING` | TTS 推理 | 输出各推理阶段的耗时 |
 
 ## `COSYVOICE_SIMD_LEVEL`
 
@@ -58,9 +60,15 @@ COSYVOICE_SIMD_LEVEL=avx2 cosyvoice-cli --model model.gguf --prompt-speech promp
 COSYVOICE_MAX_WEIGHT_BUFFER_SIZE=268435456 cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --text "hello" --output out.wav
 ```
 
+## `COSYVOICE_LOG_VERBOSE`
+
+控制库的 INFO/DEBUG 消息是否输出。Debug 构建（`_DEBUG`）默认开启；Release 构建默认关闭，除非设置该变量（任意值，包括空值），或设置了下面的诊断变量（`COSYVOICE_STAGE_TIMING`、`COSYVOICE_HIFT_PHASE_LOG`）。警告与错误始终输出。
+
+所有输出都经过当前生效的 GGML 日志回调；默认回调把这些级别写到 stdout。
+
 ## `COSYVOICE_HIFT_PHASE_LOG`
 
-该变量被设置为任意值（**包括空值**）都会启用 HiFT 流式帧统计——代码只检查变量是否*被设置*（`getenv` 返回非空），因此要关闭必须*不设置*该变量。流式输出期间，每个块都会向 GGML 日志回调与 stderr 输出一行统计，包含 `prompt_frames`、`input_frames`、`new_frames`、`cache_frames`、`emitted_frames` 与 `emitted_total`。用于调试 HiFT 缓存/流式接缝。
+该变量被设置为任意值（**包括空值**）都会启用 HiFT 流式帧统计——代码只检查变量是否*被设置*（`getenv` 返回非空），因此要关闭必须*不设置*该变量。流式输出期间，每个块都会通过 GGML 日志回调（INFO）输出一行统计，包含 `prompt_frames`、`input_frames`、`new_frames`、`cache_frames`、`emitted_frames` 与 `emitted_total`。设置该变量也会启用 verbose（见 `COSYVOICE_LOG_VERBOSE`）。用于调试 HiFT 缓存/流式接缝。
 
 示例：
 
@@ -85,3 +93,20 @@ COSYVOICE_DUMP_MEL=/tmp/mel.bin cosyvoice-cli --model model.gguf --prompt-speech
 ```
 
 这是调试辅助手段；该格式并非稳定 API，可能随时变更。
+
+## `COSYVOICE_STAGE_TIMING`
+
+该变量被设置为任意值（**包括空值**）都会启用分阶段推理计时。库会统计流水线各阶段耗时，并通过 GGML 日志回调（INFO）输出每行；设置该变量也会启用 verbose，因此 Release 构建下同样可见。
+
+- `stage timing: text: ...` — 每次高层 TTS 调用一行：emoji 移除、文本规范化与分词。
+- `stage timing: ...` — 每个合成轮次（一次 LLM 任务加一次声码器）一行：LLM prefill/decode/epilogue、flow encode、DiT 扩散、mel 组装与 HiFT，并附带每 token/每 step 均值和图重建次数。流式模式下带 chunk 序号前缀；首 chunk 的耗时即首包延迟。
+- `stage timing: stream: ...` — 整个流式请求的汇总：chunk 数、总墙钟时间与各阶段累计。
+- `stage timing: sched re-reserved ...` — 图调度器需要重新预留计算缓冲（会同步所有后端）；轮次行中计入 `sched_reallocs`。
+
+未设置该变量时，插桩在每个阶段边界只多一次分支判断，且不读取时钟。
+
+示例：
+
+```bash
+COSYVOICE_STAGE_TIMING=1 cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --text "hello" --output out.wav --stream
+```
