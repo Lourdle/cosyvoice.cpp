@@ -4,6 +4,7 @@
 #include "cosyvoice-lowlevel.h"
 #include "cosyvoice-interface.h"
 #include "cosyvoice-kv-cache.h"
+#include "cosyvoice-stage-timing.h"
 #include "common.h"
 
 #include <ggml-cpp.h>
@@ -93,6 +94,16 @@ struct cosyvoice_worker_context
     uint32_t wav_offset{0};
     std::vector<uint32_t> chunk_boundaries;
     uint32_t offset{0};
+
+    // Stage diagnostics (COSYVOICE_STAGE_TIMING): per-round values are reset at
+    // the start of every LLM job and printed after the vocoder; `stage_stream`
+    // accumulates the whole streaming request and `stage_chunk_index` counts
+    // its chunks, reset where the streaming state above is reset.
+    stage_timing_round stage_round;
+    stage_timing_round stage_stream;
+    int64_t stage_round_begin{0};
+    uint32_t stage_chunk_index{0};
+
     std::unique_ptr<char[]> batch_buffer;
     std::unique_ptr<float[]> nucleus_probs;
     // Immutable copy of the top-k candidates of the last computed logits, so

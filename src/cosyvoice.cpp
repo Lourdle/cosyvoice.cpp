@@ -111,6 +111,14 @@ void cosyvoice_init_backend_from_path(const char* dir_path)
 
 void cosyvoice_log_callback_default(ggml_log_level level, const char* text, void* user_data)
 {
+#ifdef _DEBUG
+    constexpr bool verbose = true;
+#else
+    static const bool verbose = std::getenv("COSYVOICE_LOG_VERBOSE")
+        || std::getenv("COSYVOICE_STAGE_TIMING")
+        || std::getenv("COSYVOICE_HIFT_PHASE_LOG");
+#endif
+
 #ifdef _WIN32
     UINT uCodePage = GetConsoleOutputCP();
     if (uCodePage != CP_UTF8)
@@ -121,10 +129,11 @@ void cosyvoice_log_callback_default(ggml_log_level level, const char* text, void
     case GGML_LOG_LEVEL_NONE:
     case GGML_LOG_LEVEL_INFO:
     case GGML_LOG_LEVEL_DEBUG:
-#ifdef _DEBUG
-        fputs(text, stdout);
-        fflush(stdout);
-#endif
+        if (verbose)
+        {
+            fputs(text, stdout);
+            fflush(stdout);
+        }
         if (level == GGML_LOG_LEVEL_DEBUG)
             debug_output(text);
         break;

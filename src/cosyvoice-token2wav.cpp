@@ -4,7 +4,6 @@
 #include "common.h"
 
 #include <algorithm>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <format>
@@ -205,6 +204,67 @@ struct dit_sched_config
     }
 };
 
+static void stage_timing_print(cosyvoice_worker_context* worker, bool streaming, bool finalize)
+{
+    if (!stage_timing_enabled())
+        return;
+
+    const auto& r = worker->stage_round;
+    auto& s = worker->stage_stream;
+
+    double round_ms = 0;
+    if (r.active)
+    {
+        round_ms = stage_timing_ms(worker->stage_round_begin, ggml_time_us());
+        if (streaming)
+        {
+            s.llm_prefill_ms += r.llm_prefill_ms;
+            s.llm_decode_ms += r.llm_decode_ms;
+            s.llm_epilogue_ms += r.llm_epilogue_ms;
+            s.flow_encode_ms += r.flow_encode_ms;
+            s.dit_ms += r.dit_ms;
+            s.mel_ms += r.mel_ms;
+            s.hift_ms += r.hift_ms;
+            s.round_ms += round_ms;
+            if (worker->stage_chunk_index == 0)
+                s.first_ms = round_ms;
+        }
+    }
+
+    auto line = streaming
+        ? std::format("stage timing: chunk {}: ", worker->stage_chunk_index)
+        : std::string("stage timing: ");
+    if (r.active)
+    {
+        line += std::format("prefill={:.1f}ms ({} graphs) decode={:.1f}ms ({} tokens, avg {:.1f}ms, {} graphs) epilogue={:.1f}ms ",
+            r.llm_prefill_ms, r.llm_prefill_builds,
+            r.llm_decode_ms, r.llm_decode_calls,
+            r.llm_decode_calls != 0 ? r.llm_decode_ms / r.llm_decode_calls : 0.0,
+            r.llm_decode_builds,
+            r.llm_epilogue_ms);
+    }
+    line += std::format("flow={:.1f}ms dit={:.1f}ms ({} steps, avg {:.1f}ms, {} graphs) mel={:.1f}ms hift={:.1f}ms ({} frames)",
+        r.flow_encode_ms,
+        r.dit_ms, r.dit_steps, r.dit_steps != 0 ? r.dit_ms / r.dit_steps : 0.0, r.dit_builds,
+        r.mel_ms,
+        r.hift_ms, r.hift_frames);
+    if (r.active)
+        line += std::format(" round={:.1f}ms", round_ms);
+    if (r.sched_rereserves != 0)
+        line += std::format(" sched_reallocs={}", r.sched_rereserves);
+    line += '\n';
+    stage_timing_log(line.c_str());
+
+    if (streaming && finalize)
+        stage_timing_log(std::format(
+            "stage timing: stream: chunks={} total={:.1f}ms (first chunk {:.1f}ms) prefill={:.1f}ms decode={:.1f}ms flow={:.1f}ms dit={:.1f}ms mel={:.1f}ms hift={:.1f}ms\n",
+            worker->stage_chunk_index + 1, s.round_ms, s.first_ms,
+            s.llm_prefill_ms, s.llm_decode_ms, s.flow_encode_ms, s.dit_ms, s.mel_ms, s.hift_ms).c_str());
+
+    worker->stage_round.active = false;
+    ++worker->stage_chunk_index;
+}
+
 bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, bool streaming, bool finalize, cosyvoice_generated_speech_ptr result)
 {
     use_count_guard _guard(this);
@@ -229,6 +289,8 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         worker->chunk_boundaries.clear();
         worker->flow_cache.clear();
         worker->wav_offset = 0;
+        worker->stage_chunk_index = 0;
+        worker->stage_stream = {};
     }
 
     ggml_reset(ctx0.get());
@@ -245,6 +307,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     ggml_set_input(embedding);
 
     // Phase 1: Flow encode
+    const stage_mark flow_encode_mark;
     ggml_cgraph* gf = new_cgraph(ctx0.get());
     auto [mu, spks, conds, cut_len] = flow.build_cgraph_encode(ctx0.get(), token, prompt_token, prompt_feat, embedding, op_caps, (flow.decoder.diffusion_steps - params.dit_kv_fixed_slots - params.dit_kv_offloadable_slots) == 0 && streaming ? worker->offset : 0, streaming && !finalize);
     const auto seq_len = mu->ne[1];
@@ -277,6 +340,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         }
         ditctx_buffer_end = buffer_base;
     } while (false);
+    worker->stage_round.flow_encode_ms += flow_encode_mark.elapsed_ms();
 
     dit_sched_config config(params, cut_len, streaming ? worker->offset : 0, streaming, kv_cache->can_reuse(), flow.decoder.diffusion_steps);
 
@@ -310,6 +374,9 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     else
         full_len = seq_len;
 
+    worker->stage_round.hift_frames = static_cast<uint32_t>(full_len);
+
+    const stage_mark dit_mark;
     float* noise_buffer = shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_BEFORE_FLOW, noise_req, nullptr, shared->noise_callback_ctx);
     ggml_backend_tensor_set_async(backend.get(), ditctx.x, noise_buffer + noise_req - noise_len, 0, ditctx.x->nb[2]);
 
@@ -329,6 +396,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR, "failed to allocate the token2wav graph.\n");
         return false;
     }
+    ++worker->stage_round.dit_builds;
 
     auto stage_build_after = [&](int step)
     {
@@ -441,6 +509,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         tensor->view_offs = 0;
         memset(tensor->src, 0, sizeof(tensor->src));
     }
+    ++worker->stage_round.dit_steps;
 
     for (int step = 1; step != flow.decoder.diffusion_steps; ++step)
     {
@@ -451,6 +520,8 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
             cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, "token2wav stopped during DiT steps.\n");
             return false;
         }
+
+        ++worker->stage_round.dit_steps;
 
         if (config[step].slice)
         {
@@ -491,6 +562,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
                 cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR, "failed to allocate the token2wav graph.\n");
                 return false;
             }
+            ++worker->stage_round.dit_builds;
             stage_build_after(step);
         }
         else
@@ -511,8 +583,10 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
 
         if (!stage_compute_after(step)) return false;
     }
+    worker->stage_round.dit_ms += dit_mark.elapsed_ms();
 
     // Phase 3: Copy flow output to speech_feat (persistent buffer)
+    const stage_mark mel_mark;
     ggml_reset(ctx1.get());
     const auto cache_length = streaming ? static_cast<int64_t>(worker->flow_cache.size() / feat->ne[0]) : 0;
     ggml_tensor* speech_feat = ggml_new_tensor_2d(ctx1.get(), feat->type, feat->ne[0], feat->ne[1] + cache_length);
@@ -568,6 +642,9 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
             kv_cache->cur_len = 0;
         else
             kv_cache->cur_len += static_cast<uint32_t>(position_ids->ne[0]);
+    worker->stage_round.mel_ms += mel_mark.elapsed_ms();
+
+    const stage_mark hift_mark;
     ggml_reset(ctx0.get());
     ggml_backend_sched_reset(sched.get());
     gf = new_cgraph(ctx0.get());
@@ -620,6 +697,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     worker->status = ggml_backend_sched_graph_compute(sched.get(), gf);
     shared->noise_callback(COSYVOICE_NOISE_CALLBACK_STAGE_AFTER_HIFT, noise_req, noise_buffer, shared->noise_callback_ctx);
     worker->wav_offset += result->length;
+    worker->stage_round.hift_ms += hift_mark.elapsed_ms();
 
     static const bool log_phase = std::getenv("COSYVOICE_HIFT_PHASE_LOG") != nullptr;
     if (log_phase && streaming)
@@ -630,7 +708,6 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
             speech_feat->ne[0], mel_new_frames, cache_length,
             result->length / hift.scale_factor, worker->wav_offset);
         cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, buf.c_str());
-        std::fprintf(stderr, "%s", buf.c_str());
     }
 
     // Debug aid: append this call's new mel frames so the chunked mel sequence
@@ -649,6 +726,8 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         out.write(reinterpret_cast<const char*>(header), sizeof(header));
         out.write(reinterpret_cast<const char*>(buffer.data()), static_cast<std::streamsize>(buffer.size() * sizeof(float)));
     }
+
+    stage_timing_print(worker, streaming, finalize);
 
     return worker->status == GGML_STATUS_SUCCESS;
 }

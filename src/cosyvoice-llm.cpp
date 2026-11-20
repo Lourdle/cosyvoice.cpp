@@ -212,6 +212,7 @@ bool cosyvoice_model_3::llm_prefill(
     }
     else
     {
+        ++worker->stage_round.llm_prefill_builds;
         auto ctx0 = worker->ctx0.get();
         auto& llm = cv3_shared->llm;
         ggml_reset(ctx0);
@@ -328,6 +329,7 @@ bool cosyvoice_model_3::llm_prefill_logits(
     ggml_reset(ctx0);
     ggml_backend_sched_reset(worker->sched.get());
 
+    ++worker->stage_round.llm_prefill_builds;
     gf = ggml_new_graph(ctx0);
     llm_input = ggml_new_tensor_2d(
         ctx0,
@@ -404,6 +406,7 @@ bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
     }
     else
     {
+        ++worker->stage_round.llm_decode_builds;
         auto ctx0 = worker->ctx0.get();
         auto& llm = cv3_shared->llm;
         ggml_reset(ctx0);

@@ -1,14 +1,35 @@
 ﻿#include "cosyvoice-internal.h"
+#include "cosyvoice-stage-timing.h"
 #include "cosyvoice-text-chunk.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <format>
 #include <string_view>
 #include <vector>
 
 constexpr uint32_t COSYVOICE_TTS_FLAG_MASK = COSYVOICE_TTS_FLAG_TEXT_NORMALIZATION | COSYVOICE_TTS_FLAG_SPLIT_TEXT | COSYVOICE_TTS_FLAG_FAST_SPLIT | COSYVOICE_TTS_FLAG_FADE_IN;
 constexpr double COSYVOICE_TTS_FADE_IN_SECONDS = 0.02;
+
+namespace
+{
+struct text_stage_report
+{
+    double preprocess_ms = 0;
+    double tokenize_ms = 0;
+    uint32_t tokenize_calls = 0;
+
+    ~text_stage_report()
+    {
+        if (!stage_timing_enabled())
+            return;
+        stage_timing_log(std::format(
+            "stage timing: text: preprocess={:.1f}ms tokenize={:.1f}ms ({} calls)\n",
+            preprocess_ms, tokenize_ms, tokenize_calls).c_str());
+    }
+};
+}
 
 static constexpr bool is_emoji_cp(uint32_t cp)
 {
@@ -103,6 +124,8 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
 
     bool tts_job(const char* text, const char* instruction, float speed, cosyvoice_inference_mode mode, cosyvoice_generated_speech_ptr result, cosyvoice_tts_audio_callback_t callback, void* user_data)
     {
+        text_stage_report text_report;
+
         instruction_cache.resize(prefix_len);
         if (instruction)
         {
@@ -116,16 +139,26 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
             instruction_cache.c_str());
 
         // Remove all emoji from the synthesis text.
+        const stage_mark preprocess_mark;
         auto effective_text = strip_emoji(text, *this) ? c_str() : text;
 
         if (flags & COSYVOICE_TTS_FLAG_TEXT_NORMALIZATION
             && cosyvoice_frontend_util_text_normalize(*this, effective_text, static_cast<uint32_t>(strlen(effective_text)), nullptr))
             effective_text = c_str();
+        text_report.preprocess_ms += preprocess_mark.elapsed_ms();
+
+        auto do_tokenize = [&](auto&&... args)
+        {
+            const stage_mark mark;
+            ctx->tokenize(std::forward<decltype(args)>(args)...);
+            text_report.tokenize_ms += mark.elapsed_ms();
+            ++text_report.tokenize_calls;
+        };
 
         // When splitting is disabled, do a single tokenize+synthesize pass.
         if (!(flags & COSYVOICE_TTS_FLAG_SPLIT_TEXT))
         {
-            ctx->tokenize(effective_text, this, true);
+            do_tokenize(effective_text, this, true);
             return result ? cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result)
                 : cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data);
         }
@@ -133,7 +166,7 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
         const auto fragments = cosyvoice_internal::split_into_fragments(effective_text);
         if (fragments.size() <= 1)
         {
-            ctx->tokenize(effective_text, this, true);
+            do_tokenize(effective_text, this, true);
             return result ? cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result)
                 : cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data);
         }
@@ -158,7 +191,7 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
 
         if (params.n_max_seq <= o + 1u || !(r > 0.0f))
         {
-            ctx->tokenize(effective_text, this, true);
+            do_tokenize(effective_text, this, true);
             return result ? cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result)
                 : cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data);
         }
@@ -167,7 +200,7 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
 
         if (max_text_tokens == 0)
         {
-            ctx->tokenize(effective_text, this, true);
+            do_tokenize(effective_text, this, true);
             return result ? cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result)
                 : cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data);
         }
@@ -183,7 +216,7 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
                 for (const auto& fragment : fragments)
                 {
                     tok.tokens.clear();
-                    ctx->tokenize(fragment.c_str(), &tok, true);
+                    do_tokenize(fragment.c_str(), &tok, true);
                     fragment_tokens.push_back(tok.tokens);
                 }
             }
@@ -242,7 +275,7 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
         const auto token_count = [&](std::string_view fragment) -> std::size_t
             {
                 tokens_scratch.tokens.clear();
-                ctx->tokenize(fragment.data(), static_cast<uint32_t>(fragment.size()), &tokens_scratch, true);
+                do_tokenize(fragment.data(), static_cast<uint32_t>(fragment.size()), &tokens_scratch, true);
                 return tokens_scratch.get_n_tokens();
             };
         const auto chunks = cosyvoice_internal::reassemble_by_token_budget(
@@ -250,7 +283,7 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
 
         if (chunks.size() <= 1)
         {
-            ctx->tokenize(effective_text, this, true);
+            do_tokenize(effective_text, this, true);
             return result ? cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, result)
                 : cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data);
         }
@@ -269,7 +302,7 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
                     result->length = 0;
                     return false;
                 }
-                ctx->tokenize(chunk.c_str(), this, true);
+                do_tokenize(chunk.c_str(), this, true);
                 cosyvoice_generated_speech part = {};
                 if (!cosyvoice_tts_with_postprocess(get_tokens(), get_n_tokens(), speed, &part)
                     || !part.data || part.length == 0)
@@ -288,7 +321,7 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
             {
                 if (ctx->is_stop_requested())
                     return false;
-                ctx->tokenize(chunk.c_str(), this, true);
+                do_tokenize(chunk.c_str(), this, true);
                 if (!cosyvoice_tts_stream_with_postprocess(get_tokens(), get_n_tokens(), speed, callback, user_data))
                     return false;
             }

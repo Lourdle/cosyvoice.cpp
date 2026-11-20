@@ -29,6 +29,12 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
     auto last_prompt_crc32 = prompt_crc32;
     bool stop_reached = false;
 
+    worker->stage_round = {};
+    worker->stage_round.active = true;
+    if (stage_timing_enabled())
+        worker->stage_round_begin = ggml_time_us();
+    const stage_mark prefill_mark;
+
     if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED)
     {
         ggml_backend_sched_reset(sched.get());
@@ -170,6 +176,9 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
         constexpr uint32_t max_silent_token_num = 5;
         const auto& silent_tokens = cv3_shared->silent_tokens;
 
+        worker->stage_round.llm_prefill_ms += prefill_mark.elapsed_ms();
+        const stage_mark decode_mark;
+
         for (uint32_t n = llm_get_n_accepted_tokens();; ++n)
         {
             llm_prepare_probs(n > min_len);
@@ -194,6 +203,7 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
                     // the model state so generation can move past it instead of
                     // re-sampling the same logits.
                     cur = speech_emb + token_id * speech_row_size;
+                    ++worker->stage_round.llm_decode_calls;
                     if (!llm_decode(speech_type, cur))
                         throw std::runtime_error("Failed to decode LLM output.\n");
                     continue;
@@ -217,9 +227,11 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
                 break;
 
             cur = speech_emb + token_id * speech_row_size;
+            ++worker->stage_round.llm_decode_calls;
             if (!llm_decode(speech_type, cur))
                 throw std::runtime_error("Failed to decode LLM output.\n");
         }
+        worker->stage_round.llm_decode_ms += decode_mark.elapsed_ms();
     }
     catch (const prefill_stopped&)
     {
@@ -242,6 +254,7 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
         return false;
     }
 
+    const stage_mark epilogue_mark;
     worker->llm_input = nullptr;
     if (final)
         *final = stop_reached;
@@ -261,6 +274,8 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
     // Reset RNG on stop (matches non-streaming behavior)
     if (stop_reached && params.builtin_sampler_rng_policy == COSYVOICE_BUILTIN_SAMPLER_RNG_POLICY_RESET_PER_SESSION)
         reset_builtin_sampler_rng();
+
+    worker->stage_round.llm_epilogue_ms += epilogue_mark.elapsed_ms();
 
     return true;
 }
