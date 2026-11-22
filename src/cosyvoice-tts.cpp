@@ -66,7 +66,6 @@ static uint32_t decode_utf8_cp(std::string_view text, std::size_t i, std::size_t
 
 static inline bool strip_emoji(std::string_view text, std::string& result)
 {
-    result.reserve(text.size());
     bool removed = false;
     bool prev_emoji = false;
     std::size_t i = 0;
@@ -88,13 +87,18 @@ static inline bool strip_emoji(std::string_view text, std::string& result)
         }
         if (drop)
         {
-            removed = true;
+            if (!removed)
+            {
+                result.append(text.data(), i);
+                removed = true;
+            }
             prev_emoji = true;
             i += len;
             continue;
         }
         prev_emoji = false;
-        result.append(text, i, len);
+        if (removed)
+            result.append(text, i, len);
         i += len;
     }
 
@@ -216,8 +220,8 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
                 for (const auto& fragment : fragments)
                 {
                     tok.tokens.clear();
-                    do_tokenize(fragment.c_str(), &tok, true);
-                    fragment_tokens.push_back(tok.tokens);
+                    do_tokenize(fragment.data(), static_cast<uint32_t>(fragment.size()), &tok, true);
+                    fragment_tokens.push_back(std::move(tok.tokens));
                 }
             }
             auto chunk_token_list = cosyvoice_internal::reassemble_by_token_budget(
