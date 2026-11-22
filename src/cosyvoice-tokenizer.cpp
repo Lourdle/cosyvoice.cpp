@@ -88,6 +88,10 @@ public:
     }
 
     void pop() = delete;
+
+    void clear() {
+        this->c.clear();
+    }
 };
 
 struct llm_bigram_bpe {
@@ -101,30 +105,39 @@ struct llm_bigram_bpe {
     using queue = llm_priority_queue<llm_bigram_bpe, queue_storage, comparator>;
     llm_symbol::index left;
     llm_symbol::index right;
-    std::string text;
+    size_t left_n;
+    size_t right_n;
     int rank;
-    size_t size;
 };
 
 struct llm_tokenizer_bpe : llm_tokenizer {
     explicit llm_tokenizer_bpe(gguf_metadata_loader& loader)
-        : regex(loader.get_string("tokenizer.pre_tokenizer.regex")) {}
+        : regex(loader.get_string("tokenizer.pre_tokenizer.regex")), splitter(regex) {}
 
     std::string regex;
+    unicode_regex_splitter splitter;
+};
+
+struct llm_tokenizer_bpe_scratch {
+    std::vector<llm_symbol> symbols;
+    std::vector<llm_symbol> symbols_final;
+    llm_bigram_bpe::queue    work_queue;
 };
 
 struct llm_tokenizer_bpe_session {
-    llm_tokenizer_bpe_session(const cosyvoice_vocab& vocab, const llm_tokenizer_bpe& tokenizer) : vocab(vocab), tokenizer(tokenizer) {}
+    llm_tokenizer_bpe_session(const cosyvoice_vocab& vocab, const llm_tokenizer_bpe& tokenizer, llm_tokenizer_bpe_scratch& scratch)
+        : vocab(vocab), tokenizer(tokenizer), scratch(scratch) {}
 
     void tokenize(const std::string_view& text, std::vector<int>& output) {
-        int final_prev_index = -1;
-        const auto word_collection = unicode_regex_split(text, tokenizer.regex);
+        output.reserve(output.size() + text.size());
 
-        symbols_final.clear();
+        const auto word_collection = tokenizer.splitter.split(text);
+
+        scratch.symbols_final.clear();
 
         for (const auto& word : word_collection) {
-            work_queue = llm_bigram_bpe::queue();
-            symbols.clear();
+            scratch.work_queue.clear();
+            scratch.symbols.clear();
 
             int index = 0;
             size_t offset = 0;
@@ -138,25 +151,23 @@ struct llm_tokenizer_bpe_session {
                 sym.prev = index - 1;
                 sym.next = offset == word.size() ? -1 : index + 1;
                 index++;
-                symbols.emplace_back(sym);
+                scratch.symbols.emplace_back(sym);
             }
-            for (int i = 1; i < (int)symbols.size(); ++i) {
+            for (int i = 1; i < (int)scratch.symbols.size(); ++i) {
                 add_new_bigram(i - 1, i);
             }
 
             // build token(s)
-            while (!work_queue.empty()) {
-                auto bigram = work_queue.pop_move();
+            while (!scratch.work_queue.empty()) {
+                auto bigram = scratch.work_queue.pop_move();
 
-                auto& left_symbol = symbols[bigram.left];
-                auto& right_symbol = symbols[bigram.right];
+                auto& left_symbol = scratch.symbols[bigram.left];
+                auto& right_symbol = scratch.symbols[bigram.right];
 
                 if (left_symbol.n == 0 || right_symbol.n == 0) {
                     continue;
                 }
-                std::string left_token = std::string(left_symbol.text, left_symbol.n);
-                std::string right_token = std::string(right_symbol.text, right_symbol.n);
-                if (left_token + right_token != bigram.text) {
+                if (left_symbol.n != bigram.left_n || right_symbol.n != bigram.right_n) {
                     continue;  // Skip this bigram if it's outdated
                 }
 
@@ -167,51 +178,39 @@ struct llm_tokenizer_bpe_session {
                 // remove the right sym from the chain
                 left_symbol.next = right_symbol.next;
                 if (right_symbol.next >= 0) {
-                    symbols[right_symbol.next].prev = bigram.left;
+                    scratch.symbols[right_symbol.next].prev = bigram.left;
                 }
 
                 add_new_bigram(left_symbol.prev, bigram.left);  // left side of current symbol
                 add_new_bigram(bigram.left, left_symbol.next);  // right side of current symbol
             }
 
-            // add the finished tokens to the final list keeping correct order for next and prev
-            for (auto& sym : symbols) {
+            // add the finished tokens to the final list in order
+            for (const auto& sym : scratch.symbols) {
                 if (sym.n > 0) {
-                    sym.prev = final_prev_index;
-                    sym.next = -1;
-                    if (final_prev_index != -1) {
-                        symbols_final[final_prev_index].next = static_cast<int>(symbols_final.size());
-                    }
-                    symbols_final.emplace_back(sym);
-                    final_prev_index = static_cast<int>(symbols_final.size()) - 1;
+                    scratch.symbols_final.emplace_back(sym);
                 }
             }
         }
 
-        symbols = symbols_final;
+        for (const auto& symbol : scratch.symbols_final) {
+            if (symbol.n == 0) {
+                continue;
+            }
 
-        if (!symbols.empty()) {
-            for (int i = 0; i != -1; i = symbols[i].next) {
-                auto& symbol = symbols[i];
-                if (symbol.n == 0) {
-                    continue;
-                }
+            const std::string_view str(symbol.text, symbol.n);
+            const auto token = vocab.text_to_token(str);
 
-                const std::string str = std::string(symbol.text, symbol.n);
-                const auto token = vocab.text_to_token(str);
-
-                if (token == -1) {
-                    for (auto j = str.begin(); j != str.end(); ++j) {
-                        std::string byte_str(1, *j);
-                        auto token_multibyte = vocab.text_to_token(byte_str);
-                        if (token_multibyte != -1) {
-                            output.push_back(token_multibyte);
-                        }
+            if (token == -1) {
+                for (size_t j = 0; j < str.size(); ++j) {
+                    auto token_multibyte = vocab.text_to_token(str.substr(j, 1));
+                    if (token_multibyte != -1) {
+                        output.push_back(token_multibyte);
                     }
                 }
-                else {
-                    output.push_back(token);
-                }
+            }
+            else {
+                output.push_back(token);
             }
         }
     }
@@ -221,34 +220,23 @@ private:
         if (left == -1 || right == -1) {
             return;
         }
-        std::string left_token = std::string(symbols[left].text, symbols[left].n);
-        std::string right_token = std::string(symbols[right].text, symbols[right].n);
-
-        int rank_found = -1;
-
-        rank_found = vocab.find_bpe_rank(left_token, right_token);
+        const auto& left_symbol = scratch.symbols[left];
+        const auto& right_symbol = scratch.symbols[right];
+        const int rank_found = vocab.find_bpe_rank(
+            std::string_view(left_symbol.text, left_symbol.n),
+            std::string_view(right_symbol.text, right_symbol.n));
 
         if (rank_found < 0) {
             return;
         }
 
-        llm_bigram_bpe bigram;
-
-        bigram.left = left;
-        bigram.right = right;
-        bigram.text = left_token + right_token;
-        bigram.size = left_token.size() + right_token.size();
-        bigram.rank = rank_found;
-
-        work_queue.push(bigram);
+        scratch.work_queue.push(llm_bigram_bpe{
+            left, right, left_symbol.n, right_symbol.n, rank_found });
     }
 
     const cosyvoice_vocab&   vocab;
     const llm_tokenizer_bpe& tokenizer;
-
-    std::vector<llm_symbol>  symbols;
-    std::vector<llm_symbol>  symbols_final;
-    llm_bigram_bpe::queue    work_queue;
+    llm_tokenizer_bpe_scratch& scratch;
 };
 
 struct cosyvoice_vocab::impl {
@@ -439,7 +427,8 @@ void cosyvoice_vocab::tokenize(
         pimpl_->partition_special_tokens(fragment_buffer, parse_special);
     }
 
-    llm_tokenizer_bpe_session session(*this, *static_cast<llm_tokenizer_bpe*>(pimpl_->tokenizer.get()));
+    static thread_local llm_tokenizer_bpe_scratch scratch;
+    llm_tokenizer_bpe_session session(*this, *static_cast<llm_tokenizer_bpe*>(pimpl_->tokenizer.get()), scratch);
 
     for (const auto& fragment : fragment_buffer) {
         if (fragment.type == fragment_buffer_kind::raw_text) {

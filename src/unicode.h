@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // TODO: reimplement this structure in endian-independent way
@@ -101,4 +103,18 @@ unicode_cpt_flags unicode_cpt_flags_from_cpt(uint32_t cpt);
 std::string unicode_byte_to_utf8(uint8_t byte);
 uint8_t     unicode_utf8_to_byte(const std::string& utf8);
 
-std::vector<std::string> unicode_regex_split(const std::string_view& text, const std::string& regex_exprs);
+class unicode_regex_splitter
+{
+public:
+    explicit unicode_regex_splitter(const std::string& regex);
+    ~unicode_regex_splitter();
+
+    unicode_regex_splitter(const unicode_regex_splitter&) = delete;
+    unicode_regex_splitter& operator=(const unicode_regex_splitter&) = delete;
+
+    std::vector<std::string> split(std::string_view text) const;
+
+private:
+    struct impl;
+    std::unique_ptr<impl> impl_;
+};
