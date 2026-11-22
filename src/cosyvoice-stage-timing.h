@@ -21,6 +21,7 @@ struct stage_timing_round
     uint32_t dit_builds = 0;
     uint32_t hift_frames = 0;
     uint32_t sched_rereserves = 0;
+    uint32_t token2wav_reallocs = 0;
     // Only accumulated into the streaming summary: `round_ms` is the wall time
     // of the round, `first_ms` the wall time of the first streaming chunk.
     double round_ms = 0;

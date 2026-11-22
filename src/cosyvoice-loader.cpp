@@ -4,11 +4,13 @@
 
 #include <tuple>
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <string_view>
 #include <system_error>
 #include <format>
 #include <span>
@@ -1223,6 +1225,57 @@ void cosyvoice_model_3::load(gguf_loader& loader)
     std::memcpy(shared->architecture.get(), arch.data(), arch.size());
     shared->architecture.get()[arch.size()] = '\0';
     shared->hift_overlap = hift.overlap_length();
+
+    // Optional: pre-reserve the Flow compute buffers for a worst-case mel
+    // length. A value of zero derives the length from the context parameters;
+    // anything else is used directly and clamped to what the model can emit.
+    int64_t sched_reserve_frames = -1;
+    if (const char* text = std::getenv("COSYVOICE_SCHED_RESERVE"))
+    {
+        std::string_view value_text(text);
+        while (!value_text.empty() && std::isspace(static_cast<unsigned char>(value_text.front())))
+            value_text.remove_prefix(1);
+        while (!value_text.empty() && std::isspace(static_cast<unsigned char>(value_text.back())))
+            value_text.remove_suffix(1);
+
+        int64_t value = 0;
+        const auto parsed = std::from_chars(value_text.data(), value_text.data() + value_text.size(), value);
+        if (value_text.empty() || parsed.ec != std::errc() || parsed.ptr != value_text.data() + value_text.size() || value < 0)
+        {
+            cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_WARN, std::format(
+                "ignoring invalid COSYVOICE_SCHED_RESERVE=\"{}\": expected a non-negative mel frame count.\n",
+                text).c_str());
+        }
+        else if (shared->params.dit_kv_fixed_slots + shared->params.dit_kv_offloadable_slots != 0)
+        {
+            // The KV-cached Flow path keeps the per-chunk graph size bounded already.
+            cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO,
+                "sched reserve: disabled because a DiT KV cache is configured.\n");
+        }
+        else
+        {
+            const auto derived = static_cast<int64_t>(shared->params.n_max_seq) * cv3_shared->flow.token_mel_ratio;
+            sched_reserve_frames = value == 0 ? derived : std::min(value, derived);
+            cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, std::format(
+                "sched reserve: enabled for {} mel frames ({}).\n",
+                sched_reserve_frames,
+                value == 0 ? "derived from n_max_seq" : "from COSYVOICE_SCHED_RESERVE").c_str());
+        }
+    }
+    shared->sched_reserve_frames = sched_reserve_frames;
+    if (sched_reserve_frames > 0)
+    {
+        // The reservation works on the current worker pair and every worker
+        // owns its own buffers, so walk the workers through set_worker_no()
+        // and restore the previous selection afterwards.
+        const auto worker_no = get_worker_no();
+        for (uint32_t i = 0; i != shared->params.n_workers; ++i)
+        {
+            set_worker_no(i);
+            reserve_token2wav_sched(static_cast<uint32_t>(sched_reserve_frames));
+        }
+        set_worker_no(worker_no);
+    }
 
     ggml_backend_synchronize(backend);
 }

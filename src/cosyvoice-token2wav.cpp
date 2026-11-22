@@ -96,6 +96,166 @@ static void set_graph_backends(ggml_cgraph* gf, ggml_backend_sched_t sched, ggml
     }
 }
 
+// Pre-reserves the Flow buffers for a worst-case mel length: the scheduler
+// compute buffers plus the intermediate buffer that carries the DiT step state
+// and the accumulated mel. When a graph needs more space than the reserved
+// one, the scheduler frees the whole buffer and allocates it again at the new
+// size (plus a backend synchronization), and the intermediate buffer grows the
+// same way as the per-chunk mel length does, so a streaming request repeats
+// those free+alloc pairs. Reserving up front moves them to load time. `frames`
+// bounds the mel length of the measured graphs. Must be called with the
+// worker to reserve selected as the current worker.
+bool cosyvoice_model_3::reserve_token2wav_sched(uint32_t frames)
+{
+    if (frames == 0)
+        return true;
+
+    const auto& flow = cv3_shared->flow;
+    const auto ratio = static_cast<uint32_t>(std::max(1, flow.token_mel_ratio));
+    const auto lookahead = static_cast<uint32_t>(std::max(0, flow.pre_lookahead_layer.pre_lookahead_len));
+    const auto base_tokens = static_cast<int64_t>((frames + ratio - 1) / ratio) + lookahead + 1;
+
+    auto sched = worker->sched.get();
+    auto backend = worker->backend.get();
+    auto cpu_backend = worker->cpu_backend.get();
+    auto ctx = worker->ctx0.get();
+    auto buft = ggml_backend_get_default_buffer_type(backend);
+    const auto alignment = ggml_backend_buft_get_alignment(buft);
+
+    struct variant_t
+    {
+        bool streaming;
+        uint32_t encode_cut;
+        int64_t step_cut;
+        bool mask;
+    };
+
+    // The masked streaming layout keeps every tensor of the other layouts (the
+    // same mel-length-dependent intermediates plus the mask) and is the largest
+    // one; the plain layout is what a non-streaming request builds first.
+    // Reserving both leaves no buffer growth for any other layout.
+    const variant_t variants[] = {
+        { true,  ratio, ratio, true  },
+        { false, 0,     0,     false },
+    };
+
+    const auto begin = ggml_time_us();
+    const auto before = ggml_backend_sched_get_buffer_size(sched, backend);
+    const auto before_cpu = ggml_backend_sched_get_buffer_size(sched, cpu_backend);
+    int64_t reserved_frames = 0;
+    size_t ditctx_need = 0;
+    bool ok = true;
+
+    for (const auto& variant : variants)
+    {
+        ggml_reset(ctx);
+        ggml_backend_sched_reset(sched);
+
+        // A one-frame prompt keeps the encoder padding independent of the real
+        // prompt; `frames` dominates every measured tensor size.
+        ggml_tensor* token = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, base_tokens);
+        ggml_tensor* prompt_token = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 1);
+        ggml_tensor* prompt_feat = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, flow.decoder.estimator.mel_dim, 1);
+        ggml_tensor* embedding = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, flow.spk_embed_affine_layer.weight->ne[0], 1);
+        ggml_set_input(token);
+        ggml_set_input(prompt_token);
+        ggml_set_input(prompt_feat);
+        ggml_set_input(embedding);
+
+        auto encode = flow.build_cgraph_encode(
+            ctx, token, prompt_token, prompt_feat, embedding, shared->op_caps,
+            variant.encode_cut, variant.streaming);
+        reserved_frames = std::max<int64_t>(reserved_frames, encode.mu->ne[1]);
+
+        auto ditctx = flow.decoder.prepare_context(ctx, encode.mu, encode.spks, encode.conds);
+
+        // The intermediate buffer starts with the DiT context region; mirror
+        // the aligned placement the runtime does when reusing the buffer.
+        size_t ctx_need = 0;
+        for (auto tensor : { ditctx.x, ditctx.mu_in, ditctx.spks_in, ditctx.cond_in })
+            ctx_need += get_aligned_size(ggml_backend_buft_get_alloc_size(buft, tensor), alignment);
+        ditctx_need = std::max(ditctx_need, ctx_need);
+
+        auto gf = new_cgraph(ctx);
+        ggml_tensor* t_leaf = nullptr;
+        ggml_tensor* position_ids = nullptr;
+        ggml_tensor* attn_mask = nullptr;
+        auto feat = flow.decoder.build_cgraph_one_step(
+            ctx, ditctx, 1, shared->op_caps, variant.step_cut, t_leaf, position_ids, gf,
+            nullptr, variant.mask ? &attn_mask : nullptr);
+        ggml_build_forward_expand(gf, feat);
+        set_graph_backends(gf, sched, backend, cpu_backend, shared->op_caps);
+
+        if (!ggml_backend_sched_reserve(sched, gf))
+        {
+            ok = false;
+            cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_WARN,
+                "sched reserve: failed to reserve a Flow graph.\n");
+            ggml_backend_sched_reset(sched);
+        }
+    }
+
+    // The intermediate buffer holds the DiT step state (sized by the mel
+    // length) and, after it, the whole accumulated mel; both reach their worst
+    // case together on a single non-streaming pass of `frames` frames.
+    auto speech_feat = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, flow.decoder.estimator.mel_dim, frames);
+    auto token2wav_need = ditctx_need
+        + get_aligned_size(ggml_backend_buft_get_alloc_size(buft, speech_feat), alignment);
+
+    const auto token2wav_before = cv3_worker->token2wav_buffer
+        ? ggml_backend_buffer_get_size(cv3_worker->token2wav_buffer.get())
+        : 0;
+
+    // In the shared policies this buffer backs the LLM KV cache too, which has
+    // to keep fitting, so never shrink below the existing allocation.
+    if (shared->params.inference_buffer_policy != COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED)
+        token2wav_need = std::max(token2wav_need, token2wav_before);
+
+    if (!cv3_worker->token2wav_buffer || token2wav_need > token2wav_before)
+        reset_shared_buffer(ggml_backend_buft_alloc_buffer(buft, token2wav_need));
+
+    // The streaming mel cache grows every chunk; reserve the worst-case
+    // capacity once so the per-chunk resize never reallocates.
+    worker->flow_cache.reserve(static_cast<size_t>(frames) * flow.decoder.estimator.mel_dim);
+
+    // The graphs were built in the worker context, so drop the cached LLM graph
+    // and the mask state: the next call has to rebuild them instead of using
+    // tensors that the next graph build would overwrite.
+    worker->gf = nullptr;
+    worker->llm_input = nullptr;
+    worker->llm_probs = nullptr;
+    if (worker->causal_mask)
+    {
+        worker->causal_mask->buffer = nullptr;
+        worker->causal_mask->data = nullptr;
+    }
+
+    const auto after = ggml_backend_sched_get_buffer_size(sched, backend);
+    const auto after_cpu = ggml_backend_sched_get_buffer_size(sched, cpu_backend);
+    const auto token2wav_after = cv3_worker->token2wav_buffer
+        ? ggml_backend_buffer_get_size(cv3_worker->token2wav_buffer.get())
+        : 0;
+    const auto cpu_text = cpu_backend != backend
+        ? std::format(" (cpu {:.1f} -> {:.1f} MiB)", before_cpu / 1048576.0, after_cpu / 1048576.0)
+        : std::string();
+    cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, std::format(
+        "sched reserve: {} mel frames, buffers {:.1f} -> {:.1f} MiB{}, token2wav {:.1f} -> {:.1f} MiB, {:.1f} ms{}.\n",
+        reserved_frames,
+        before / 1048576.0, after / 1048576.0, cpu_text,
+        token2wav_before / 1048576.0, token2wav_after / 1048576.0,
+        (ggml_time_us() - begin) / 1000.0,
+        ok ? "" : " (failed)").c_str());
+
+    return ok;
+}
+
+void cosyvoice_model_3::empty_buffer_cache()
+{
+    cosyvoice_model::empty_buffer_cache();
+    if (shared->sched_reserve_frames > 0)
+        reserve_token2wav_sched(static_cast<uint32_t>(shared->sched_reserve_frames));
+}
+
 bool cosyvoice_model_3::token2wav(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, cosyvoice_generated_speech_ptr result)
 {
     return token2wav_ext(token_ids, n_tokens, speed, prompt, false, true, result);
@@ -204,7 +364,15 @@ struct dit_sched_config
     }
 };
 
-static void stage_timing_print(cosyvoice_worker_context* worker, bool streaming, bool finalize)
+static void stage_timing_token2wav_realloc(cosyvoice_worker_context* worker, const char* reason, size_t before, size_t after)
+{
+    ++worker->stage_round.token2wav_reallocs;
+    stage_timing_log(std::format(
+        "stage timing: token2wav re-allocated ({}): {:.1f} -> {:.1f} MiB\n",
+        reason, before / 1048576.0, after / 1048576.0).c_str());
+}
+
+static void stage_timing_print(cosyvoice_worker_context* worker, const cosyvoice_3_worker_context* cv3_worker, bool streaming, bool finalize)
 {
     if (!stage_timing_enabled())
         return;
@@ -249,9 +417,15 @@ static void stage_timing_print(cosyvoice_worker_context* worker, bool streaming,
         r.mel_ms,
         r.hift_ms, r.hift_frames);
     if (r.active)
-        line += std::format(" round={:.1f}ms", round_ms);
+        line += std::format(" round={:.1f}ms buffers={:.1f}MiB t2w={:.1f}MiB", round_ms,
+            ggml_backend_sched_get_buffer_size(worker->sched.get(), worker->backend.get()) / 1048576.0,
+            cv3_worker->token2wav_buffer.get()
+                ? ggml_backend_buffer_get_size(cv3_worker->token2wav_buffer.get()) / 1048576.0
+                : 0.0);
     if (r.sched_rereserves != 0)
         line += std::format(" sched_reallocs={}", r.sched_rereserves);
+    if (r.token2wav_reallocs != 0)
+        line += std::format(" t2w_reallocs={}", r.token2wav_reallocs);
     line += '\n';
     stage_timing_log(line.c_str());
 
@@ -322,10 +496,13 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
 
         if (!token2wav_buffer || size > ggml_backend_buffer_get_size(token2wav_buffer.get()))
         {
+            const auto before = token2wav_buffer ? ggml_backend_buffer_get_size(token2wav_buffer.get()) : 0;
             reset_shared_buffer(ggml_backend_alloc_ctx_tensors_from_buft(ctx1.get(), buft));
             // The fresh buffer was allocated for exactly the DiT context tensors,
             // so their region ends at the end of the buffer.
             ditctx_buffer_end = reinterpret_cast<char*>(ggml_backend_buffer_get_base(token2wav_buffer.get())) + size;
+            if (stage_timing_enabled())
+                stage_timing_token2wav_realloc(worker, "dit context", before, ggml_backend_buffer_get_size(token2wav_buffer.get()));
             break;
         }
 
@@ -605,11 +782,14 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         // Size the replacement buffer for the DiT context region plus the mel, so
         // the next call can keep both of them without overlapping. The DiT context
         // is already consumed on this call, so the mel goes to the base here.
+        const auto before = ggml_backend_buffer_get_size(token2wav_buffer.get());
         reset_shared_buffer(ggml_backend_buft_alloc_buffer(
             ggml_backend_buffer_get_type(token2wav_buffer.get()),
             mel_offset + mel_size));
         ggml_backend_tensor_alloc(token2wav_buffer.get(), speech_feat,
             ggml_backend_buffer_get_base(token2wav_buffer.get()));
+        if (stage_timing_enabled())
+            stage_timing_token2wav_realloc(worker, "mel", before, ggml_backend_buffer_get_size(token2wav_buffer.get()));
     }
     if (cache_length != 0)
     {
@@ -727,7 +907,7 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
         out.write(reinterpret_cast<const char*>(buffer.data()), static_cast<std::streamsize>(buffer.size() * sizeof(float)));
     }
 
-    stage_timing_print(worker, streaming, finalize);
+    stage_timing_print(worker, cv3_worker, streaming, finalize);
 
     return worker->status == GGML_STATUS_SUCCESS;
 }

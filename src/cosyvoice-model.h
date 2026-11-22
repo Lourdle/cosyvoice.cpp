@@ -35,6 +35,9 @@ struct cosyvoice_model_shared
     ggml_backend_op_capabilities op_caps;
     bool backend_uma;
     int hift_overlap;
+    // COSYVOICE_SCHED_RESERVE: mel frames to pre-reserve for the Flow compute
+    // buffers at load time, or -1 when the feature is disabled.
+    int64_t sched_reserve_frames = -1;
 
     std::mt19937 noise_rng;
     std::shared_mutex noise_mutex;
@@ -231,6 +234,9 @@ struct cosyvoice_model_3 : cosyvoice_model
     bool llm_job_ext(const int* text, uint32_t text_len, cosyvoice_prompt_t prompt, uint32_t max_new_tokens, bool* final);
     bool token2wav(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, cosyvoice_generated_speech_ptr result);
     bool token2wav_ext(const int* token_ids, uint32_t n_tokens, float speed, cosyvoice_prompt_t prompt, bool streaming, bool finalize, cosyvoice_generated_speech_ptr result);
+
+    bool reserve_token2wav_sched(uint32_t frames);
+    void empty_buffer_cache() override;
 
     void get_memory_usage(cosyvoice_memory_usage_t* usage);
     void get_total_memory_usage(cosyvoice_memory_usage_t* usage);

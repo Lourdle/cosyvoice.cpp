@@ -246,13 +246,14 @@ cosyvoice_model::~cosyvoice_model()
     }
 }
 
-static void stage_timing_sched_realloc(ggml_backend_sched_t, ggml_cgraph*, bool backend_ids_changed, bool graph_size_changed, void* user_data)
+static void stage_timing_sched_realloc(ggml_backend_sched_t sched, ggml_cgraph*, bool backend_ids_changed, bool graph_size_changed, void* user_data)
 {
     auto worker = static_cast<cosyvoice_worker_context*>(user_data);
     ++worker->stage_round.sched_rereserves;
     stage_timing_log(std::format(
-        "stage timing: sched re-reserved (backend_ids_changed={}, graph_size_changed={})\n",
-        backend_ids_changed, graph_size_changed).c_str());
+        "stage timing: sched re-reserved (backend_ids_changed={}, graph_size_changed={}, buffers={:.1f} MiB)\n",
+        backend_ids_changed, graph_size_changed,
+        ggml_backend_sched_get_buffer_size(sched, worker->backend.get()) / 1048576.0).c_str());
 }
 
 void cosyvoice_model::empty_buffer_cache()
