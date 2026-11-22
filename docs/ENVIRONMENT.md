@@ -11,6 +11,7 @@ The runtime library (`cosyvoice`) and its tools read a small set of environment 
 | `COSYVOICE_HIFT_PHASE_LOG` | Streaming TTS | Log HiFT streaming frame accounting |
 | `COSYVOICE_DUMP_MEL` | Streaming TTS | Append new mel frames to a file for continuity debugging |
 | `COSYVOICE_STAGE_TIMING` | TTS inference | Log per-stage inference timings |
+| `COSYVOICE_SCHED_RESERVE` | Model load | Pre-reserve the Flow buffers for a worst-case mel length |
 
 ## `COSYVOICE_SIMD_LEVEL`
 
@@ -99,9 +100,10 @@ This is a debugging aid; the format is not a stable API and may change without n
 Setting the variable to any value (even an empty one) enables per-stage inference timing. The library times the pipeline and prints each line through the GGML log callback at INFO; setting this variable also enables verbose output, so the lines are visible in Release builds.
 
 - `stage timing: text: ...` — once per high-level TTS call: emoji stripping, text normalization and tokenization.
-- `stage timing: ...` — once per synthesis round (one LLM job plus one vocoder pass): LLM prefill/decode/epilogue, flow encode, DiT diffusion, mel assembly and HiFT, including per-token/per-step averages and the number of graphs that had to be rebuilt. In streaming mode the line is prefixed with the chunk index; the first chunk's time is the time to first audio.
+- `stage timing: ...` — once per synthesis round (one LLM job plus one vocoder pass): LLM prefill/decode/epilogue, flow encode, DiT diffusion, mel assembly and HiFT, including per-token/per-step averages and the number of graphs that had to be rebuilt. In streaming mode the line is prefixed with the chunk index; the first chunk's time is the time to first audio. `buffers=`/`t2w=` are the current scheduler compute buffer and Flow intermediate buffer sizes, so growth across rounds is visible.
 - `stage timing: stream: ...` — summary of a streaming request: chunk count, total wall time and per-stage sums.
-- `stage timing: sched re-reserved ...` — the graph scheduler had to reserve its compute buffers again, which synchronizes the backends; the round line counts these events as `sched_reallocs`.
+- `stage timing: sched re-reserved ...` — the graph scheduler had to reserve its compute buffers again, which synchronizes the backends; the line includes the buffer size before the re-reservation and the round line counts these events as `sched_reallocs`.
+- `stage timing: token2wav re-allocated (dit context|mel): X -> Y MiB` — the intermediate Flow buffer was freed and allocated again at the new size while its contents grew; this only happens without `COSYVOICE_SCHED_RESERVE` or beyond the reserved length. The round line counts these events as `t2w_reallocs`.
 
 While the variable is unset the instrumentation only costs one branch per stage boundary and never reads the clock.
 
@@ -109,4 +111,24 @@ Example:
 
 ```bash
 COSYVOICE_STAGE_TIMING=1 cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --text "hello" --output out.wav --stream
+```
+
+## `COSYVOICE_SCHED_RESERVE`
+
+Pre-reserves the Flow (DiT) buffers at model load for a worst-case mel length: the scheduler compute buffers, the intermediate buffer that carries the DiT step state and the accumulated mel between steps, and the host-side mel cache. The backend scheduler re-plans its allocation whenever the graph layout changes and only ever grows its buffers, so on the default (non-KV) Flow path a streaming request reallocates them chunk after chunk as the accumulated mel grows. Reserving up front moves those allocations to load time and keeps them out of the inference path. Only the Flow path is covered; the LLM and HiFT graphs keep the previous behavior.
+
+The value is a mel frame count:
+
+- unset, negative or not a number — disabled (an invalid value logs a warning).
+- `0` — use the length derived from the context parameters: `n_max_seq * token_mel_ratio` (the longest mel the model can emit).
+- `N > 0` — reserve for `N` mel frames, clamped to the derived maximum.
+
+The reserved length is a fixed cost in compute memory: the scheduler buffers are pre-grown to that worst case even for short requests (roughly 0.7 MiB per frame with the reference model). Size it to the longest audio you expect; longer requests still work and simply grow the buffers as before. The reservation is skipped when a DiT KV cache is configured (`dit_kv_fixed_slots`/`dit_kv_offloadable_slots`), because that path already keeps the per-chunk graph size bounded.
+
+No reservation is performed when the variable is unset, which is the default.
+
+Example:
+
+```bash
+COSYVOICE_SCHED_RESERVE=2048 cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --text "hello" --output out.wav --stream
 ```

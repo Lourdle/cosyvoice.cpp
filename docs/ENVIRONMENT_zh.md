@@ -11,6 +11,7 @@
 | `COSYVOICE_HIFT_PHASE_LOG` | 流式 TTS | 输出 HiFT 流式帧统计日志 |
 | `COSYVOICE_DUMP_MEL` | 流式 TTS | 将新增 mel 帧追加写入文件，用于连续性调试 |
 | `COSYVOICE_STAGE_TIMING` | TTS 推理 | 输出各推理阶段的耗时 |
+| `COSYVOICE_SCHED_RESERVE` | 模型加载时 | 为 Flow 缓冲按最坏 mel 长度预预留 |
 
 ## `COSYVOICE_SIMD_LEVEL`
 
@@ -99,9 +100,10 @@ COSYVOICE_DUMP_MEL=/tmp/mel.bin cosyvoice-cli --model model.gguf --prompt-speech
 该变量被设置为任意值（**包括空值**）都会启用分阶段推理计时。库会统计流水线各阶段耗时，并通过 GGML 日志回调（INFO）输出每行；设置该变量也会启用 verbose，因此 Release 构建下同样可见。
 
 - `stage timing: text: ...` — 每次高层 TTS 调用一行：emoji 移除、文本规范化与分词。
-- `stage timing: ...` — 每个合成轮次（一次 LLM 任务加一次声码器）一行：LLM prefill/decode/epilogue、flow encode、DiT 扩散、mel 组装与 HiFT，并附带每 token/每 step 均值和图重建次数。流式模式下带 chunk 序号前缀；首 chunk 的耗时即首包延迟。
+- `stage timing: ...` — 每个合成轮次（一次 LLM 任务加一次声码器）一行：LLM prefill/decode/epilogue、flow encode、DiT 扩散、mel 组装与 HiFT，并附带每 token/每 step 均值和图重建次数。流式模式下带 chunk 序号前缀；首 chunk 的耗时即首包延迟。`buffers=`/`t2w=` 为当前调度器计算缓冲与 Flow 中间缓冲的大小，可看出跨轮次是否增长。
 - `stage timing: stream: ...` — 整个流式请求的汇总：chunk 数、总墙钟时间与各阶段累计。
-- `stage timing: sched re-reserved ...` — 图调度器需要重新预留计算缓冲（会同步所有后端）；轮次行中计入 `sched_reallocs`。
+- `stage timing: sched re-reserved ...` — 图调度器需要重新预留计算缓冲（会同步所有后端）；该行包含重新预留前的缓冲大小，轮次行中计入 `sched_reallocs`。
+- `stage timing: token2wav re-allocated (dit context|mel): X -> Y MiB` — Flow 中间缓冲在内容增长时被释放并按新尺寸重新分配；只会在未启用 `COSYVOICE_SCHED_RESERVE` 或超出预留长度时出现。轮次行中计入 `t2w_reallocs`。
 
 未设置该变量时，插桩在每个阶段边界只多一次分支判断，且不读取时钟。
 
@@ -109,4 +111,25 @@ COSYVOICE_DUMP_MEL=/tmp/mel.bin cosyvoice-cli --model model.gguf --prompt-speech
 
 ```bash
 COSYVOICE_STAGE_TIMING=1 cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --text "hello" --output out.wav --stream
+```
+
+
+## `COSYVOICE_SCHED_RESERVE`
+
+在模型加载时为 Flow（DiT）按最坏 mel 长度预先预留缓冲：包括调度器计算缓冲、在 step 之间承载 DiT 状态与累积 mel 的中间缓冲，以及宿主侧 mel 缓存。后端调度器在图的布局变化时会重新规划分配，且缓冲只增不减；因此在默认（不带 KV cache）的 Flow 路径上，流式请求会随着累积 mel 增长而在每个 chunk 重新分配缓冲。提前预留可以把这部分分配挪到加载期，不再落在推理路径上。只有 Flow 路径被预留；LLM 与 HiFT 图保持原有行为。
+
+取值是 mel 帧数：
+
+- 未设置、为负数或非数字——关闭（非法值会打印警告）。
+- `0`——使用由上下文参数推导的长度：`n_max_seq * token_mel_ratio`（模型可能产出的最长 mel）。
+- `N > 0`——按 `N` 个 mel 帧预留，并截断到推导出的上限。
+
+预留长度是计算内存的固定开销：即使短请求，调度器缓冲也会预先增长到该最坏情况（参考模型约每帧 0.7 MiB）。请按预期的最长音频来设置；超过预留的请求仍可正常工作，只是像以前一样继续增长缓冲。配置了 DiT KV cache（`dit_kv_fixed_slots`/`dit_kv_offloadable_slots`）时会跳过预留，因为该路径下每 chunk 的图尺寸本就有界。
+
+未设置该变量时不进行预留，这也是默认行为。
+
+示例：
+
+```bash
+COSYVOICE_SCHED_RESERVE=2048 cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --text "hello" --output out.wav --stream
 ```
