@@ -7,6 +7,7 @@
     #include <string>
     #include <unordered_map>
     #include <functional>
+    #include <memory>
 
     #include <unicode/unistr.h>
     #include <unicode/normalizer2.h>
@@ -65,24 +66,103 @@ static icu::Locale detect_locale(const icu::UnicodeString& text)
     }
 }
 
+template <typename Replacer>
 static icu::UnicodeString replace_with_matcher(
+    const icu::RegexPattern* pattern,
     const icu::UnicodeString& input,
-    const icu::UnicodeString& pattern,
     UErrorCode& status,
-    const std::function<icu::UnicodeString(icu::RegexMatcher&)>& replacer)
+    Replacer&& replacer)
 {
-    icu::RegexMatcher matcher(pattern, input, 0, status);
-    if (U_FAILURE(status)) return input;
+    if (!pattern) return input;
+
+    std::unique_ptr<icu::RegexMatcher> matcher(pattern->matcher(input, status));
+    if (U_FAILURE(status) || !matcher) return input;
 
     icu::UnicodeString out;
     int32_t last = 0;
-    while (matcher.find()) {
-        out.append(input, last, matcher.start(status) - last);
-        out.append(replacer(matcher));
-        last = matcher.end(status);
+    while (matcher->find()) {
+        out.append(input, last, matcher->start(status) - last);
+        out.append(replacer(*matcher));
+        last = matcher->end(status);
     }
     out.append(input, last, input.length() - last);
     return out;
+}
+
+static const icu::RegexPattern* pattern_unit()
+{
+    static const std::unique_ptr<icu::RegexPattern> pattern = [] {
+        UErrorCode status = U_ZERO_ERROR;
+        return std::unique_ptr<icu::RegexPattern>(icu::RegexPattern::compile(
+            icu::UnicodeString::fromUTF8(reinterpret_cast<const char*>(u8R"(([+-]?\d+(?:[.,]\d+)?)(\s*)(kg|mg|g|km|cm|mm|L|ml|m|°C|°F))")),
+            0, status));
+    }();
+    return pattern.get();
+}
+
+static const icu::RegexPattern* pattern_ordinal()
+{
+    static const std::unique_ptr<icu::RegexPattern> pattern = [] {
+        UErrorCode status = U_ZERO_ERROR;
+        return std::unique_ptr<icu::RegexPattern>(icu::RegexPattern::compile(
+            icu::UnicodeString::fromUTF8(reinterpret_cast<const char*>(u8R"(\b(\d+)(st|nd|rd|th)\b)")),
+            0, status));
+    }();
+    return pattern.get();
+}
+
+static const icu::RegexPattern* pattern_number()
+{
+    static const std::unique_ptr<icu::RegexPattern> pattern = [] {
+        UErrorCode status = U_ZERO_ERROR;
+        return std::unique_ptr<icu::RegexPattern>(icu::RegexPattern::compile(
+            icu::UnicodeString::fromUTF8(reinterpret_cast<const char*>(u8R"(\d+(?:[.,]\d+)?)")),
+            0, status));
+    }();
+    return pattern.get();
+}
+
+struct text_norm_formatters
+{
+    std::unique_ptr<icu::RuleBasedNumberFormat> spellout;
+    std::unique_ptr<icu::NumberFormat> number_parser;
+    std::unique_ptr<icu::MeasureFormat> measure;
+    bool measure_tried = false;
+
+    bool usable() const { return spellout != nullptr && number_parser != nullptr; }
+};
+
+static text_norm_formatters& get_formatters(const icu::Locale& loc)
+{
+    static thread_local std::unordered_map<std::string, text_norm_formatters> cache;
+    auto [it, inserted] = cache.try_emplace(loc.getName());
+    if (inserted)
+    {
+        UErrorCode status = U_ZERO_ERROR;
+        auto spellout = std::make_unique<icu::RuleBasedNumberFormat>(icu::URBNF_SPELLOUT, loc, status);
+        if (U_SUCCESS(status))
+            it->second.spellout = std::move(spellout);
+
+        if (it->second.spellout)
+        {
+            status = U_ZERO_ERROR;
+            it->second.number_parser.reset(icu::NumberFormat::createInstance(loc, status));
+        }
+    }
+    return it->second;
+}
+
+static icu::MeasureFormat* get_measure_format(text_norm_formatters& formatters, const icu::Locale& loc)
+{
+    if (!formatters.measure_tried)
+    {
+        formatters.measure_tried = true;
+        UErrorCode status = U_ZERO_ERROR;
+        auto measure = std::make_unique<icu::MeasureFormat>(loc, UMEASFMT_WIDTH_WIDE, status);
+        if (U_SUCCESS(status))
+            formatters.measure = std::move(measure);
+    }
+    return formatters.measure.get();
 }
 
 static void normalize_fullwidth_digits(icu::UnicodeString& text)
@@ -91,7 +171,7 @@ static void normalize_fullwidth_digits(icu::UnicodeString& text)
     {
         UChar32 c = text.char32At(i);
         if (c >= 0xFF10 && c <= 0xFF19)
-            text.replace(i, U16_LENGTH(c), icu::UnicodeString(static_cast<UChar32>(c - 0xFF10 + '0')));
+            text.setCharAt(i, static_cast<UChar>(c - 0xFF10 + '0'));
         i += U16_LENGTH(c);
     }
 }
@@ -167,22 +247,17 @@ bool cosyvoice_frontend_util_text_normalize(std::string& text, const char* orig_
         norm.toUTF8String(text);
         return true;
     };
-    icu::RuleBasedNumberFormat spellout(icu::URBNF_SPELLOUT, loc, status);
-    if (U_FAILURE(status)) return finalize();
-
-    std::unique_ptr<icu::NumberFormat> numberParser(icu::NumberFormat::createInstance(loc, status));
-    if (U_FAILURE(status) || !numberParser) return finalize();
+    auto& formatters = get_formatters(loc);
+    if (!formatters.usable()) return finalize();
 
     // Common unit suffixes such as kg, mg, km, m, cm, mm, L, ml, °C, and °F.
-    static const icu::UnicodeString unitPattern = icu::UnicodeString::fromUTF8(
-        reinterpret_cast<const char*>(u8R"(([+-]?\d+(?:[.,]\d+)?)(\s*)(kg|mg|g|km|cm|mm|L|ml|m|°C|°F))"));
-    norm = replace_with_matcher(norm, unitPattern, status,
+    norm = replace_with_matcher(pattern_unit(), norm, status,
         [&](icu::RegexMatcher& m) -> icu::UnicodeString {
             icu::UnicodeString num = m.group(1, status);
             icu::UnicodeString unit = m.group(3, status);
             icu::Formattable parsed;
             icu::ParsePosition pos(0);
-            numberParser->parse(num, parsed, pos);
+            formatters.number_parser->parse(num, parsed, pos);
 
             std::unique_ptr<icu::MeasureUnit> mu;
             if (unit == u"kg") mu.reset(icu::MeasureUnit::createKilogram(status));
@@ -197,26 +272,25 @@ bool cosyvoice_frontend_util_text_normalize(std::string& text, const char* orig_
             else if (unit == u"°C") mu.reset(icu::MeasureUnit::createCelsius(status));
             else if (unit == u"°F") mu.reset(icu::MeasureUnit::createFahrenheit(status));
 
-            if (!mu || U_FAILURE(status)) return m.group(0, status);
+            icu::MeasureFormat* mf = get_measure_format(formatters, loc);
+            if (!mu || !mf || U_FAILURE(status)) return m.group(0, status);
 
             icu::Measure measure(parsed, mu.release(), status);
-            icu::MeasureFormat mf(loc, UMEASFMT_WIDTH_WIDE, status);
             icu::UnicodeString out;
             icu::FieldPosition fp;
-            mf.formatMeasures(&measure, 1, out, fp, status);
+            mf->formatMeasures(&measure, 1, out, fp, status);
             return out;
         });
 
-    static const icu::UnicodeString ordinalPattern = icu::UnicodeString::fromUTF8(reinterpret_cast<const char*>(u8R"(\b(\d+)(st|nd|rd|th)\b)"));
-    norm = replace_with_matcher(norm, ordinalPattern, status,
+    norm = replace_with_matcher(pattern_ordinal(), norm, status,
         [&](icu::RegexMatcher& m) -> icu::UnicodeString
         {
             icu::UnicodeString num = m.group(1, status);
             icu::Formattable parsed;
             icu::ParsePosition pos(0);
-            numberParser->parse(num, parsed, pos);
+            formatters.number_parser->parse(num, parsed, pos);
             num.remove();
-            spellout.format(parsed, num, status);
+            formatters.spellout->format(parsed, num, status);
             auto view = std::u16string_view(num.getBuffer(), num.length());
             static const std::unordered_map<std::u16string_view, std::u16string_view> specialOrdinals =
             {
@@ -265,16 +339,15 @@ bool cosyvoice_frontend_util_text_normalize(std::string& text, const char* orig_
             return num;
         });
 
-    static const icu::UnicodeString numberPattern = icu::UnicodeString::fromUTF8(reinterpret_cast<const char*>(u8R"(\d+(?:[.,]\d+)?)"));
-    norm = replace_with_matcher(norm, numberPattern, status,
+    norm = replace_with_matcher(pattern_number(), norm, status,
         [&](icu::RegexMatcher& m) -> icu::UnicodeString
         {
             icu::UnicodeString num = m.group(0, status);
             icu::Formattable parsed;
             icu::ParsePosition pos(0);
-            numberParser->parse(num, parsed, pos);
+            formatters.number_parser->parse(num, parsed, pos);
             icu::UnicodeString out;
-            spellout.format(parsed, out, status);
+            formatters.spellout->format(parsed, out, status);
             return out;
         });
 
