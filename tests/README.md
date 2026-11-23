@@ -191,3 +191,24 @@ The work file is copied from the source model when it does not exist yet, so it
 can be pointed at any writable location with room for one model copy. If the work
 file already exists it is used as is, which allows hard-linking it to the model on
 space-constrained drives.
+
+## `test-memory-pool`
+
+Regression for the process-wide memory pool used by the library's internal
+containers. It does not need a model. Run without arguments to verify that a
+`params` struct size that does not match a released version is rejected without
+consuming the one-time initialization, initialize the pool early, verify that a
+second initialization is rejected, and normalize text from four threads; run
+with `late` to make a pooled allocation first and verify that a later
+initialization is rejected.
+
+Run it without `COSYVOICE_MEMORY_POOL_BYTES` set: the variable initializes the
+runtime when the library is loaded, and the explicit calls under test would then
+fail as already initialized.
+
+```sh
+build/bin/test-memory-pool
+build/bin/test-memory-pool late
+```
+
+Both modes print `PASS` on success.

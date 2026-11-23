@@ -21,3 +21,7 @@ target_include_directories(test-mmap-zerocopy PRIVATE ../include)
 add_executable(test-mmap-delete mmap-delete.cpp)
 target_link_libraries(test-mmap-delete PRIVATE cosyvoice common tools_common ggml)
 target_include_directories(test-mmap-delete PRIVATE ../include)
+
+add_executable(test-memory-pool memory-pool.cpp)
+target_link_libraries(test-memory-pool PRIVATE cosyvoice common tools_common ggml)
+target_include_directories(test-memory-pool PRIVATE ../include)
