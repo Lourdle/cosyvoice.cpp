@@ -426,6 +426,58 @@ Groups context creation options that affect backend behavior, memory planning, a
 - `sampler_ext`: Worker-aware custom sampler occupying the same storage as `sampler`. The runtime always invokes the callback through the extended signature (a trailing `worker_no` argument); a plain `cosyvoice_sampler_t` in this slot simply ignores the extra argument.
 - `sampler_ctx`: User pointer passed to `sampler`.
 
+## cosyvoice_runtime_params_t
+
+### Syntax
+
+```c
+typedef struct cosyvoice_runtime_params
+{
+    uint64_t memory_pool_bytes;
+} cosyvoice_runtime_params_t;
+```
+
+### Description
+
+Process-wide runtime options passed to `cosyvoice_init_runtime()`.
+
+### Fields
+
+- `memory_pool_bytes`: Size in bytes of the preallocated internal memory pool. `0` disables the pool.
+
+### Remarks
+
+The pool serves the library's internal C++ containers (tokenizer, text chunking, prompt/TTS state). Requests up to 32 KiB are pooled; larger or over-aligned requests use the system allocator directly. The value is not a hard memory cap: when the preallocated arena is exhausted the pool continues from the system heap.
+
+Future versions append new fields at the end of this struct instead of introducing versioned variants. Callers always pass `sizeof` their own struct to `cosyvoice_init_runtime()`; the size identifies the struct version the caller was built against, and fields introduced by newer versions fall back to their defaults. The library accepts the sizes of all released versions of this struct; any other size is rejected as a caller error.
+
+## cosyvoice_init_runtime
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_init_runtime(const cosyvoice_runtime_params_t* params, size_t params_size);
+```
+
+### Description
+
+Initializes process-wide runtime options such as the internal memory pool.
+
+### Parameters
+
+- `params`: Runtime options. When `NULL`, the `COSYVOICE_MEMORY_POOL_BYTES` environment variable is used and `params_size` is ignored.
+- `params_size`: Size of the struct `params` points to, in bytes. Pass `sizeof(cosyvoice_runtime_params_t)`. Must match the size of a released struct version; any other value is rejected with a warning.
+
+### Return value
+
+`true` on success; `false` when the configuration is invalid, the runtime was already initialized, or pooled containers have already allocated memory.
+
+### Remarks
+
+Call before loading models or tokenizers. The runtime can be initialized only once per process. When `COSYVOICE_MEMORY_POOL_BYTES` is set, the runtime is initialized from it when the library is loaded, and a later call fails as already initialized; an explicit call only takes effect when the variable is unset (or invalid). Enabling the pool after pooled containers have allocated is rejected with a warning and leaves the system allocator active.
+
+An unrecognized `params_size` is a caller error: it is rejected with a warning without consuming the one-time initialization, so the call can be fixed and retried.
+
 ## cosyvoice_init_backend
 
 ### Syntax

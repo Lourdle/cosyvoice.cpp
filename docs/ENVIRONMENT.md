@@ -12,6 +12,7 @@ The runtime library (`cosyvoice`) and its tools read a small set of environment 
 | `COSYVOICE_DUMP_MEL` | Streaming TTS | Append new mel frames to a file for continuity debugging |
 | `COSYVOICE_STAGE_TIMING` | TTS inference | Log per-stage inference timings |
 | `COSYVOICE_SCHED_RESERVE` | Model load | Pre-reserve the Flow buffers for a worst-case mel length |
+| `COSYVOICE_MEMORY_POOL_BYTES` | Runtime init | Preallocate a process-wide pool for internal C++ containers, in bytes (0/unset disables) |
 
 ## `COSYVOICE_SIMD_LEVEL`
 
@@ -131,4 +132,24 @@ Example:
 
 ```bash
 COSYVOICE_SCHED_RESERVE=2048 cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --text "hello" --output out.wav --stream
+```
+
+## `COSYVOICE_MEMORY_POOL_BYTES`
+
+Preallocates a process-wide memory pool for the library's internal C++ containers (tokenizer, text chunking, prompt/TTS state, and other `src/` runtime structures). The pool is backed by a `std::pmr::synchronized_pool_resource` with an arena reserved at runtime initialization. Requests up to 32 KiB are served from the pool; larger or over-aligned requests go directly to the system allocator. When the arena is exhausted the pool continues from the system heap, so the value is not a hard memory cap.
+
+The value is a size in bytes:
+
+- unset or `0` —?disabled (the default).
+- `N > 0` —?enable the pool with an `N`-byte initial arena; the size is rounded up to the arena alignment (64 KiB).
+- negative or not a number —?disabled with a warning.
+
+The pool is process-global and can be initialized only once. The environment variable is applied when the library is loaded, before any library call, so it must be set before the process starts. `cosyvoice_init_runtime()` can be used instead of the variable; because the variable is applied at load, it takes precedence over a later explicit call, which is rejected as already initialized. Enabling the pool after pooled containers have already allocated is rejected with a warning and leaves the system allocator active.
+
+Pool setup and teardown are process-lifetime: the arena is not returned to the OS and is reused for the life of the process. The pool does not cover ggml/backend tensors, ICU-internal allocations, or `tools/`/`tests/` code. The startup banner and any warnings are printed once when the library is loaded, before the verbose log filter is installed, so they are visible even without `COSYVOICE_LOG_VERBOSE`.
+
+Example:
+
+```bash
+COSYVOICE_MEMORY_POOL_BYTES=33554432 COSYVOICE_LOG_VERBOSE=1 cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --text "hello" --output out.wav --stream
 ```

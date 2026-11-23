@@ -83,3 +83,7 @@ The project targets C++20, and the core library already follows these idioms —
 - **Idioms**: prefer `nullptr` over `NULL`/`0`, `static_cast`/`reinterpret_cast` over C-style casts, `if` with initializer, structured bindings, and `enum class` over plain `enum` in non-C-API code.
 
 New code should follow these; simple `printf`-style console output does not need rewriting.
+
+## Internal container allocators (`src/`)
+
+`src/` hot-path containers use the aliases from `src/cosyvoice-memory.h` (`string`, `vector`, `map`, `unordered_map`, `forward_list`, `set`, `unordered_set`, `priority_queue`). These aliases use a zero-size allocator wired to the process-wide memory pool configured by `cosyvoice_init_runtime()` (`COSYVOICE_MEMORY_POOL_BYTES`); when the pool is disabled they fall back to the system allocator. Do not use the aliases in `include/`, `common/`, `tools/`, or `tests/` — those boundaries stay on `std::`. Static-storage-duration caches and file-scope containers stay on `std::` so static initialization does not depend on the runtime pool.

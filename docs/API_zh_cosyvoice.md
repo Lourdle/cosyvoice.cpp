@@ -420,6 +420,58 @@ typedef struct cosyvoice_context_params
 - `sampler_ext`：带 worker 编号的自定义采样器，与 `sampler` 共用同一存储。运行时始终以扩展签名调用回调（末位多一个 `worker_no` 参数）；在此槽位放一个普通 `cosyvoice_sampler_t` 也可以，多余参数会被忽略。
 - `sampler_ctx`：传入采样回调的用户上下文。
 
+## cosyvoice_runtime_params_t
+
+### 语法
+
+```c
+typedef struct cosyvoice_runtime_params
+{
+    uint64_t memory_pool_bytes;
+} cosyvoice_runtime_params_t;
+```
+
+### 说明
+
+传给 `cosyvoice_init_runtime()` 的进程级运行时选项。
+
+### 字段
+
+- `memory_pool_bytes`：预分配的内部内存池大小（字节）。`0` 表示关闭。
+
+### 备注
+
+该池服务于库内部的 C++ 容器（分词器、文本分块、prompt/TTS 状态）。不超过 32 KiB 的请求由池服务；更大或要求超对齐的请求直接使用系统分配器。该值不是硬性内存上限：预分配的 arena 用尽后，池会继续从系统堆分配。
+
+后续版本会直接在此结构体末尾追加新字段，而不是引入 v2/v3 版本化变体。调用方始终把自己头文件里的 `sizeof` 传给 `cosyvoice_init_runtime()`；该大小即调用方编译时所用的结构体版本，更新版本引入的字段按默认值处理。库接受所有已发布版本的结构体大小；其它大小会被当作调用方错误拒绝。
+
+## cosyvoice_init_runtime
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_init_runtime(const cosyvoice_runtime_params_t* params, size_t params_size);
+```
+
+### 说明
+
+初始化进程级运行时选项，例如内部内存池。
+
+### 参数
+
+- `params`：运行时选项。为 `NULL` 时使用 `COSYVOICE_MEMORY_POOL_BYTES` 环境变量，`params_size` 被忽略。
+- `params_size`：`params` 所指结构体的大小（字节）。传 `sizeof(cosyvoice_runtime_params_t)`。必须与某个已发布版本的结构体大小一致；其它值会带警告拒绝。
+
+### 返回值
+
+成功返回 `true`；配置非法、运行时已初始化，或池化容器已经分配过内存时返回 `false`。
+
+### 备注
+
+应在加载模型或分词器之前调用。每个进程只能初始化一次。设置了 `COSYVOICE_MEMORY_POOL_BYTES` 时，运行时在库被加载时即据此初始化，之后的显式调用会以“已初始化”拒绝；只有变量未设置（或非法）时显式调用才生效。如果池化容器已经分配过内存，再启用池会被警告拒绝，系统分配器保持生效。
+
+`params_size` 无法识别属于调用方错误：会带警告拒绝，但**不消耗**一次性初始化机会，修正后可以重试。
+
 ## cosyvoice_init_backend
 
 ### 语法

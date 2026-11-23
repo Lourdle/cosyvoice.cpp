@@ -12,6 +12,7 @@
 | `COSYVOICE_DUMP_MEL` | 流式 TTS | 将新增 mel 帧追加写入文件，用于连续性调试 |
 | `COSYVOICE_STAGE_TIMING` | TTS 推理 | 输出各推理阶段的耗时 |
 | `COSYVOICE_SCHED_RESERVE` | 模型加载时 | 为 Flow 缓冲按最坏 mel 长度预预留 |
+| `COSYVOICE_MEMORY_POOL_BYTES` | 运行时初始化 | 为内部 C++ 容器预分配进程级内存池，单位为字节（0/未设置=关闭） |
 
 ## `COSYVOICE_SIMD_LEVEL`
 
@@ -132,4 +133,24 @@ COSYVOICE_STAGE_TIMING=1 cosyvoice-cli --model model.gguf --prompt-speech prompt
 
 ```bash
 COSYVOICE_SCHED_RESERVE=2048 cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --text "hello" --output out.wav --stream
+```
+
+## `COSYVOICE_MEMORY_POOL_BYTES`
+
+为库内部的 C++ 容器（分词器、文本分块、prompt/TTS 状态以及其它 `src/` 运行时结构）预分配一个进程级内存池。池由 `std::pmr::synchronized_pool_resource` 支持，初始化时预留 arena。不超过 32 KiB 的请求由池服务；更大或要求超对齐的请求直接走系统分配器。arena 用尽后池会继续从系统堆分配，因此该值不是硬性内存上限。
+
+取值是字节数：
+
+- 未设置或 `0`——关闭（默认）。
+- `N > 0`——启用池，初始 arena 为 `N` 字节；会按 arena 对齐（64 KiB）向上取整。
+- 负数或非数字——关闭并打印警告。
+
+池是进程级的，只能初始化一次。环境变量在库被加载时、任何库调用之前生效，因此必须在进程启动前设置。也可以改用 `cosyvoice_init_runtime()`；由于变量在加载时就已生效，它优先于之后的显式调用——后者会以“已初始化”拒绝。如果池化容器已经分配过内存，再启用池会被警告拒绝，系统分配器保持生效。
+
+池的创建与释放是进程生命周期的：arena 不会归还给操作系统，而是在进程存续期间复用。该池不覆盖 ggml/后端张量、ICU 内部的内存分配，也不覆盖 `tools/`/`tests/` 代码。启动横幅与警告信息在库被加载时打印一次，此时尚未安装 verbose 日志过滤，因此即使不设 `COSYVOICE_LOG_VERBOSE` 也能看到。
+
+示例：
+
+```bash
+COSYVOICE_MEMORY_POOL_BYTES=33554432 COSYVOICE_LOG_VERBOSE=1 cosyvoice-cli --model model.gguf --prompt-speech prompt_speech.gguf --text "hello" --output out.wav --stream
 ```

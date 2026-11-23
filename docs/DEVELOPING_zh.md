@@ -83,3 +83,7 @@ target_include_directories(my-tool PRIVATE ../include)
 - **惯用法**：优先 `nullptr` 而非 `NULL`/`0`，`static_cast`/`reinterpret_cast` 而非 C 风格强转，善用 if-初始化语句、结构化绑定，非 C API 代码用 `enum class` 而非普通 `enum`。
 
 以上针对新代码；简单的 printf 风格控制台输出不必重写。
+
+## `src/` 内部容器分配器
+
+`src/` 热路径中的容器使用 `src/cosyvoice-memory.h` 提供的别名（`string`、`vector`、`map`、`unordered_map`、`forward_list`、`set`、`unordered_set`、`priority_queue`）。这些别名使用零大小 allocator，接入 `cosyvoice_init_runtime()`（`COSYVOICE_MEMORY_POOL_BYTES`）配置的进程级内存池；池关闭时回退到系统分配器。不要在 `include/`、`common/`、`tools/` 或 `tests/` 中使用这些别名，这些边界继续使用 `std::`。静态存储期的缓存和文件级容器保持 `std::`，避免静态初始化依赖运行时内存池。
