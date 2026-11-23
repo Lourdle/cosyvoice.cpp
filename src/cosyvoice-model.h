@@ -4,6 +4,7 @@
 #include "cosyvoice-lowlevel.h"
 #include "cosyvoice-interface.h"
 #include "cosyvoice-kv-cache.h"
+#include "cosyvoice-memory.h"
 #include "cosyvoice-stage-timing.h"
 #include "common.h"
 
@@ -28,7 +29,7 @@ struct cosyvoice_model_shared
     // destroyed first.
     ggml_backend_buffer_ptr mmap_buffer;
 
-    std::vector<ggml_backend_buffer_ptr> buffers;
+    vector<ggml_backend_buffer_ptr> buffers;
     ggml_backend_buffer_ptr cpu_buffer;
 
     cosyvoice_context_params_v4_cpp params;
@@ -71,7 +72,7 @@ struct cosyvoice_worker_context
 
     std::mt19937 sampler_rng, noise_rng;
 
-    std::vector<int> tokens;
+    vector<int> tokens;
 
     // Consecutive-silent-token counter for the FSQ silence filtering. It must
     // survive across llm_job_ext() calls that continue the same generation
@@ -90,12 +91,12 @@ struct cosyvoice_worker_context
     cosyvoice_builtin_sampler_rng_policy_t builtin_sampler_rng_policy;
 
     uint32_t chunk_size;
-    std::vector<float> flow_cache;
+    vector<float> flow_cache;
     // Streaming re-renders the whole accumulated mel each chunk, matching the
     // reference implementation, and crops away the already-emitted prefix at
     // this sample offset before handing the result to the caller.
     uint32_t wav_offset{0};
-    std::vector<uint32_t> chunk_boundaries;
+    vector<uint32_t> chunk_boundaries;
     uint32_t offset{0};
 
     // Stage diagnostics (COSYVOICE_STAGE_TIMING): per-round values are reset at
@@ -192,8 +193,8 @@ struct cosyvoice_model_3_shared
     CausalHiFTGenerator hift;
     CosyVoice3LM llm;
 
-    std::set<int> stop_tokens;
-    std::set<int> silent_tokens;
+    set<int> stop_tokens;
+    set<int> silent_tokens;
 };
 
 struct cosyvoice_3_worker_context

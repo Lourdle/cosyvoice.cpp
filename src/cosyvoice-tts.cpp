@@ -64,7 +64,7 @@ static uint32_t decode_utf8_cp(std::string_view text, std::size_t i, std::size_t
     return cp;
 }
 
-static inline bool strip_emoji(std::string_view text, std::string& result)
+static inline bool strip_emoji(std::string_view text, string& result)
 {
     bool removed = false;
     bool prev_emoji = false;
@@ -105,7 +105,7 @@ static inline bool strip_emoji(std::string_view text, std::string& result)
     return removed;
 }
 
-struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_prompt, std::string
+struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_prompt, string
 {
     cosyvoice_tts_context(cosyvoice_context_t ctx, cosyvoice_prompt_t prompt)
         : cosyvoice_prompt(*prompt), ctx(ctx),
@@ -213,7 +213,7 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
         // avoiding re-tokenization of each assembled chunk.
         if (flags & COSYVOICE_TTS_FLAG_FAST_SPLIT)
         {
-            std::vector<std::vector<int>> fragment_tokens;
+            vector<vector<int>> fragment_tokens;
             fragment_tokens.reserve(fragments.size());
             {
                 cosyvoice_tokenization_result_impl tok;
@@ -385,11 +385,11 @@ struct cosyvoice_tts_context : cosyvoice_tokenization_result_impl, cosyvoice_pro
     }
 
     cosyvoice_context_t ctx;
-    std::string instruction_cache;
+    string instruction_cache;
     size_t prefix_len;
     uint32_t flags;
     uint32_t fade_samples;
-    std::vector<float> combined_pcm;
+    vector<float> combined_pcm;
 };
 
 cosyvoice_tts_context_t cosyvoice_tts_context_new(cosyvoice_context_t ctx, cosyvoice_prompt_t prompt)

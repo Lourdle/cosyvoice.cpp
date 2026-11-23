@@ -1,5 +1,7 @@
 #pragma once
 
+#include "cosyvoice-memory.h"
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -93,26 +95,25 @@ struct unicode_cpt_flags {
 
 size_t unicode_len_utf8(char src);
 
-std::string unicode_cpt_to_utf8(uint32_t cpt);
+string unicode_cpt_to_utf8(uint32_t cpt);
 uint32_t    unicode_cpt_from_utf8(const std::string_view& utf8, size_t& offset);
 
-std::vector<uint32_t> unicode_cpts_from_utf8(const std::string_view& utf8);
+vector<uint32_t> unicode_cpts_from_utf8(const std::string_view& utf8);
 
 unicode_cpt_flags unicode_cpt_flags_from_cpt(uint32_t cpt);
 
-std::string unicode_byte_to_utf8(uint8_t byte);
-uint8_t     unicode_utf8_to_byte(const std::string& utf8);
+string unicode_byte_to_utf8(uint8_t byte);
 
 class unicode_regex_splitter
 {
 public:
-    explicit unicode_regex_splitter(const std::string& regex);
+    explicit unicode_regex_splitter(std::string_view regex);
     ~unicode_regex_splitter();
 
     unicode_regex_splitter(const unicode_regex_splitter&) = delete;
     unicode_regex_splitter& operator=(const unicode_regex_splitter&) = delete;
 
-    std::vector<std::string> split(std::string_view text) const;
+    vector<string> split(std::string_view text) const;
 
 private:
     struct impl;

@@ -30,7 +30,7 @@ static bool is_valid_locale(const char* locale)
 
 static icu::Locale detect_locale(const icu::UnicodeString& text)
 {
-    std::unordered_map<UScriptCode, int> counts;
+    unordered_map<UScriptCode, int> counts;
     for (int32_t i = 0; i < text.length();) {
         UChar32 c = text.char32At(i);
         i += U16_LENGTH(c);
@@ -193,7 +193,7 @@ static bool strip(const char*& orig_text, uint32_t& text_len)
 
 struct cosyvoice_text_impl : cosyvoice_text
 {
-    std::string text_storage;
+    string text_storage;
 };
 
 cosyvoice_text_ptr cosyvoice_text_create()
@@ -216,7 +216,7 @@ void cosyvoice_frontend_util_text_normalize(const char* text, uint32_t text_len,
     p->text = p->text_storage.c_str();
 }
 
-bool cosyvoice_frontend_util_text_normalize(std::string& text, const char* orig_text, uint32_t text_len, const char* locale)
+bool cosyvoice_frontend_util_text_normalize(string& text, const char* orig_text, uint32_t text_len, const char* locale)
 {
 #ifdef COSYVOICE_NO_ICU
     if (strip(orig_text, text_len))

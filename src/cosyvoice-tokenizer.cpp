@@ -75,7 +75,7 @@ struct llm_symbol {
 
 static_assert(std::is_trivially_copyable<llm_symbol>::value, "llm_symbol is not trivially copyable");
 
-template<typename T, typename Container = std::vector<T>, typename Compare = std::less<typename Container::value_type>>
+template<typename T, typename Container = vector<T>, typename Compare = std::less<typename Container::value_type>>
 class llm_priority_queue : public std::priority_queue<T, Container, Compare> {
 public:
     using std::priority_queue<T, Container, Compare>::priority_queue;
@@ -101,7 +101,7 @@ struct llm_bigram_bpe {
         }
     };
 
-    using queue_storage = std::vector<llm_bigram_bpe>;
+    using queue_storage = vector<llm_bigram_bpe>;
     using queue = llm_priority_queue<llm_bigram_bpe, queue_storage, comparator>;
     llm_symbol::index left;
     llm_symbol::index right;
@@ -112,15 +112,14 @@ struct llm_bigram_bpe {
 
 struct llm_tokenizer_bpe : llm_tokenizer {
     explicit llm_tokenizer_bpe(gguf_metadata_loader& loader)
-        : regex(loader.get_string("tokenizer.pre_tokenizer.regex")), splitter(regex) {}
+        : splitter(loader.get_string("tokenizer.pre_tokenizer.regex")) {}
 
-    std::string regex;
     unicode_regex_splitter splitter;
 };
 
 struct llm_tokenizer_bpe_scratch {
-    std::vector<llm_symbol> symbols;
-    std::vector<llm_symbol> symbols_final;
+    vector<llm_symbol> symbols;
+    vector<llm_symbol> symbols_final;
     llm_bigram_bpe::queue    work_queue;
 };
 
@@ -128,7 +127,7 @@ struct llm_tokenizer_bpe_session {
     llm_tokenizer_bpe_session(const cosyvoice_vocab& vocab, const llm_tokenizer_bpe& tokenizer, llm_tokenizer_bpe_scratch& scratch)
         : vocab(vocab), tokenizer(tokenizer), scratch(scratch) {}
 
-    void tokenize(const std::string_view& text, std::vector<int>& output) {
+    void tokenize(const std::string_view& text, vector<int>& output) {
         output.reserve(output.size() + text.size());
 
         const auto word_collection = tokenizer.splitter.split(text);
@@ -240,20 +239,20 @@ private:
 };
 
 struct cosyvoice_vocab::impl {
-    void partition_special_tokens(std::forward_list<fragment_buffer_variant>& buffer, bool parse_special) const;
+    void partition_special_tokens(forward_list<fragment_buffer_variant>& buffer, bool parse_special) const;
 
     std::unique_ptr<char[]> text_pool;
-    std::unordered_map<std::string_view, int> token_to_id;
-    std::vector<token_data>              id_to_token;
-    std::vector<int>                     cache_special_tokens;
-    std::unordered_map<std::pair<std::string_view, std::string_view>, int, pair_hash> bpe_ranks;
+    unordered_map<std::string_view, int> token_to_id;
+    vector<token_data>              id_to_token;
+    vector<int>                     cache_special_tokens;
+    unordered_map<std::pair<std::string_view, std::string_view>, int, pair_hash> bpe_ranks;
     std::unique_ptr<llm_tokenizer>       tokenizer;
 };
 
 cosyvoice_vocab::cosyvoice_vocab() : pimpl_(new impl()) {}
 cosyvoice_vocab::~cosyvoice_vocab() { if (get_ref_count() == 1) delete pimpl_; }
 
-void cosyvoice_vocab::impl::partition_special_tokens(std::forward_list<fragment_buffer_variant>& buffer, bool parse_special) const {
+void cosyvoice_vocab::impl::partition_special_tokens(forward_list<fragment_buffer_variant>& buffer, bool parse_special) const {
     for (const int special_id : cache_special_tokens) {
         const auto& data = id_to_token.at(special_id);
         const auto& text = data.text;
@@ -261,7 +260,7 @@ void cosyvoice_vocab::impl::partition_special_tokens(std::forward_list<fragment_
         if (!parse_special && data.type == TOKEN_TYPE_CONTROL) continue;
 
         // Split every raw-text fragment around matches for this special token.
-        std::forward_list<fragment_buffer_variant>::iterator it = buffer.begin();
+        forward_list<fragment_buffer_variant>::iterator it = buffer.begin();
         while (it != buffer.end()) {
             auto& fragment = (*it);
 
@@ -416,11 +415,11 @@ void cosyvoice_vocab::load(gguf_metadata_loader& loader) {
 
 void cosyvoice_vocab::tokenize(
     const std::string_view& raw_text,
-    std::vector<int>& output,
+    vector<int>& output,
     bool parse_special) const {
 
     output.clear();
-    std::forward_list<fragment_buffer_variant> fragment_buffer;
+    forward_list<fragment_buffer_variant> fragment_buffer;
 
     if (!raw_text.empty()) {
         fragment_buffer.emplace_front(raw_text, 0, raw_text.length());

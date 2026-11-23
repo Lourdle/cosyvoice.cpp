@@ -148,31 +148,7 @@ static const unicode_byte_to_utf8_table& unicode_byte_to_utf8_table_get() {
     return table;
 }
 
-static std::unordered_map<std::string, uint8_t> unicode_utf8_to_byte_map() {
-    std::unordered_map<std::string, uint8_t> map;
-    for (int ch = 0x21; ch <= 0x7E; ++ch) {  // u'!' to u'~'
-        assert(0 <= ch && ch < 256);
-        map[unicode_cpt_to_utf8(ch)] = ch;
-    }
-    for (int ch = 0xA1; ch <= 0xAC; ++ch) {  // u'¡' to u'¬'
-        assert(0 <= ch && ch < 256);
-        map[unicode_cpt_to_utf8(ch)] = ch;
-    }
-    for (int ch = 0xAE; ch <= 0xFF; ++ch) {  // u'®' to u'ÿ'
-        assert(0 <= ch && ch < 256);
-        map[unicode_cpt_to_utf8(ch)] = ch;
-    }
-    auto n = 0;
-    for (int ch = 0; ch < 256; ++ch) {
-        if (map.find(unicode_cpt_to_utf8(ch)) == map.end()) {
-            map[unicode_cpt_to_utf8(256 + n)] = ch;
-            ++n;
-        }
-    }
-    return map;
-}
-
-static inline std::wstring unicode_wstring_from_utf8(const std::string& s) {
+static inline std::wstring unicode_wstring_from_utf8(std::string_view s) {
 #if defined(__clang__)
     // disable C++17 deprecation warning for std::codecvt_utf8
 #    pragma clang diagnostic push
@@ -190,7 +166,7 @@ static inline std::wstring unicode_wstring_from_utf8(const std::string& s) {
 #    pragma GCC diagnostic pop
 #endif
 
-    return conv.from_bytes(s);
+    return conv.from_bytes(std::string(s));
 }
 
 static std::string pcre2_error_message(int error_code) {
@@ -232,9 +208,9 @@ static const std::map<int, std::string> k_ucat_map = {
 };
 
 struct unicode_regex_splitter::impl {
-    std::string regex;
+    string regex;
     bool use_collapsed = false;
-    std::string regex_expr_collapsed;
+    string regex_expr_collapsed;
     std::wstring wregex;
     pcre2_code_8*  code8  = nullptr;
     pcre2_code_16* code16 = nullptr;
@@ -245,7 +221,7 @@ struct unicode_regex_splitter::impl {
     }
 };
 
-static pcre2_code_8* compile_pcre2_8(const std::string& regex_expr) {
+static pcre2_code_8* compile_pcre2_8(const string& regex_expr) {
     int error_code = 0;
     PCRE2_SIZE error_offset = 0;
     pcre2_code_8* code = pcre2_compile_8(
@@ -283,11 +259,11 @@ static pcre2_code_16* compile_pcre2_16(const std::wstring& regex_expr) {
     return code;
 }
 
-unicode_regex_splitter::unicode_regex_splitter(const std::string& regex) : impl_(new impl()) {
+unicode_regex_splitter::unicode_regex_splitter(std::string_view regex) : impl_(new impl()) {
     impl_->regex = regex;
 
     for (const auto& ucat : k_ucat_enum) {
-        if (regex.find(ucat.first) != std::string::npos) {
+        if (regex.find(ucat.first) != std::string_view::npos) {
             impl_->use_collapsed = true;
             break;
         }
@@ -323,8 +299,8 @@ unicode_regex_splitter::unicode_regex_splitter(const std::string& regex) : impl_
                 regex[i + 2] == '{') {
                 // Find the closing brace
                 size_t closing_brace = regex.find('}', i + 3);
-                if (closing_brace != std::string::npos && closing_brace <= i + 10) { // reasonable limit
-                    const std::string pat = regex.substr(i, closing_brace - i + 1);
+                if (closing_brace != std::string_view::npos && closing_brace <= i + 10) { // reasonable limit
+                    const std::string pat(regex.substr(i, closing_brace - i + 1));
                     if (k_ucat_enum.find(pat) != k_ucat_enum.end()) {
                         if (!inside) {
                             impl_->regex_expr_collapsed += '[';
@@ -354,7 +330,7 @@ unicode_regex_splitter::unicode_regex_splitter(const std::string& regex) : impl_
 unicode_regex_splitter::~unicode_regex_splitter() = default;
 
 // use PCRE2 16-bit to split the text
-static std::vector<size_t> unicode_regex_split_pcre2_16(pcre2_code_16* code, const std::wstring& wtext, const std::vector<size_t>& offsets) {
+static vector<size_t> unicode_regex_split_pcre2_16(pcre2_code_16* code, const std::wstring& wtext, const vector<size_t>& offsets) {
     std::unique_ptr<pcre2_match_data_16, decltype(&pcre2_match_data_free_16)> match_data(
         pcre2_match_data_create_from_pattern_16(code, nullptr),
         pcre2_match_data_free_16);
@@ -363,7 +339,7 @@ static std::vector<size_t> unicode_regex_split_pcre2_16(pcre2_code_16* code, con
         throw std::runtime_error("Failed to allocate PCRE2 match data (16-bit)");
     }
 
-    std::vector<size_t> bpe_offsets; // store the offset of each word
+    vector<size_t> bpe_offsets; // store the offset of each word
     bpe_offsets.reserve(offsets.size()); // Reserve memory for the approximate size
 
     const PCRE2_UCHAR16* subject_base = nullptr;
@@ -434,7 +410,7 @@ static std::vector<size_t> unicode_regex_split_pcre2_16(pcre2_code_16* code, con
 }
 
 // use PCRE2 8-bit to split the text
-static std::vector<size_t> unicode_regex_split_pcre2_8(pcre2_code_8* code, const std::string& text, const std::vector<size_t>& offsets) {
+static vector<size_t> unicode_regex_split_pcre2_8(pcre2_code_8* code, const string& text, const vector<size_t>& offsets) {
     std::unique_ptr<pcre2_match_data_8, decltype(&pcre2_match_data_free_8)> match_data(
         pcre2_match_data_create_from_pattern_8(code, nullptr),
         pcre2_match_data_free_8);
@@ -443,7 +419,7 @@ static std::vector<size_t> unicode_regex_split_pcre2_8(pcre2_code_8* code, const
         throw std::runtime_error("Failed to allocate PCRE2 match data (8-bit)");
     }
 
-    std::vector<size_t> bpe_offsets; // store the offset of each word
+    vector<size_t> bpe_offsets; // store the offset of each word
     bpe_offsets.reserve(offsets.size()); // Reserve memory for the approximate size
 
     size_t start = 0;
@@ -505,13 +481,13 @@ static std::vector<size_t> unicode_regex_split_pcre2_8(pcre2_code_8* code, const
 // interface
 //
 
-std::string unicode_cpt_to_utf8(uint32_t cpt) {
+string unicode_cpt_to_utf8(uint32_t cpt) {
     char buf[4];
-    return std::string(buf, utf8_encode(cpt, buf));
+    return string(buf, utf8_encode(cpt, buf));
 }
 
-std::vector<uint32_t> unicode_cpts_from_utf8(const std::string_view& utf8) {
-    std::vector<uint32_t> result;
+vector<uint32_t> unicode_cpts_from_utf8(const std::string_view& utf8) {
+    vector<uint32_t> result;
     result.reserve(utf8.size());
     size_t offset = 0;
     while (offset < utf8.size()) {
@@ -533,21 +509,16 @@ unicode_cpt_flags unicode_cpt_flags_from_cpt(const uint32_t cpt) {
     return cpt < cpt_flags.size() ? cpt_flags[cpt] : undef;
 }
 
-std::string unicode_byte_to_utf8(uint8_t byte) {
-    return std::string(unicode_byte_to_utf8_table_get().view(byte));
+string unicode_byte_to_utf8(uint8_t byte) {
+    return string(unicode_byte_to_utf8_table_get().view(byte));
 }
 
-uint8_t unicode_utf8_to_byte(const std::string& utf8) {
-    static std::unordered_map<std::string, uint8_t> map = unicode_utf8_to_byte_map();
-    return map.at(utf8);
-}
-
-std::vector<std::string> unicode_regex_splitter::split(std::string_view text) const {
+vector<string> unicode_regex_splitter::split(std::string_view text) const {
     const auto cpts = unicode_cpts_from_utf8(text);
 
     // generate a "collapsed" representation of the text, where all codepoints are replaced by a single byte
     // ref: https://github.com/ggml-org/llama.cpp/pull/6920#issuecomment-2081479935
-    std::string text_collapsed;
+    string text_collapsed;
     if (impl_->use_collapsed) {
         // collapse all unicode categories
         text_collapsed.resize(cpts.size());
@@ -575,7 +546,7 @@ std::vector<std::string> unicode_regex_splitter::split(std::string_view text) co
         }
     }
 
-    std::vector<size_t> bpe_offsets = { cpts.size() };
+    vector<size_t> bpe_offsets = { cpts.size() };
 
     // fallback to general-purpose PCRE2 (8-bit / 16-bit)
     try {
@@ -603,9 +574,9 @@ std::vector<std::string> unicode_regex_splitter::split(std::string_view text) co
 
     // Encode the codepoints back to UTF-8 once and remember each codepoint's
     // byte offset, so the split words can be sliced without re-encoding.
-    std::string text_utf;
+    string text_utf;
     text_utf.reserve(text.size());
-    std::vector<size_t> byte_offsets(cpts.size() + 1);
+    vector<size_t> byte_offsets(cpts.size() + 1);
     for (size_t i = 0; i < cpts.size(); ++i) {
         byte_offsets[i] = text_utf.size();
         char buf[4];
@@ -615,7 +586,7 @@ std::vector<std::string> unicode_regex_splitter::split(std::string_view text) co
 
     const auto& byte_table = unicode_byte_to_utf8_table_get();
 
-    std::vector<std::string> bpe_encoded_words;
+    vector<string> bpe_encoded_words;
     bpe_encoded_words.reserve(bpe_offsets.size());
 
     size_t cp_start = 0;
@@ -629,7 +600,7 @@ std::vector<std::string> unicode_regex_splitter::split(std::string_view text) co
             encoded_len += byte_table.len[static_cast<uint8_t>(text_utf[i])];
         }
 
-        std::string encoded_token;
+        string encoded_token;
         encoded_token.reserve(encoded_len);
         for (size_t i = byte_start; i < byte_end; ++i) {
             encoded_token.append(byte_table.view(static_cast<uint8_t>(text_utf[i])));

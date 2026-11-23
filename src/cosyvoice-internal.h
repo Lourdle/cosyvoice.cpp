@@ -7,6 +7,7 @@
 #include "cosyvoice.h"
 #include "cosyvoice-lowlevel.h"
 #include "cosyvoice-interface.h"
+#include "cosyvoice-memory.h"
 
 #include <vector>
 #include <utility>
@@ -132,7 +133,7 @@ struct cosyvoice_prompt_speech
 
 struct cosyvoice_prompt
 {
-    std::vector<int> prompt_text;
+    vector<int> prompt_text;
     tokens_t orig_prompt_text;
     tokens_t llm_prompt_speech_tokens;
     tokens_t flow_prompt_speech_tokens;
@@ -166,11 +167,11 @@ struct cosyvoice_tokenization_result_impl : cosyvoice_tokenization_result {
     int* get_tokens() { return tokens.data(); }
     uint32_t get_n_tokens() { return static_cast<uint32_t>(tokens.size()); }
 
-    std::vector<int> tokens;
+    vector<int> tokens;
 };
 
 bool cosyvoice_frontend_util_text_normalize(
-    std::string& text,
+    string& text,
     const char* orig_text,
     uint32_t text_len,
     const char* locale

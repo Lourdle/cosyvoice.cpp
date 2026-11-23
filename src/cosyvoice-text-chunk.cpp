@@ -37,7 +37,7 @@ inline bool match_at(std::string_view text, std::size_t pos, std::string_view pa
 
 inline bool is_ws(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
-inline void emit_trimmed(std::vector<std::string_view>& out, std::string_view text, std::size_t lo, std::size_t hi)
+inline void emit_trimmed(vector<std::string_view>& out, std::string_view text, std::size_t lo, std::size_t hi)
 {
     while (lo < hi && is_ws(text[lo])) ++lo;
     while (hi > lo && is_ws(text[hi - 1])) --hi;
@@ -47,9 +47,9 @@ inline void emit_trimmed(std::vector<std::string_view>& out, std::string_view te
 
 }  // namespace
 
-std::vector<std::string_view> split_into_fragments(std::string_view text)
+vector<std::string_view> split_into_fragments(std::string_view text)
 {
-    std::vector<std::string_view> fragments;
+    vector<std::string_view> fragments;
     if (text.empty())
         return fragments;
 
@@ -96,16 +96,16 @@ std::vector<std::string_view> split_into_fragments(std::string_view text)
     return fragments;
 }
 
-std::vector<std::string> reassemble_by_token_budget(
-    const std::vector<std::string_view>& fragments,
+vector<string> reassemble_by_token_budget(
+    const vector<std::string_view>& fragments,
     std::size_t max_tokens,
     const token_count_fn& count)
 {
-    std::vector<std::string> chunks;
+    vector<string> chunks;
     if (fragments.empty() || max_tokens == 0)
         return chunks;
 
-    std::string current;
+    string current;
     std::size_t current_tokens = 0;
     for (const auto& fragment : fragments)
     {
@@ -125,15 +125,15 @@ std::vector<std::string> reassemble_by_token_budget(
     return chunks;
 }
 
-std::vector<std::vector<int>> reassemble_by_token_budget(
-    std::vector<std::vector<int>>& fragment_tokens,
+vector<vector<int>> reassemble_by_token_budget(
+    vector<vector<int>>& fragment_tokens,
     std::size_t max_tokens)
 {
-    std::vector<std::vector<int>> chunks;
+    vector<vector<int>> chunks;
     if (fragment_tokens.empty() || max_tokens == 0)
         return chunks;
 
-    std::vector<int> current;
+    vector<int> current;
     for (auto& tokens : fragment_tokens)
         if (current.size() != 0 && current.size() + tokens.size() > max_tokens)
         {

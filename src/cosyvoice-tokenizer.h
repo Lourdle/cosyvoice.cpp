@@ -15,7 +15,7 @@ public:
     ~cosyvoice_vocab();
 
     void load(gguf_metadata_loader& loader);
-    void tokenize(const std::string_view& raw_text, std::vector<int>& output, bool parse_special = false) const;
+    void tokenize(const std::string_view& raw_text, vector<int>& output, bool parse_special = false) const;
     int text_to_token(std::string_view text) const;
     int find_bpe_rank(std::string_view token_left, std::string_view token_right) const;
 
