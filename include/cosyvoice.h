@@ -375,6 +375,34 @@ struct cosyvoice_context_params_v4_cpp : cosyvoice_context_params_v3_cpp
 COSYVOICE_API uint32_t cosyvoice_generate_random_seed();
 
 // ----------------------------------------------------------------------------
+// Runtime Initialization API
+// ----------------------------------------------------------------------------
+
+/**
+ * @brief Process-wide runtime options.
+ *
+ * Future versions append new fields at the end of this struct instead of introducing
+ * versioned variants. Callers pass `sizeof` their own struct to `cosyvoice_init_runtime()`;
+ * the size identifies the struct version the caller was built against, and fields introduced
+ * by newer versions fall back to their defaults.
+ */
+typedef struct cosyvoice_runtime_params
+{
+    uint64_t memory_pool_bytes; ///< Size in bytes of the preallocated memory pool. 0 disables the pool.
+} cosyvoice_runtime_params_t;
+
+/**
+ * @brief Initialize process-wide runtime options.
+ * @param params Optional runtime parameters. When null, `COSYVOICE_MEMORY_POOL_BYTES` is used and `params_size` is ignored.
+ * @param params_size Size of the struct `params` points to, in bytes. Pass `sizeof(cosyvoice_runtime_params_t)`. Must match the size of a released struct version; any other value is rejected. Ignored when `params` is null.
+ * @return True on success; false when the configuration is invalid, the runtime was already initialized, or pooled containers have already allocated.
+ * @note Call before loading models or tokenizers. The runtime can be initialized only once per process.
+ * @note `COSYVOICE_MEMORY_POOL_BYTES` is applied when the library is loaded and takes precedence over a later call.
+ * @note An unrecognized `params_size` is a caller error: it is rejected with a warning without consuming the one-time initialization.
+ */
+COSYVOICE_API bool cosyvoice_init_runtime(const cosyvoice_runtime_params_t* params, size_t params_size);
+
+// ----------------------------------------------------------------------------
 // Backend Initialization API
 // ----------------------------------------------------------------------------
 
