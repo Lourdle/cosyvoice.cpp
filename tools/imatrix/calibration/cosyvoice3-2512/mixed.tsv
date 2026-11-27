@@ -1,0 +1,136 @@
+﻿# Mixed-language samples.
+# zs = Chinese-dominant zero-shot (simplified, HK and TW traditional).
+# xl = cross-lingual (non-Chinese dominant, or mixed without a Chinese sentence).
+#
+# Simplified Chinese + English / other languages.
+zs	我用 Python 写了个脚本，自动从 GitHub 上下载数据。
+zs	这个 API 要传一个 access token，你先去后台生成一个。
+zs	你能不能帮我看看这个 Kubernetes 的配置？pod 一直起不来。
+zs	我们团队现在用 Slack 沟通，文档都放在 Notion 上。
+zs	他在 Zoom 上开了一下午的会，嗓子都哑了。
+zs	这台 iPhone 的电池健康度只剩 78% 了。
+zs	我在 App Store 里搜了半天，也没找到这个应用。
+zs	最近 ChatGPT 出了新模型，写代码比以前强多了。
+zs	用 Docker 跑一下这个服务，记得把端口映射出来。
+zs	这块 GPU 的显存不够，跑不了这么大的 batch。
+zs	我周末在 Steam 上买了个新游戏，结果玩了一整天。
+zs	她在 Netflix 上追完了整季《怪奇物语》。
+zs	这首歌在 Spotify 上的播放量已经破亿了。
+zs	我们公司用 OKR 管理目标，每个季度 review 一次。
+zs	这个 bug 我在 Jira 上开了个 issue，你去看一下。
+zs	我们的 CI/CD pipeline 又挂了，得查一下 log。
+zs	这台 MacBook 的 SSD 读写速度很快。
+zs	这个月的 KPI 完成得怎么样？
+zs	我在 Coursera 上报了一门 machine learning 的课。
+zs	他用 Figma 做了个原型，你看看效果。
+zs	我昨天在淘宝上买了个机械键盘，手感不错。
+zs	我们约在楼下的 Starbucks 见吧。
+zs	这条视频在 Bilibili 上有中文字幕。
+zs	我用 VS Code 写代码，插件装了一大堆。
+zs	记得把 VPN 关掉，不然访问不了内网。
+zs	我们家的 router 又断网了，重启一下试试。
+zs	这个 dataset 有一百万条记录，用 pandas 处理一下。
+zs	他把项目传到 GitLab 了，你自己 clone 一下。
+zs	这个月的 AWS 账单有点高，看看哪里超了。
+zs	她用 Notion 管理自己的读书笔记。
+# Traditional Chinese (Hong Kong) + English.
+zs	我用 Python 寫咗個 script，自動由 GitHub 下載數據。
+zs	呢個 API 要傳個 access token，你去後台 generate 一個先。
+zs	我們團隊用 Slack 溝通，文件都放喺 Notion。
+zs	佢喺 Zoom 開咗成個下晝會，把聲都沙埋。
+zs	呢部 iPhone 嘅電池健康度只剩 78%。
+zs	我喺 App Store 搵咗陣，都搵唔到呢個 app。
+zs	用 Docker 跑呢個 service，記得 map 返個 port。
+zs	呢張 GPU 嘅 VRAM 唔夠，跑唔到咁大個 batch。
+zs	我週末喺 Steam 買咗隻新 game，結果玩咗成日。
+zs	呢個 bug 我喺 Jira 開咗個 issue。
+# Traditional Chinese (Taiwan) + English.
+zs	我用 Python 寫了一個腳本，自動從 GitHub 下載資料。
+zs	這個 API 要傳一個 access token，你先去後台產生一個。
+zs	我們團隊用 Slack 溝通，文件都放在 Notion 上。
+zs	他在 Zoom 上開了一下午的會，聲音都啞了。
+zs	這支 iPhone 的電池健康度只剩 78% 了。
+zs	我在 App Store 找了一下，沒找到這個應用程式。
+zs	用 Docker 跑一下這個服務，記得把連接埠對應出來。
+zs	這張 GPU 的顯示記憶體不夠，跑不了這麼大的 batch。
+zs	我週末在 Steam 買了新遊戲，結果玩了一整天。
+zs	這個 bug 我在 Jira 上開了一個 issue。
+# Simplified Chinese + Japanese / Korean / European languages.
+zs	我们下一站去 東京 的 浅草寺，然后坐新干线去 大阪。
+zs	她最喜欢 宮崎駿 的《千と千尋の神隠し》，看了不下十遍。
+zs	他用法语对我说 "Bonjour, comment ça va ?"，我愣了一下才反应过来。
+zs	她用韩语说了句 "감사합니다"，发音还挺标准的。
+zs	我们明年去 Москва（莫斯科）看红场。
+zs	他在 柏林 学会的第一句德语是 "Guten Tag"。
+zs	她用西班牙语说 "Muchas gracias"，然后笑着走了。
+zs	我们去了 京都 的 金閣寺，还在 祇園 吃了 和果子。
+zs	他在 서울 的 明洞 买了很多化妆品。
+zs	这首歌是 米津玄師 的《Lemon》，我在日本的时候天天听。
+zs	她推荐我看《Le Petit Prince》，说原版比译本更有味道。
+zs	我们公司在 東京 有分公司，下个月可能要去出差。
+zs	他在 釜山 吃的 海鲜煎饼 比 首尔 的还正宗。
+zs	她用俄语说了句 "Спасибо"，我差点没听出来。
+zs	这家店的 paella 很正宗，老板是 Valencia 人。
+# English + other languages.
+xl	We had tapas and paella at a small restaurant in Madrid.
+xl	She said "Danke schön" and waved goodbye at the station.
+xl	Our trip to München was amazing — the Oktoberfest was packed.
+xl	I ordered a café au lait at a tiny bistro near the Louvre.
+xl	He quoted Dante: "Nel mezzo del cammin di nostra vita..."
+xl	The sushi in 東京 was the best I've ever had.
+xl	We took the Shinkansen from 東京 to 大阪 in about two and a half hours.
+xl	My friend from 北京 taught me how to say "谢谢" properly.
+xl	At the Korean restaurant, the waiter greeted us with "안녕하세요".
+xl	The menu had "Bruschetta" and "Spaghetti Carbonara" in Italian.
+xl	The church in Москва was breathtaking, especially at sunset.
+xl	She read "Le Petit Prince" in the original French.
+# Japanese + English / Korean / Chinese.
+xl	昨日はスマホで YouTube を見ながら、コンビニで買ったおにぎりを食べました。
+xl	週末に Netflix で韓国ドラマを一気に見ました。
+xl	東京から大阪まで新幹線で行って、大阪でたこ焼きを食べました。
+xl	彼は「谢谢」と中国語で言って、笑いました。
+xl	会社の会議は Zoom で行いました。
+xl	彼女は BTS のファンで、毎日 YouTube で動画を見ています。
+xl	パリのカフェで croissant を食べながら、のんびり過ごしました。
+xl	ドイツの München で Oktoberfest に参加しました。
+xl	私は Coursera で Python のコースを受けています。
+xl	ソウルの明洞で化粧品をたくさん買いました。
+# Korean + English / Japanese.
+xl	어제 카카오톡으로 친구에게 메시지를 보냈어요.
+xl	주말에 유튜브로 한국 드라마를 봤어요.
+xl	그는 "ありがとう"라고 일본어로 말했어요.
+xl	우리는 도쿄에서 신칸센을 타고 오사카로 갔어요.
+xl	회사 회의는 Zoom으로 진행했습니다.
+xl	파리에서 croissant와 커피를 먹었어요.
+xl	뮌헨에서 Oktoberfest에 참가했어요.
+xl	저는 Coursera에서 Python 강의를 듣고 있어요.
+# German + English / French / Japanese.
+xl	Heute haben wir ein Meeting mit dem Team aus London.
+xl	Ich habe mein Handy im Büro vergessen.
+xl	In Straßburg habe ich einen café au lait getrunken und Croissants gegessen.
+xl	Am Wochenende schauen wir eine Serie auf Netflix.
+xl	Er sagte "ありがとう" und lächelte höflich.
+xl	In 東京 haben wir die berühmte Shibuya-Kreuzung gesehen.
+# Spanish + English / Italian / Korean.
+xl	Ayer hice una videollamada por Zoom con el equipo de Berlín.
+xl	En Roma pedimos una pizza margherita y un espresso.
+xl	El fin de semana vimos una serie en Netflix.
+xl	Mi amigo de Tokio me enseñó a decir "ありがとう".
+xl	En el restaurante coreano nos saludaron con "안녕하세요".
+# French + English / German / Italian.
+xl	J'ai envoyé un e-mail à l'équipe de Berlin.
+xl	Le week-end dernier, nous avons regardé un film sur Netflix.
+xl	À la gare de Berlin, j'ai demandé : « Wo ist der Ausgang ? »
+xl	Nous avons dîné dans un restaurant italien et commandé un espresso.
+xl	Mon collègue de Tokyo arrive la semaine prochaine.
+# Italian + English / Spanish.
+xl	Ieri ho fatto una videochiamata su Zoom con il team di Berlino.
+xl	A Barcellona abbiamo mangiato tapas y paella.
+xl	Nel weekend abbiamo guardato una serie su Netflix.
+xl	Il mio collega di Tokyo arriva la settimana prossima.
+# Russian + English / German / Chinese.
+xl	Вчера я отправил email команде в Берлине.
+xl	На выходных мы смотрели сериал на Netflix.
+xl	В Берлине я купил Bratwurst и Kartoffelsalat.
+xl	Мой коллега из Токио приезжает на следующей неделе.
+xl	Он сказал "谢谢" и вежливо попрощался.
