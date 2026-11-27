@@ -1,0 +1,15 @@
+{
+    "decoder\\.estimator\\.norm_out\\.linear\\.weight": "Q6_K",
+    "decoder\\.estimator\\.time_embed\\.time_mlp\\.0\\.weight": "Q4_K",
+    "decoder\\.estimator\\.time_embed\\.time_mlp\\.2\\.weight": "Q5_K",
+    "decoder\\.estimator\\.transformer_blocks\\..*\\.attn\\.to_out\\.0\\.weight": "Q5_K",
+    "decoder\\.estimator\\.transformer_blocks\\..*\\.attn\\.to_v\\.weight": "Q5_K",
+    "decoder\\.estimator\\.transformer_blocks\\..*\\.attn_norm\\.linear\\.weight": "IQ4_NL",
+    "decoder\\.estimator\\.transformer_blocks\\.[01]\\.ff\\.ff\\.2\\.weight": "Q4_K",
+    "embed_tokens\\.weight": "Q5_0",
+    "layers\\.[0-2]\\.mlp\\.down_proj\\.weight": "IQ4_NL",
+    "layers\\..*\\.self_attn\\.o_proj\\.weight": "IQ4_XS",
+    "layers\\..*\\.self_attn\\.v_proj\\.weight": "Q5_K",
+    "llm_decoder\\.weight": "Q6_K",
+    "speech_embedding\\.weight": "Q5_0"
+}

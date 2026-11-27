@@ -1,9 +1,10 @@
-#ifdef _MSC_VER
+﻿#ifdef _MSC_VER
     #define _CRT_SECURE_NO_WARNINGS
 #endif
 
 #include "tool_common.h"
 #include "gguf_parser.h"
+#include "imatrix.h"
 
 #include <cstring>
 #include <cinttypes>
@@ -98,6 +99,8 @@ enum OptionID {
     OPT_TYPE,
     OPT_CUSTOM_STRING,
     OPT_TENSOR_MAP,
+    OPT_IMATRIX,
+    OPT_IMATRIX_FORMAT,
     OPT_COUNT
 };
 
@@ -112,9 +115,11 @@ static const OptionDef s_options[OPT_COUNT] = {
     { "--help",         'h', 0, "Show this help message and exit." },
     { "--file",         'f', 1, "Input GGUF file path." },
     { "--output-file",  'o', 1, "Output GGUF file path." },
-    { "--type",         't', 1, "Default quantization type. Supported: F16, Q8_0, Q5_0, Q5_1, Q4_0, Q4_1, MXFP4, Q6_K, Q5_K, Q4_K, Q3_K, Q2_K, Q2_0, Q1_0, F8_E4M3, COPY." },
+    { "--type",         't', 1, "Default quantization type. Supported: F16, Q8_0, Q5_0, Q5_1, Q4_0, Q4_1, MXFP4, Q6_K, Q5_K, Q4_K, Q3_K, Q2_K, Q2_0, Q1_0, F8_E4M3, IQ4_NL, IQ4_XS, IQ3_S, IQ3_XXS, IQ2_S, IQ2_XS, IQ2_XXS, IQ1_S, IQ1_M, COPY." },
     { "--custom-string",'c', 2, "Custom metadata key-value pair (repeatable). Usage: -c <key> <value>" },
     { "--tensor-map",   'M', 1, "JSON file mapping tensor name regex to quantization type. Unlisted tensors use --type default." },
+    { "--imatrix",      'I', 1, "Importance-matrix GGUF file used by IQ quantization types. Required for IQ1/IQ2/IQ3 types." },
+    { "--imatrix-format", 'F', 1, "Importance-matrix layout: 'native' (default) or 'llama' (llama.cpp's <name>.in_sum2/<name>.counts format)." },
 };
 
 static void print_help(const char* program)
@@ -133,6 +138,7 @@ static void print_help(const char* program)
     printf("\nExamples:\n");
     printf("  %s -f model.gguf -o model-q4k.gguf -t Q4_K\n", program);
     printf("  %s -f model.gguf -o model-partial.gguf -t COPY -M tensor_map.json\n", program);
+    printf("  %s -f model.gguf -o model-iq3xxs.gguf -t IQ3_XXS -M tensor_map.json -I imatrix.gguf\n", program);
     printf("  %s -f model.gguf -o model-with-meta.gguf -t Q4_K -c general.quantized_by Lourdle\n", program);
 }
 
@@ -153,8 +159,32 @@ static ggml_ftype parse_ftype(const char* s)
     if (str_casecmp(s, "Q2_0") == 0) return GGML_FTYPE_MOSTLY_Q2_0;
     if (str_casecmp(s, "Q1_0") == 0) return GGML_FTYPE_MOSTLY_Q1_0;
     if (str_casecmp(s, "F8_E4M3") == 0) return GGML_FTYPE_MOSTLY_F8_E4M3;
+    if (str_casecmp(s, "IQ4_NL") == 0) return GGML_FTYPE_MOSTLY_IQ4_NL;
+    if (str_casecmp(s, "IQ4_XS") == 0) return GGML_FTYPE_MOSTLY_IQ4_XS;
+    if (str_casecmp(s, "IQ3_S") == 0) return GGML_FTYPE_MOSTLY_IQ3_S;
+    if (str_casecmp(s, "IQ3_XXS") == 0) return GGML_FTYPE_MOSTLY_IQ3_XXS;
+    if (str_casecmp(s, "IQ2_S") == 0) return GGML_FTYPE_MOSTLY_IQ2_S;
+    if (str_casecmp(s, "IQ2_XS") == 0) return GGML_FTYPE_MOSTLY_IQ2_XS;
+    if (str_casecmp(s, "IQ2_XXS") == 0) return GGML_FTYPE_MOSTLY_IQ2_XXS;
+    if (str_casecmp(s, "IQ1_S") == 0) return GGML_FTYPE_MOSTLY_IQ1_S;
+    if (str_casecmp(s, "IQ1_M") == 0) return GGML_FTYPE_MOSTLY_IQ1_M;
     if (str_casecmp(s, "COPY") == 0) return GGML_FTYPE_UNKNOWN;
     return static_cast<ggml_ftype>(-2);
+}
+
+static bool parse_imatrix_format(const char* s, imatrix_format& format)
+{
+    if (str_casecmp(s, "native") == 0 || str_casecmp(s, "default") == 0)
+    {
+        format = imatrix_format::native;
+        return true;
+    }
+    if (str_casecmp(s, "llama") == 0 || str_casecmp(s, "llama.cpp") == 0)
+    {
+        format = imatrix_format::llama;
+        return true;
+    }
+    return false;
 }
 
 static ggml_type get_fallback_type(ggml_type type, int64_t ne)
@@ -181,8 +211,39 @@ static ggml_type get_fallback_type(ggml_type type, int64_t ne)
         return get_fallback_type(GGML_TYPE_Q5_1, ne);
     case GGML_TYPE_Q6_K:
         return get_fallback_type(GGML_TYPE_Q8_0, ne);
+    case GGML_TYPE_IQ1_S:
+    case GGML_TYPE_IQ1_M:
+    case GGML_TYPE_IQ2_XXS:
+    case GGML_TYPE_IQ2_XS:
+    case GGML_TYPE_IQ2_S:
+    case GGML_TYPE_IQ3_XXS:
+    case GGML_TYPE_IQ3_S:
+    case GGML_TYPE_IQ4_XS:
+        return get_fallback_type(GGML_TYPE_IQ4_NL, ne);
+    case GGML_TYPE_IQ4_NL:
+        return GGML_TYPE_F16;
     default:
         GGML_ABORT("get_fallback_type: unsupported type %s", ggml_type_name(type));
+    }
+}
+
+// IQ quantization types whose quality relies on an importance matrix. ggml's
+// quantizer only hard-asserts for IQ2_XXS/IQ2_XS/IQ1_S, so the remaining types
+// are enforced here as well.
+static bool requires_imatrix(ggml_type type)
+{
+    switch (type)
+    {
+    case GGML_TYPE_IQ1_S:
+    case GGML_TYPE_IQ1_M:
+    case GGML_TYPE_IQ2_XXS:
+    case GGML_TYPE_IQ2_XS:
+    case GGML_TYPE_IQ2_S:
+    case GGML_TYPE_IQ3_XXS:
+    case GGML_TYPE_IQ3_S:
+        return true;
+    default:
+        return false;
     }
 }
 
@@ -292,18 +353,20 @@ int tool_entry(int argc, char** argv)
     char* input = nullptr;
     char* output = nullptr;
     char* tensor_map_path = nullptr;
+    char* imatrix_path = nullptr;
+    imatrix_format imatrix_fmt = imatrix_format::native;
     ggml_ftype default_ftype = static_cast<ggml_ftype>(-2);
     std::map<std::string, std::string> custom_strings;
 
     auto get_required_arg = [&](int& i, const char* opt_name) -> const char*
-    {
-        if (++i >= argc)
         {
-            fprintf(stderr, "Error: option \"%s\" requires an argument.\n", opt_name);
-            exit(1);
-        }
-        return argv[i];
-    };
+            if (++i >= argc)
+            {
+                fprintf(stderr, "Error: option \"%s\" requires an argument.\n", opt_name);
+                exit(1);
+            }
+            return argv[i];
+        };
 
     for (int i = 1; i < argc; i++)
     {
@@ -358,6 +421,16 @@ int tool_entry(int argc, char** argv)
                 case OPT_TENSOR_MAP:
                     tensor_map_path = const_cast<char*>(v);
                     break;
+                case OPT_IMATRIX:
+                    imatrix_path = const_cast<char*>(v);
+                    break;
+                case OPT_IMATRIX_FORMAT:
+                    if (!parse_imatrix_format(v, imatrix_fmt))
+                    {
+                        fprintf(stderr, "Error: unsupported importance-matrix format \"%s\" (expected \"native\" or \"llama\").\n", v);
+                        return 1;
+                    }
+                    break;
                 default:
                     break;
                 }
@@ -411,46 +484,61 @@ int tool_entry(int argc, char** argv)
             return 1;
     }
 
+    // Load the importance matrix
+    imatrix_data imatrix;
+    if (imatrix_path)
+    {
+        std::string imatrix_error;
+        imatrix_info imatrix_info = {};
+        if (!load_imatrix(imatrix_path, imatrix, &imatrix_info, imatrix_error, imatrix_fmt))
+        {
+            fprintf(stderr, "Error: %s.\n", imatrix_error.c_str());
+            return 1;
+        }
+        printf("Loaded importance statistics for %zu tensors from \"%s\" (%u chunks).\n",
+            imatrix.size(), imatrix_path, imatrix_info.chunk_count);
+    }
+
     // Resolve ftype per tensor:
     //   1. Literal (exact) patterns take priority over regex patterns.
     //   2. Among regex patterns, the longest textual pattern wins (most specific).
     //   3. Ties broken by JSON insertion order.
     auto resolve_ftype = [&](const char* name) -> ggml_ftype
-    {
-        int best = -1;
-        bool best_is_literal = false;
-        size_t best_len = 0;
-        for (int i = 0; i < static_cast<int>(tensor_map.size()); i++)
         {
-            if (!match_tensor_name(tensor_map[i].code.get(), name))
-                continue;
-            auto& entry = tensor_map[i];
-            // Literal always beats regex
-            if (!best_is_literal && entry.is_literal)
+            int best = -1;
+            bool best_is_literal = false;
+            size_t best_len = 0;
+            for (int i = 0; i < static_cast<int>(tensor_map.size()); i++)
             {
-                best = i;
-                best_is_literal = true;
-                best_len = entry.pattern.size();
-                continue;
+                if (!match_tensor_name(tensor_map[i].code.get(), name))
+                    continue;
+                auto& entry = tensor_map[i];
+                // Literal always beats regex
+                if (!best_is_literal && entry.is_literal)
+                {
+                    best = i;
+                    best_is_literal = true;
+                    best_len = entry.pattern.size();
+                    continue;
+                }
+                if (entry.is_literal)
+                    continue; // already have a literal, can't beat
+                if (best_is_literal)
+                    continue; // literal already won
+                // Both are regex: prefer longer pattern
+                if (best < 0 || entry.pattern.size() > best_len)
+                {
+                    best = i;
+                    best_len = entry.pattern.size();
+                }
             }
-            if (entry.is_literal)
-                continue; // already have a literal, can't beat
-            if (best_is_literal)
-                continue; // literal already won
-            // Both are regex: prefer longer pattern
-            if (best < 0 || entry.pattern.size() > best_len)
+            if (best >= 0)
             {
-                best = i;
-                best_len = entry.pattern.size();
+                tensor_map[best].matched = true;
+                return tensor_map[best].ftype;
             }
-        }
-        if (best >= 0)
-        {
-            tensor_map[best].matched = true;
-            return tensor_map[best].ftype;
-        }
-        return default_ftype;
-    };
+            return default_ftype;
+        };
 
     // Store tensor info: name, output type, dimensions, and data pointer.
     // Data pointer initially points into the mmap region for all tensors.
@@ -460,6 +548,7 @@ int tool_entry(int argc, char** argv)
         ggml_type type;
         bool need_to_quantize = false;
         std::array<int64_t, GGML_MAX_DIMS> ne;
+        const float* importance = nullptr;
         TensorData data;
     };
 
@@ -512,6 +601,27 @@ int tool_entry(int argc, char** argv)
                 if (cur_type != target_type)
                     printf("Warning: tensor \"%s\"'s ne0 is %" PRId64 ", not divisible by block size of %s, rolling back to %s.\n",
                         tensor_name, tensor->ne[0], ggml_type_name(target_type), ggml_type_name(cur_type));
+
+                const float* importance = nullptr;
+                if (auto it = imatrix.find(tensor_name); it != imatrix.end())
+                {
+                    if (static_cast<int64_t>(it->second.size()) != tensor->ne[0])
+                    {
+                        fprintf(stderr, "Error: the importance matrix for tensor \"%s\" has %zu columns, but the tensor has %" PRId64 ".\n",
+                            tensor_name, it->second.size(), tensor->ne[0]);
+                        return 1;
+                    }
+                    importance = it->second.data();
+                }
+                if (requires_imatrix(cur_type) && !importance)
+                {
+                    fprintf(stderr, "Error: tensor \"%s\" is quantized to %s, which requires an importance matrix, but no statistics were found for it%s.\n",
+                        tensor_name, ggml_type_name(cur_type),
+                        imatrix_path ? " in the provided file; collect them with the cosyvoice-imatrix tool" : "; pass --imatrix <file>");
+                    return 1;
+                }
+                entry.importance = importance;
+
                 // Direct mmap pointer — zero-copy. Will be swapped after quantization.
                 entry.data.view(reinterpret_cast<char*>(tensor->data));
                 entry.data.nbytes = ggml_nbytes(tensor);
@@ -548,37 +658,38 @@ int tool_entry(int argc, char** argv)
         std::atomic_size_t processed_parameters = 0;
 
         auto worker_thread = [&](auto report_progress)
-        {
-            auto iter = tensors.begin();
-            size_t last = 0;
-            for (;;)
             {
-                size_t cur = idx++;
-                if (cur >= tensors.size())
-                    break;
-                std::advance(iter, cur - last);
-                last = cur;
-                if (!iter->second.need_to_quantize)
-                    continue;
-                auto& td = iter->second.data;
-                auto& type = iter->second.type;
-                auto& ne = iter->second.ne;
-                auto n_rows = ne[1] * ne[2] * ne[3];
-                const auto nbytes = ggml_row_size(type, ne[0]) * n_rows;
-                auto quantized = std::make_unique<char[]>(nbytes);
-                ggml_quantize_chunk(type, reinterpret_cast<float*>(td.data()), quantized.get(), 0, n_rows, ne[0], nullptr);
-                td.adopt(std::move(quantized));
-                td.nbytes = nbytes;
-                processed_parameters += ne[0] * n_rows;
-                report_progress();
-            }
-        };
+                auto iter = tensors.begin();
+                size_t last = 0;
+                for (;;)
+                {
+                    size_t cur = idx++;
+                    if (cur >= tensors.size())
+                        break;
+                    std::advance(iter, cur - last);
+                    last = cur;
+                    if (!iter->second.need_to_quantize)
+                        continue;
+                    auto& td = iter->second.data;
+                    auto& type = iter->second.type;
+                    auto& ne = iter->second.ne;
+                    auto importance = iter->second.importance;
+                    auto n_rows = ne[1] * ne[2] * ne[3];
+                    const auto nbytes = ggml_row_size(type, ne[0]) * n_rows;
+                    auto quantized = std::make_unique<char[]>(nbytes);
+                    ggml_quantize_chunk(type, reinterpret_cast<float*>(td.data()), quantized.get(), 0, n_rows, ne[0], importance);
+                    td.adopt(std::move(quantized));
+                    td.nbytes = nbytes;
+                    processed_parameters += ne[0] * n_rows;
+                    report_progress();
+                }
+            };
 
         auto report_progress = [&]()
-        {
-            auto n_processed = processed_parameters.load();
-            printf("\rQuantized %zu / %zu parameters (%.2f%%)", n_processed, static_cast<size_t>(n_parameters), 100.0 * n_processed / n_parameters);
-        };
+            {
+                auto n_processed = processed_parameters.load();
+                printf("\rQuantized %zu / %zu parameters (%.2f%%)", n_processed, static_cast<size_t>(n_parameters), 100.0 * n_processed / n_parameters);
+            };
 
         for (auto j = 0u; j != n_threads; ++j)
             threads[j] = j == 0 ? std::thread(worker_thread, report_progress) : std::thread(worker_thread, []() {});
