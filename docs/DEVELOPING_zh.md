@@ -4,7 +4,7 @@
 
 ## 入口约定：使用 `tool_entry`，禁止写 `main`
 
-本仓库中的每个可执行程序——工具（`tools/cli`、`tools/server`、`tools/quantize`）与测试（`tests/`）——都必须实现
+本仓库中的每个可执行程序——工具（`tools/cli`、`tools/imatrix`、`tools/server`、`tools/quantize`）与测试（`tests/`）——都必须实现
 
 ```cpp
 int tool_entry(int argc, char** argv);
@@ -35,7 +35,7 @@ target_link_libraries(my-tool PRIVATE cosyvoice common tools_common ggml)
 target_include_directories(my-tool PRIVATE ../include)
 ```
 
-- 工具放在 `tools/<name>/` 下，各带自己的 `CMakeLists.txt`（参考 `tools/cli/CMakeLists.txt`、`tools/quantize/CMakeLists.txt`、`tools/server/CMakeLists.txt`）。
+- 工具放在 `tools/<name>/` 下，各带自己的 `CMakeLists.txt`。`tools/CMakeLists.txt` 会自动发现所有包含 `CMakeLists.txt` 的子目录，因此新增或删除工具目录时无需修改它。使用 Makefile 与 Ninja 生成器时，新目录会在构建时自动被发现（`CONFIGURE_DEPENDS`）；Visual Studio 生成器在新增或删除这类目录后需要手动重新运行一次 configure。链接 `cosyvoice` 运行时的工具命名为 `cosyvoice-<名称>`（`cosyvoice-cli`、`cosyvoice-server`、`cosyvoice-imatrix`）；只依赖 `ggml`/`common` 的通用工具保持原名（如 `quantize`）。
 - 测试放在 `tests/` 下，由 `COSYVOICE_BUILD_TESTS` 开关控制（见 `tests/CMakeLists.txt` 与 [tests/README.md](../tests/README.md)）。
 - `cosyvoice` 是核心推理库。`common` 是**本仓库自己的**共享辅助库（`common/`）：包含 `gguf_parser` GGUF 解析器、`file_mmap`，以及 UTF-8 感知的 `open_ifstream_utf8()` / `open_ofstream_utf8()` / `utf8_to_wstr()`；它公开链接 `ggml`（`common/CMakeLists.txt`）。工具直接使用这些符号——`quantize` 调用 `gguf_parser` / `file_mmap` / `open_ifstream_utf8`（`tools/quantize/quantize.cpp`），CLI 调用 `open_ifstream_utf8`（`tools/cli/cosyvoice-cli.cpp`），且 `tool_common.h` 本身 `#include "common.h"`——因此新可执行目标应同时链接 `cosyvoice` 与 `common`。
 - 主项目默认以 `BUILD_SHARED_LIBS=ON` 构建；工具链接共享的 `cosyvoice` 库，因此头文件来自 `include/`。
@@ -55,6 +55,7 @@ target_include_directories(my-tool PRIVATE ../include)
 
 ## 工具代码的 UTF-8 规则
 
+- 任何包含非 ASCII 字符的文件都必须保存为带 BOM 的 UTF-8；纯 ASCII 文件可加可不加。
 - 把从 `tool_entry`（或某个 cosyvoice API）收到的每个 `char*`/`std::string` 都当作 UTF-8。不要用 ANSI 代码页做任何转换。
 - 需要把路径传给 C 运行时/操作系统函数时：
   - **POSIX**：直接把 UTF-8 `char*` 原样传递——文件 API 接收字节串，UTF-8 即为惯例。

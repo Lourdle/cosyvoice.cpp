@@ -1,10 +1,10 @@
-# Developer Guide
+﻿# Developer Guide
 
 Guidelines for contributing tools and tests to this repository. API reference and SIMD internals are covered in [API.md](API.md) and [SIMD.md](SIMD.md).
 
 ## Entry point convention: `tool_entry`, never `main`
 
-Every executable in this repository — tools (`tools/cli`, `tools/server`, `tools/quantize`) and tests (`tests/`) — implements
+Every executable in this repository — tools (`tools/cli`, `tools/imatrix`, `tools/server`, `tools/quantize`) and tests (`tests/`) — implements
 
 ```cpp
 int tool_entry(int argc, char** argv);
@@ -35,7 +35,7 @@ target_link_libraries(my-tool PRIVATE cosyvoice common tools_common ggml)
 target_include_directories(my-tool PRIVATE ../include)
 ```
 
-- Tools live under `tools/<name>/` each with its own `CMakeLists.txt` (see `tools/cli/CMakeLists.txt`, `tools/quantize/CMakeLists.txt`, `tools/server/CMakeLists.txt`).
+- Tools live under `tools/<name>/` each with its own `CMakeLists.txt`. `tools/CMakeLists.txt` discovers every subdirectory that has a `CMakeLists.txt` automatically, so adding or removing a tool directory needs no edit there. With the Makefile and Ninja generators a new directory is picked up automatically at build time (`CONFIGURE_DEPENDS`); the Visual Studio generator requires re-running the configure step once after adding or removing such a directory. Tools that link the `cosyvoice` runtime are named `cosyvoice-<name>` (`cosyvoice-cli`, `cosyvoice-server`, `cosyvoice-imatrix`); generic tools that only use `ggml`/`common` keep a plain name (`quantize`).
 - Tests live under `tests/` and are gated behind `COSYVOICE_BUILD_TESTS` (see `tests/CMakeLists.txt` and [tests/README.md](../tests/README.md)).
 - `cosyvoice` is the core inference library. `common` is **this repository's** shared helper library (`common/`): the `gguf_parser` GGUF reader, `file_mmap`, and the UTF-8-aware `open_ifstream_utf8()` / `open_ofstream_utf8()` / `utf8_to_wstr()`; it links `ggml` publicly (`common/CMakeLists.txt`). Tools use these symbols directly — `quantize` calls `gguf_parser` / `file_mmap` / `open_ifstream_utf8` (`tools/quantize/quantize.cpp`), the CLI calls `open_ifstream_utf8` (`tools/cli/cosyvoice-cli.cpp`), and `tool_common.h` itself includes `common.h` — so a new executable links both `cosyvoice` and `common`.
 - The main project is built with `BUILD_SHARED_LIBS=ON` by default; the tools link the shared `cosyvoice` library, so headers from `include/` are what you use.
@@ -55,6 +55,7 @@ Headers, include via `"tool_common.h"` (or `"tool_common_cosyvoice.h"` for the c
 
 ## UTF-8 rules for tool code
 
+- Save every file that contains non-ASCII characters as UTF-8 with a BOM; pure-ASCII files may omit it.
 - Treat every `char*`/`std::string` you receive from `tool_entry` (or a cosyvoice API) as UTF-8. Do not convert with the ANSI codepage.
 - When you need to hand a path to a C runtime/OS function:
   - **POSIX**: pass the UTF-8 `char*` as-is — file APIs take byte strings and UTF-8 is the convention.
