@@ -10,7 +10,6 @@
 
 #include <ggml-cpp.h>
 
-#include <set>
 #include <mutex>
 #include <condition_variable>
 #include <random>
@@ -121,6 +120,10 @@ struct cosyvoice_worker_context
     ggml_backend_buffer_ptr llm_kv_buffer;
     ggml_backend_buffer_ptr dit_kv_buffer;
 
+    // Scheduler evaluation callback registered on this worker's scheduler.
+    cosyvoice_sched_eval_callback_t sched_eval_callback{ nullptr };
+    void* sched_eval_callback_ctx{ nullptr };
+
     std::atomic<bool> stop_flag{false};
     std::atomic<int>  use_count{0};
     std::mutex        cv_mutex;
@@ -182,9 +185,19 @@ struct cosyvoice_model : virtual cosyvoice_model_context, virtual cosyvoice_obje
     void set_noise_callback(cosyvoice_noise_callback_t callback, void* callback_ctx);
     void get_noise_callback(cosyvoice_noise_callback_t* callback, void** callback_ctx);
 
+    void set_sched_eval_callback(cosyvoice_sched_eval_callback_t callback, void* callback_ctx);
+
+    // Pipeline Stage Notifications
+    void set_stage_callback(cosyvoice_stage_callback_t callback, void* user_data);
+    bool invoke_stage_callback(cosyvoice_stage_t stage, int32_t value);
+
     cosyvoice_model_shared* shared;
     cosyvoice_worker_context* workers;
     cosyvoice_worker_context* worker;
+
+    // Pipeline stage callback, shared by all workers of the context.
+    cosyvoice_stage_callback_t stage_callback{ nullptr };
+    void* stage_callback_user_data{ nullptr };
 };
 
 struct cosyvoice_model_3_shared
@@ -219,6 +232,9 @@ struct cosyvoice_model_3 : cosyvoice_model
     void llm_prepare_probs(bool allow_stop_tokens);
     bool llm_prefill(ggml_type type, const void* data, uint32_t seq_len);
     bool llm_prefill_logits(ggml_type type, const void* data, uint32_t seq_len);
+
+    // Sequence Replay
+    bool llm_full_forward(ggml_type type, const void* data, uint32_t n_tokens, float* logits, uint64_t logits_capacity, uint32_t* n_vocab);
 
     bool llm_is_stop_token(int token_id);
 

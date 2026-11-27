@@ -270,6 +270,12 @@ void cosyvoice_model::empty_buffer_cache()
     if (stage_timing_enabled())
         ggml_backend_sched_set_realloc_callback(worker->sched.get(), stage_timing_sched_realloc, worker);
 
+    // The fresh scheduler drops the eval callback, so re-apply the worker's stored one.
+    if (worker->sched_eval_callback)
+        ggml_backend_sched_set_eval_callback(worker->sched.get(),
+            reinterpret_cast<ggml_backend_sched_eval_callback>(worker->sched_eval_callback),
+            worker->sched_eval_callback_ctx);
+
     {
         std::unique_lock lock(shared->noise_mutex);
         shared->rand_noise.reset();
@@ -509,6 +515,27 @@ void cosyvoice_model::get_noise_callback(cosyvoice_noise_callback_t* callback, v
     }
 }
 
+void cosyvoice_model::set_sched_eval_callback(cosyvoice_sched_eval_callback_t callback, void* callback_ctx)
+{
+    worker->sched_eval_callback = callback;
+    worker->sched_eval_callback_ctx = callback ? callback_ctx : nullptr;
+    ggml_backend_sched_set_eval_callback(worker->sched.get(),
+        reinterpret_cast<ggml_backend_sched_eval_callback>(worker->sched_eval_callback),
+        worker->sched_eval_callback_ctx);
+}
+
+void cosyvoice_model::set_stage_callback(cosyvoice_stage_callback_t callback, void* user_data)
+{
+    stage_callback = callback;
+    stage_callback_user_data = callback ? user_data : nullptr;
+}
+
+bool cosyvoice_model::invoke_stage_callback(cosyvoice_stage_t stage, int32_t value)
+{
+    if (!stage_callback)
+        return true;
+    return stage_callback(stage, value, get_worker_no(), stage_callback_user_data);
+}
 
 int cosyvoice_model::llm_sample_token()
 {

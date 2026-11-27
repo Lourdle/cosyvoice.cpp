@@ -122,6 +122,16 @@ struct cosyvoice_model_context
     virtual uint32_t get_hift_rand_ini_len() = 0; ///< Get the required shared HiFT initialization-noise length.
     virtual void set_hift_rand_ini(const float* data) = 0; ///< Set the shared HiFT initialization-noise buffer.
 
+    // Scheduler Evaluation
+    virtual void set_sched_eval_callback(cosyvoice_sched_eval_callback_t callback, void* callback_ctx) = 0; ///< Register the scheduler evaluation callback for the active worker. Pass a null callback to remove it.
+
+    // Pipeline Stage Notifications
+    virtual void set_stage_callback(cosyvoice_stage_callback_t callback, void* user_data) = 0; ///< Register a pipeline stage callback for the active worker.
+    virtual bool invoke_stage_callback(cosyvoice_stage_t stage, int32_t value) = 0; ///< Fire a pipeline stage event. Returns true when there is no callback or the callback returns true.
+
+    // Sequence Replay
+    virtual bool llm_full_forward(ggml_type type, const void* data, uint32_t n_tokens, float* logits, uint64_t logits_capacity, uint32_t* n_vocab) = 0; ///< Run a full LLM forward pass over the given embedding rows without sampling, on top of the current KV-cache contents.
+
     // Stop-request API
     virtual void request_stop() = 0; ///< Request that the active worker's current job stop as soon as possible.
     virtual bool is_stop_requested() = 0; ///< Check whether a stop was requested. Returns true if a stop was requested.

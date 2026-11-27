@@ -1,4 +1,4 @@
-#include "cosyvoice-internal.h"
+﻿#include "cosyvoice-internal.h"
 #include "cosyvoice-tokenizer.h"
 #include "cosyvoice-model.h"
 #include "cosyvoice-loader.h"
@@ -509,17 +509,47 @@ bool cosyvoice_tts(cosyvoice_context_t ctx, const int* text, uint32_t text_len, 
         }
     }
 
-    if (ctx->llm_job(text, text_len, prompt)
-        && ctx->token2wav(ctx->llm_get_accepted_tokens(), ctx->llm_get_n_accepted_tokens(), speed, prompt, result))
+    if (!ctx->invoke_stage_callback(COSYVOICE_STAGE_LLM_BEGIN, 0))
     {
-        // Check if stop was requested during token2wav
-        if (ctx->is_stop_requested())
+        result->data = nullptr;
+        result->length = 0;
+        return false;
+    }
+
+    if (ctx->llm_job(text, text_len, prompt))
+    {
+        if (!ctx->invoke_stage_callback(COSYVOICE_STAGE_LLM_END, static_cast<int32_t>(ctx->llm_get_n_accepted_tokens())))
         {
             result->data = nullptr;
             result->length = 0;
             return false;
         }
-        return true;
+
+        if (!ctx->invoke_stage_callback(COSYVOICE_STAGE_TOKEN2WAV_BEGIN, 0))
+        {
+            result->data = nullptr;
+            result->length = 0;
+            return false;
+        }
+
+        if (ctx->token2wav(ctx->llm_get_accepted_tokens(), ctx->llm_get_n_accepted_tokens(), speed, prompt, result))
+        {
+            if (!ctx->invoke_stage_callback(COSYVOICE_STAGE_TOKEN2WAV_END, 0))
+            {
+                result->data = nullptr;
+                result->length = 0;
+                return false;
+            }
+
+            // Check if stop was requested during token2wav
+            if (ctx->is_stop_requested())
+            {
+                result->data = nullptr;
+                result->length = 0;
+                return false;
+            }
+            return true;
+        }
     }
     result->data = nullptr;
     result->length = 0;
@@ -549,13 +579,25 @@ bool cosyvoice_tts_stream(cosyvoice_context_t ctx, const int* text, uint32_t tex
                 return false;
 
             if (!final)
+            {
+                if (!ctx->invoke_stage_callback(COSYVOICE_STAGE_LLM_BEGIN, 0))
+                    goto cleanup;
                 if (!ctx->llm_job_ext(text, text_len, prompt, chunk_tokens + 1, &final))
                     goto cleanup;
+                if (!ctx->invoke_stage_callback(COSYVOICE_STAGE_LLM_END, static_cast<int32_t>(ctx->llm_get_n_accepted_tokens())))
+                    goto cleanup;
+            }
 
             n_tokens = std::min(n_tokens + chunk_tokens, ctx->llm_get_n_accepted_tokens());
 
+            if (!ctx->invoke_stage_callback(COSYVOICE_STAGE_TOKEN2WAV_BEGIN, 0))
+                goto cleanup;
+
             cosyvoice_generated_speech result = {};
             if (!ctx->token2wav_ext(ctx->llm_get_accepted_tokens(), n_tokens, speed, prompt, true, ctx->llm_get_n_accepted_tokens() == n_tokens, &result))
+                goto cleanup;
+
+            if (!ctx->invoke_stage_callback(COSYVOICE_STAGE_TOKEN2WAV_END, 0))
                 goto cleanup;
 
             if (result.data && result.length > 0
@@ -622,6 +664,21 @@ void cosyvoice_set_noise_callback(cosyvoice_context_t ctx, cosyvoice_noise_callb
 void cosyvoice_get_noise_callback(cosyvoice_context_t ctx, cosyvoice_noise_callback_t* callback, void** callback_ctx)
 {
     ctx->get_noise_callback(callback, callback_ctx);
+}
+
+void cosyvoice_set_sched_eval_callback(cosyvoice_context_t ctx, cosyvoice_sched_eval_callback_t callback, void* callback_ctx)
+{
+    ctx->set_sched_eval_callback(callback, callback_ctx);
+}
+
+void cosyvoice_set_stage_callback(cosyvoice_context_t ctx, cosyvoice_stage_callback_t callback, void* user_data)
+{
+    ctx->set_stage_callback(callback, user_data);
+}
+
+bool cosyvoice_llm_full_forward(cosyvoice_context_t ctx, enum ggml_type type, const void* data, uint32_t n_tokens, float* logits, uint64_t logits_capacity, uint32_t* n_vocab)
+{
+    return ctx->llm_full_forward(type, data, n_tokens, logits, logits_capacity, n_vocab);
 }
 
 uint32_t cosyvoice_get_hift_rand_ini_len(cosyvoice_context_t ctx)

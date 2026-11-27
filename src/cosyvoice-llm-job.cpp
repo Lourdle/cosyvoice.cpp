@@ -1,4 +1,4 @@
-#include "cosyvoice-internal.h"
+﻿#include "cosyvoice-internal.h"
 #include "cosyvoice-model.h"
 
 #include <algorithm>
@@ -28,6 +28,7 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
     auto& prompt_crc32 = worker->prompt_crc32;
     auto last_prompt_crc32 = prompt_crc32;
     bool stop_reached = false;
+    bool callback_stopped = false;
 
     worker->stage_round = {};
     worker->stage_round.active = true;
@@ -214,6 +215,14 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
 
             llm_accept_token(token_id);
 
+            // Report the accepted token count. Returning false stops generation
+            // (like hitting a token budget) and keeps the tokens accepted so far.
+            if (!invoke_stage_callback(COSYVOICE_STAGE_LLM_TOKEN, static_cast<int32_t>(llm_get_n_accepted_tokens())))
+            {
+                callback_stopped = true;
+                break;
+            }
+
             if (is_stop_requested())
             {
                 worker->llm_input = nullptr;
@@ -257,7 +266,7 @@ bool cosyvoice_model_3::llm_job_ext(const int* text, uint32_t text_len, cosyvoic
     const stage_mark epilogue_mark;
     worker->llm_input = nullptr;
     if (final)
-        *final = stop_reached;
+        *final = stop_reached || callback_stopped;
 
     if (params.inference_buffer_policy == COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED && text != nullptr && max_new_tokens == UINT32_MAX && last_prompt_crc32 != prompt_crc32)
     {

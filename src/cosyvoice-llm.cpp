@@ -385,6 +385,106 @@ bool cosyvoice_model_3::llm_prefill_logits(
     return false;
 }
 
+// Full forward pass over the given embedding rows without sampling: every
+// layer (including the final layer) consumes all rows, then the output
+// projection produces logits. The rows are processed on top of the current
+// LLM KV-cache contents; callers replaying a suffix truncate the cache first
+// and call again with the next slice for batches larger than n_batch.
+bool cosyvoice_model_3::llm_full_forward(
+    ggml_type type,
+    const void* data,
+    uint32_t n_tokens,
+    float* logits_out,
+    uint64_t logits_capacity,
+    uint32_t* n_vocab)
+{
+    const auto& llm = cv3_shared->llm;
+    const auto vocab = static_cast<uint32_t>(llm.llm_decoder.weight->ne[1]);
+    if (n_vocab)
+        *n_vocab = vocab;
+    if (!data || n_tokens == 0)
+        return false;
+    if (logits_out && logits_capacity < static_cast<uint64_t>(n_tokens) * vocab)
+        return false;
+
+    auto* kv_cache = &worker->llm_kv_cache;
+
+    const auto total_len = n_tokens + kv_cache->cur_len;
+    if (total_len > shared->params.n_max_seq - 1) return false;
+    if (n_tokens > shared->params.n_batch) return false;
+
+    auto* ctx0 = worker->ctx0.get();
+    ggml_reset(ctx0);
+    ggml_backend_sched_reset(worker->sched.get());
+
+    ++worker->stage_round.llm_prefill_builds;
+    auto& gf = worker->gf;
+    auto& llm_input = worker->llm_input;
+    worker->llm_probs = nullptr;
+    gf = ggml_new_graph(ctx0);
+    llm_input = ggml_new_tensor_2d(ctx0, type, llm.speech_embedding_weight->ne[0], n_tokens);
+
+    ggml_tensor* emb_pos = nullptr;
+    auto* hidden_states = llm_input;
+    if (type != GGML_TYPE_F32)
+    {
+        emb_pos = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_tokens);
+        ggml_set_output(emb_pos);
+        hidden_states = ggml_get_rows(ctx0, llm_input, emb_pos);
+    }
+
+    auto* causal_mask = worker->causal_mask;
+    causal_mask->ne[0] = total_len;
+    causal_mask->ne[1] = n_tokens;
+    causal_mask->nb[1] = total_len * sizeof(ggml_fp16_t);
+    causal_mask->nb[3] = causal_mask->nb[2] = causal_mask->ne[1] * causal_mask->nb[1];
+
+    auto& position_ids = worker->position_ids;
+    position_ids->ne[0] = n_tokens;
+    ggml_backend_tensor_set_async(worker->backend.get(), position_ids, shared->full_position_ids.get() + kv_cache->cur_len, 0, n_tokens * sizeof(int32_t));
+
+    const auto num_attention_heads = llm.num_attention_heads;
+    const auto num_key_value_heads = llm.num_key_value_heads;
+    const int n_layers = static_cast<int>(llm.layers.size());
+    for (int i = 0; i != n_layers; ++i)
+        hidden_states = build_qwen2_decoder_layer(
+            llm.layers[i],
+            ctx0, gf,
+            hidden_states, position_ids, *kv_cache, causal_mask,
+            llm.rope_theta,
+            llm.rms_norm_eps,
+            num_attention_heads, num_key_value_heads,
+            i, /*last_token_only=*/false);
+
+    hidden_states = llm.norm.build_cgraph(ctx0, hidden_states, llm.rms_norm_eps);
+    auto* logits = llm.llm_decoder.build_cgraph(ctx0, hidden_states);
+    ggml_build_forward_expand(gf, logits);
+
+    causal_mask->buffer = nullptr;
+    causal_mask->data = nullptr;
+    set_graph_backend(gf, worker->sched.get(), worker->backend.get(), worker->cpu_backend.get());
+    if (!ggml_backend_sched_alloc_graph(worker->sched.get(), gf))
+    {
+        worker->status = GGML_STATUS_ALLOC_FAILED;
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_ERROR, "failed to allocate the LLM replay graph.\n");
+        return false;
+    }
+    build_causal_mask(reinterpret_cast<ggml_fp16_t*>(causal_mask->data), n_tokens, total_len);
+    if (emb_pos)
+        ggml_backend_tensor_set_async(worker->backend.get(), emb_pos, shared->full_position_ids.get(), 0, n_tokens * sizeof(int32_t));
+    kv_cache->set_input_v_idxs(worker->backend.get(), shared->full_position_ids.get() + kv_cache->cur_len, n_tokens, n_tokens);
+    ggml_backend_tensor_set_async(worker->backend.get(), llm_input, data, 0, ggml_nbytes(llm_input));
+    kv_cache->cur_len += n_tokens;
+
+    worker->status = ggml_backend_sched_graph_compute(worker->sched.get(), gf);
+    if (worker->status != GGML_STATUS_SUCCESS)
+        return false;
+
+    if (logits_out)
+        ggml_backend_tensor_get(logits, logits_out, 0, ggml_nbytes(logits));
+    return true;
+}
+
 bool cosyvoice_model_3::llm_decode(ggml_type type, const void* data)
 {
     auto kv_cache = &worker->llm_kv_cache;

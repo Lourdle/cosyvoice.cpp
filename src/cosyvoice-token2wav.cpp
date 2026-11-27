@@ -1,4 +1,4 @@
-#include "cosyvoice-internal.h"
+﻿#include "cosyvoice-internal.h"
 #include "cosyvoice-model.h"
 #include "ggml-cpu-flag.h"
 #include "common.h"
@@ -561,6 +561,13 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     ggml_tensor* t_leaf;
     ggml_tensor* position_ids;
     ggml_tensor* attn_mask;
+    // The first flow step is fused with the flow encoder, so it can only be
+    // cancelled, not skipped.
+    if (!invoke_stage_callback(COSYVOICE_STAGE_FLOW_STEP, 0))
+    {
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, "token2wav cancelled before the flow decode steps.\n");
+        return false;
+    }
     if (config[0].cache_kv)
         kv_cache->bind_slot(config[0].phys_slot);
     auto feat = flow.decoder.build_cgraph_one_step(ctx0.get(), ditctx, 1, op_caps, config[0].cut_len, t_leaf, position_ids, gf, config[0].cache_kv ? kv_cache : nullptr, config[0].mask ? &attn_mask : nullptr);
@@ -690,6 +697,16 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
 
     for (int step = 1; step != flow.decoder.diffusion_steps; ++step)
     {
+        if (!invoke_stage_callback(COSYVOICE_STAGE_FLOW_STEP, step))
+        {
+            if (streaming)
+            {
+                cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, "token2wav cancelled during the flow decode steps.\n");
+                return false;
+            }
+            continue;
+        }
+
         if (is_stop_requested())
         {
             ggml_reset(ctx0.get());
@@ -825,6 +842,11 @@ bool cosyvoice_model_3::token2wav_ext(const int* token_ids, uint32_t n_tokens, f
     worker->stage_round.mel_ms += mel_mark.elapsed_ms();
 
     const stage_mark hift_mark;
+    if (!invoke_stage_callback(COSYVOICE_STAGE_HIFT_BEGIN, 0))
+    {
+        cosyvoice_call_ggml_log_callback(GGML_LOG_LEVEL_INFO, "token2wav cancelled before the HiFT vocoder.\n");
+        return false;
+    }
     ggml_reset(ctx0.get());
     ggml_backend_sched_reset(sched.get());
     gf = new_cgraph(ctx0.get());
