@@ -15,6 +15,7 @@ quantize --help
 
 支持的量化类型：
 - `F16`, `Q8_0`, `Q6_K`, `Q5_0`, `Q5_1`, `Q5_K`, `Q4_K`, `Q4_1`, `Q4_0`, `MXFP4`， `Q3_K`, `Q2_K`, `Q2_0`, `Q1_0`, `F8_E4M3`
+- `IQ4_NL`, `IQ4_XS`, `IQ3_S`, `IQ3_XXS`, `IQ2_S`, `IQ2_XS`, `IQ2_XXS`, `IQ1_S`, `IQ1_M`（重要性矩阵量化，见 [IQ 量化](#iq-量化重要性矩阵)）
 - `COPY`
 
 `F8_E4M3` 权重需要后端支持 F8 矩阵乘法（CPU 与 CUDA）。在不支持的后端（例如 Metal、Vulkan、SYCL）上加载 `F8_E4M3` 模型会直接报错。`F8_E4M3` 不做分块缩放，幅值较小的权重会丢失大部分精度；在 CosyVoice3-2512 上生成音频会退化到近乎静音。请将其视为实验性选项，优先使用 `Q8_0`/`Q6_K`。
@@ -29,6 +30,8 @@ quantize --help
 | `-t, --type <arg>` | 默认量化类型 |
 | `-c, --custom-string <arg> <arg>` | 自定义字符串元数据（可重复） |
 | `-M, --tensor-map <arg>` | Tensor 名称正则到量化类型的 JSON 映射文件 |
+| `-I, --imatrix <arg>` | IQ 量化类型使用的重要性矩阵 GGUF 文件 |
+| `-F, --imatrix-format <arg>` | 重要性矩阵布局：`native`（默认）或 `llama` |
 
 ### Tensor Map（选择性量化）
 
@@ -63,6 +66,18 @@ JSON 格式（key 为 PCRE2 正则表达式）：
 ```
 tools/quantize/profiles/
 └── cosyvoice3-2512/
+    ├── IQ1_M.json
+    ├── IQ1_S.json
+    ├── IQ2_M.json
+    ├── IQ2_S.json
+    ├── IQ2_XXS.json
+    ├── IQ2_XS.json
+    ├── IQ3_M.json
+    ├── IQ3_S.json
+    ├── IQ3_XS.json
+    ├── IQ3_XXS.json
+    ├── IQ4_NL.json
+    ├── IQ4_XS.json
     ├── Q2_K.json
     ├── Q2_K_L.json
     ├── Q3_K_M.json
@@ -73,12 +88,104 @@ tools/quantize/profiles/
     └── Q5_K_S.json
 ```
 
+`IQ*` profile 需要配合 `-I imatrix.gguf` 使用。推荐从 `IQ3_XXS` 开始；`IQ1_*`/`IQ2_*` 属于实验性档位，可能明显降低语音质量。
+
+每个 profile 与同名主类型配对使用（如 `Q4_K_S.json` 配 `-t Q4_K`、`IQ3_XXS.json` 配 `-t IQ3_XXS`）：profile 未列出的矩阵默认使用该类型，与 llama.cpp 的 `MOSTLY_*` 预设一致。例外是 `IQ2_S.json`，它配 `-t IQ2_XS`——与 llama.cpp 一致，`IQ2_S` 预设的默认类型就是 `IQ2_XS`，产物中不会出现 `IQ2_S` 张量。同理，`IQ2_M.json` 配 `-t IQ2_S`，`IQ3_XS.json`/`IQ3_M.json` 配 `-t IQ3_S`。
+
 示例：
 ```bash
 quantize -f model.gguf -o model-q4_k_s.gguf -t Q4_K -M tools/quantize/profiles/cosyvoice3-2512/Q4_K_S.json
 ```
 
+#### IQ 量化（重要性矩阵）
+
+`IQ1_*`/`IQ2_*`/`IQ3_*` 类型需要重要性矩阵：通过校准运行采集的逐权重激活幅值统计。`IQ4_*` 类型无需矩阵即可使用。
+
+先用[重要性矩阵工具](#重要性矩阵工具toolsimatrix)采集矩阵，再通过 `-I/--imatrix` 传给量化工具：
+
+```bash
+cosyvoice-imatrix -m model.gguf -p prompt_speech.gguf -F calibration.txt -o imatrix.gguf
+quantize -f model.gguf -o model-iq3_xxs.gguf -t IQ3_XXS \
+  -M tools/quantize/profiles/cosyvoice3-2512/IQ3_XXS.json -I imatrix.gguf
+```
+
+说明：
+- 将某 tensor 量化为 `IQ1_*`/`IQ2_*`/`IQ3_*` 但缺少该 tensor 的统计时会直接报错。
+- 行长度不是 IQ 的 256 值块大小整数倍的 tensor 会回退到 `IQ4_NL`，再回退到 `F16`；每次回退都会打印提示。
+
+#### 通用 GGUF 与 llama.cpp 兼容性
+
+`quantize` 是通用 GGUF 量化器：任何标准 GGUF 模型（待量化张量为 F32）都可以量化，包括为 llama.cpp 生成的模型；只有 `profiles/` 下的 tensor map 是模型专属的。
+
+重要性矩阵有两种布局：
+
+- `native`（默认）：每个权重一个 F32 张量，名字与模型张量完全相同，形状 `[n_columns, 2]`（第 0 行平方和，第 1 行行数）。`cosyvoice-imatrix` 写的就是这种。
+- `llama`：llama.cpp 的布局，每个权重一对 `<name>.in_sum2` 与 `<name>.counts` 张量。读取 `llama-imatrix` 生成的文件时用 `-F/--imatrix-format llama`。
+
+两种布局不互通；`cosyvoice-imatrix` 始终写 `native`：`.in_sum2` 后缀会把 CosyVoice3-2512 最长的张量名顶过 ggml 的 64 字节名字上限。
+
 支持通过重复 `-c/--custom-string` 写入自定义字符串元数据。
+
+## 重要性矩阵工具（`tools/imatrix`）
+可执行文件名：`cosyvoice-imatrix`
+
+采集 IQ 量化所需的逐 tensor 激活统计，并写入 GGUF 重要性矩阵。
+
+完整流程采集（LLM 与 Flow/DiT 统计）：
+
+```bash
+cosyvoice-imatrix -m model.gguf -p prompt_speech.gguf -F calibration.txt -o imatrix.gguf
+```
+
+从混合模式语料做完整流程采集：
+
+```bash
+cosyvoice-imatrix -m model.gguf -p prompt_speech.gguf -C corpus.tsv -o imatrix.gguf
+```
+
+快速 LLM-only 采集（不含 Flow/DiT 统计）：
+
+```bash
+cosyvoice-imatrix -m model.gguf -F calibration.txt --llm-only -o imatrix-llm.gguf
+```
+
+### 参数列表
+
+| 参数 | 说明 |
+|------|------|
+| `-h, --help` | 显示帮助 |
+| `-m, --model <arg>` | 输入 F32 GGUF 模型文件路径 |
+| `-o, --output-file <arg>` | 输出重要性矩阵 GGUF 文件路径。默认：`imatrix.gguf` |
+| `-b, --backend <arg>` | GGML 后端名称。默认：`auto`（自动选择最佳后端） |
+| `-t, --threads <arg>` | 后端使用的 CPU 线程数。默认：`4` |
+| `-s, --seed <arg>` | 采样器与噪声生成器种子。默认：`42` |
+| `-T, --text <arg>` | zero-shot 校准文本（可重复） |
+| `-F, --text-file <arg>` | 校准文本文件，每个非空行一个 zero-shot 样本（可重复） |
+| `-C, --corpus-file <arg>` | 混合模式校准语料（可重复）。TSV 行格式：`zs<TAB>文本`、`xl<TAB>文本` 或 `instr<TAB>指令<TAB>文本`；UTF-8，允许 `#` 注释 |
+| `-p, --prompt-speech <arg>` | Prompt speech GGUF 文件路径。使用 `--llm-only` 时不需要 |
+| `-l, --llm-only` | 仅通过快速 prefill 采集 LLM 统计 |
+| `-c, --chunk-size <arg>` | `--llm-only` 模式下每个 LLM prefill 块的 token 数。默认：上下文的批大小 |
+| `-n, --max-new-tokens <arg>` | 完整模式下每个样本生成的语音 token 数上限（`0` 表示不限制）。默认：`400` |
+
+### 语料文件格式
+
+`-C/--corpus-file` 为每个样本指定模式，与高层 TTS 行为一致：
+
+- `zs<TAB>文本`：zero-shot（使用 prompt 文本与 prompt 语音 token）。
+- `xl<TAB>文本`：cross-lingual（丢弃 prompt 文本与 prompt 语音 token，仅保留音色）。
+- `instr<TAB>指令<TAB>文本`：instruct（使用模型指令前缀加上 `指令`）。
+- 空行与以 `#` 开头的行会被忽略。文件必须为 UTF-8（BOM 可选，LF/CRLF 均可）。
+
+CosyVoice3-2512 的多语言语料位于 `tools/imatrix/calibration/cosyvoice3-2512/`
+（`zh_cn`、`zh_hk`、`zh_tw`、`en`、`ja`、`ko`、`de`、`es`、`fr`、`it`、`ru`、`mixed`、`instruct`）。
+这些样本用于搭配 CosyVoice3-2512 随附的 zh-CN `prompt_speech.gguf`：中文样本（含港/台繁体）使用 `zs`，
+其他语言与非中文混排样本使用 `xl`，`instruct` 样本使用同一音色并附加指令。
+
+### 说明
+
+- `--llm-only` 速度更快，但不产生 Flow/DiT 统计；此时将这些 tensor 量化为 `IQ1_*`/`IQ2_*`/`IQ3_*` 会失败。
+- 校准文本越多、越有代表性，IQ 质量越好；请使用与目标语音相同语言的文本。
+- `-F` 与 `-C` 文件按 UTF-8 读取且不做转码；GBK/UTF-16 语料请先转换。
 
 ## Server 工具（`tools/server`）
 可执行文件名：`cosyvoice-server`

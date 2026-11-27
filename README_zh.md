@@ -20,6 +20,7 @@
 - 命令行合成工具（`cosyvoice-cli`）
 - OpenAI Speech 兼容 API 服务，含嵌入式 WebUI（`cosyvoice-server`）
 - GGUF 量化工具（`quantize`）
+- IQ 量化用的重要性矩阵采集工具（`cosyvoice-imatrix`）
 
 ## 目录
 - [功能特性](#功能特性)

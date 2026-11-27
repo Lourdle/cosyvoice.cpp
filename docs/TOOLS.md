@@ -1,4 +1,4 @@
-# Tooling Guide
+﻿# Tooling Guide
 
 ## Quantization Tool (`tools/quantize`)
 Executable name: `quantize`
@@ -15,6 +15,7 @@ quantize --help
 
 Supported quantization types:
 - `F16`, `Q8_0`, `Q6_K`, `Q5_1`, `Q5_K`, `Q5_0`, `Q4_K`, `Q4_1`, `Q4_0`, `MXFP4`, `Q3_K`, `Q2_K`, `Q2_0`, `Q1_0`, `F8_E4M3`
+- `IQ4_NL`, `IQ4_XS`, `IQ3_S`, `IQ3_XXS`, `IQ2_S`, `IQ2_XS`, `IQ2_XXS`, `IQ1_S`, `IQ1_M` (importance-matrix quantization, see [IQ Quantization](#iq-quantization-importance-matrix))
 - `COPY`
 
 `F8_E4M3` weights require a backend with F8 matrix multiplication kernels (CPU and CUDA). Loading an `F8_E4M3` model on a backend without them (for example Metal, Vulkan, or SYCL) fails with an error. `F8_E4M3` stores values without per-block scaling, so small-magnitude weights lose most of their precision; on CosyVoice3-2512 the generated audio collapses to near-silence. Treat it as experimental and prefer `Q8_0`/`Q6_K`.
@@ -29,6 +30,8 @@ Supported quantization types:
 | `-t, --type <arg>` | Default quantization type |
 | `-c, --custom-string <arg> <arg>` | Custom metadata key-value pair (repeatable) |
 | `-M, --tensor-map <arg>` | JSON file mapping tensor name regex to quantization type |
+| `-I, --imatrix <arg>` | Importance-matrix GGUF file used by IQ quantization types |
+| `-F, --imatrix-format <arg>` | Importance-matrix layout: `native` (default) or `llama` |
 
 ### Tensor Map (Selective Quantization)
 
@@ -63,6 +66,18 @@ Ready-to-use tensor maps are available under `tools/quantize/profiles/`, organiz
 ```
 tools/quantize/profiles/
 └── cosyvoice3-2512/
+    ├── IQ1_M.json
+    ├── IQ1_S.json
+    ├── IQ2_M.json
+    ├── IQ2_S.json
+    ├── IQ2_XXS.json
+    ├── IQ2_XS.json
+    ├── IQ3_M.json
+    ├── IQ3_S.json
+    ├── IQ3_XS.json
+    ├── IQ3_XXS.json
+    ├── IQ4_NL.json
+    ├── IQ4_XS.json
     ├── Q2_K.json
     ├── Q2_K_L.json
     ├── Q3_K_M.json
@@ -73,12 +88,110 @@ tools/quantize/profiles/
     └── Q5_K_S.json
 ```
 
+The `IQ*` profiles are meant to be combined with `-I imatrix.gguf`. `IQ3_XXS` is the recommended
+starting point; the `IQ1_*`/`IQ2_*` profiles are experimental and can noticeably degrade speech quality.
+
+Use each profile together with `-t` naming its main type (e.g. `-t Q4_K` with `Q4_K_S.json`, `-t IQ3_XXS`
+with `IQ3_XXS.json`): matrices not listed in the profile default to that type, mirroring llama.cpp's
+`MOSTLY_*` presets. The exception is `IQ2_S.json`, which pairs with `-t IQ2_XS` — as in llama.cpp, the
+`IQ2_S` preset defaults to `IQ2_XS` and no `IQ2_S` tensor appears in the result. Likewise, pair
+`IQ2_M.json` with `-t IQ2_S`, and `IQ3_XS.json`/`IQ3_M.json` with `-t IQ3_S`.
+
 Example:
 ```bash
 quantize -f model.gguf -o model-q4_k_s.gguf -t Q4_K -M tools/quantize/profiles/cosyvoice3-2512/Q4_K_S.json
 ```
 
+#### IQ Quantization (Importance Matrix)
+
+`IQ1_*`/`IQ2_*`/`IQ3_*` types need an importance matrix: per-weight statistics of the activation magnitudes collected from a calibration run. `IQ4_*` types work without one.
+
+Collect the matrix with the [importance matrix tool](#importance-matrix-tool-toolsimatrix), then pass it with `-I/--imatrix`:
+
+```bash
+cosyvoice-imatrix -m model.gguf -p prompt_speech.gguf -F calibration.txt -o imatrix.gguf
+quantize -f model.gguf -o model-iq3_xxs.gguf -t IQ3_XXS \
+  -M tools/quantize/profiles/cosyvoice3-2512/IQ3_XXS.json -I imatrix.gguf
+```
+
+Notes:
+- Quantizing a tensor to `IQ1_*`/`IQ2_*`/`IQ3_*` without statistics for that tensor is an error.
+- Tensors whose row length is not a multiple of the 256-value IQ block size fall back to `IQ4_NL`, and then to `F16`; each rollback is reported.
+
+#### Generic GGUF and llama.cpp compatibility
+
+`quantize` is a generic GGUF quantizer: any standard GGUF model whose tensors to quantize are F32 can be quantized, including models produced for llama.cpp. Only the bundled tensor maps under `profiles/` are model-specific.
+
+Two importance-matrix layouts exist:
+
+- `native` (default): one F32 tensor per weight, named exactly like the model tensor, shape `[n_columns, 2]` (row 0 = sums of squared activations, row 1 = row counts). This is the layout written by `cosyvoice-imatrix`.
+- `llama`: llama.cpp's layout, `<name>.in_sum2` and `<name>.counts` tensors per weight. Read it with `-F/--imatrix-format llama` when using an importance matrix produced by `llama-imatrix`.
+
+The layouts are not interchangeable, and `cosyvoice-imatrix` always writes `native`: the `.in_sum2` suffix would push the longest CosyVoice3-2512 tensor names past ggml's 64-byte tensor-name limit.
+
 Custom metadata strings are supported with repeated `-c/--custom-string`.
+
+## Importance Matrix Tool (`tools/imatrix`)
+Executable name: `cosyvoice-imatrix`
+
+Collects per-tensor activation statistics for IQ quantization and writes them to a GGUF importance matrix.
+
+Full-pipeline collection (LLM and Flow/DiT statistics):
+
+```bash
+cosyvoice-imatrix -m model.gguf -p prompt_speech.gguf -F calibration.txt -o imatrix.gguf
+```
+
+Full-pipeline collection from a mixed-mode corpus:
+
+```bash
+cosyvoice-imatrix -m model.gguf -p prompt_speech.gguf -C corpus.tsv -o imatrix.gguf
+```
+
+Fast LLM-only collection (no Flow/DiT statistics):
+
+```bash
+cosyvoice-imatrix -m model.gguf -F calibration.txt --llm-only -o imatrix-llm.gguf
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-h, --help` | Show help message |
+| `-m, --model <arg>` | Input F32 GGUF model file path |
+| `-o, --output-file <arg>` | Output importance-matrix GGUF file path. Default: `imatrix.gguf` |
+| `-b, --backend <arg>` | GGML backend name. Default: `auto` (best available) |
+| `-t, --threads <arg>` | CPU threads for the backend. Default: `4` |
+| `-s, --seed <arg>` | Sampler and noise generator seed. Default: `42` |
+| `-T, --text <arg>` | Zero-shot calibration text (repeatable) |
+| `-F, --text-file <arg>` | Calibration text file, one zero-shot sample per non-empty line (repeatable) |
+| `-C, --corpus-file <arg>` | Mixed-mode calibration corpus (repeatable). TSV lines: `zs<TAB>text`, `xl<TAB>text` or `instr<TAB>instruction<TAB>text`; UTF-8, `#` comments allowed |
+| `-p, --prompt-speech <arg>` | Prompt speech GGUF file path. Required unless `--llm-only` is given |
+| `-l, --llm-only` | Collect only LLM statistics through fast prefill passes |
+| `-c, --chunk-size <arg>` | Tokens per LLM prefill chunk in `--llm-only` mode. Default: the context batch size |
+| `-n, --max-new-tokens <arg>` | Cap on generated speech tokens per sample in full mode (`0` = no cap). Default: `400` |
+
+### Corpus file format
+
+`-C/--corpus-file` assigns a mode per sample, mirroring the high-level TTS behavior:
+
+- `zs<TAB>text`: zero-shot (prompt text and prompt speech tokens are used).
+- `xl<TAB>text`: cross-lingual (prompt text and prompt speech tokens are dropped; the prompt voice is kept).
+- `instr<TAB>instruction<TAB>text`: instruct (the model's instruction prefix plus `instruction` are used).
+- Empty lines and lines starting with `#` are ignored. Files must be UTF-8 (BOM optional, LF/CRLF both work).
+
+A multilingual corpus for CosyVoice3-2512 lives under `tools/imatrix/calibration/cosyvoice3-2512/`
+(`zh_cn`, `zh_hk`, `zh_tw`, `en`, `ja`, `ko`, `de`, `es`, `fr`, `it`, `ru`, `mixed`, `instruct`).
+These samples are intended for the zh-CN `prompt_speech.gguf` shipped with CosyVoice3-2512:
+Chinese samples (including the traditional Hong Kong and Taiwan ones) use `zs`, other languages and
+non-Chinese mixed samples use `xl`, and `instruct` samples use the same voice with instructions.
+
+### Notes
+
+- `--llm-only` is much faster but yields no Flow/DiT statistics; quantizing those tensors to `IQ1_*`/`IQ2_*`/`IQ3_*` then fails.
+- More and representative calibration text improves IQ quality; use text in the same language(s) as the target speech.
+- `-F` and `-C` files are read as UTF-8 with no transcoding; convert GBK/UTF-16 corpora first.
 
 ## Server Tool (`tools/server`)
 Executable name: `cosyvoice-server`

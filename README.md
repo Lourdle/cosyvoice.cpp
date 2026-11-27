@@ -1,4 +1,4 @@
-# CosyVoice.cpp
+﻿# CosyVoice.cpp
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-blue.svg)]()
@@ -20,6 +20,7 @@ This project provides:
 - A CLI synthesis tool (`cosyvoice-cli`)
 - An OpenAI Speech-compatible API server with embedded WebUI (`cosyvoice-server`)
 - A GGUF quantization tool (`quantize`)
+- An importance-matrix collection tool for IQ quantization (`cosyvoice-imatrix`)
 
 ## Contents
 - [Features](#features)
