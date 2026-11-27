@@ -106,6 +106,38 @@ typedef float* (*cosyvoice_noise_callback_t)(
 
 前置阶段返回噪声缓冲区指针；后置阶段返回值忽略。
 
+## cosyvoice_sched_eval_callback_t
+
+### 语法
+
+```c
+typedef bool (*cosyvoice_sched_eval_callback_t)(
+    struct ggml_tensor* t,
+    bool                ask,
+    void*               ctx
+);
+```
+
+### 说明
+
+由后端调度器在张量求值前后调用的回调。可用于观察图节点，并请求所选节点的中间结果。
+
+### 参数
+
+- `t`：即将求值（`ask == true`）或刚刚求值完成（`ask == false`）的图节点。
+- `ask`：为 true 时返回是否需要 `t` 的结果；为 false 时 `t` 刚求值完成，可读取其数据。
+- `ctx`：通过 `cosyvoice_set_sched_eval_callback` 注册的用户上下文。
+
+### 返回值
+
+- `ask == true`：是否需要调度器求值 `t`、同步后以 `ask == false` 再次调用回调。
+- `ask == false`：是否继续求值。返回 `false` 会中止当前图剩余节点的求值。
+
+### 备注
+
+- `ask` 为 true 时张量数据尚不可用，只应检查节点信息。
+- 请求节点会强制逐节点求值，降低推理吞吐；只应请求确实需要的节点。
+
 ## cosyvoice_log_callback_default
 
 ### 语法
@@ -223,6 +255,76 @@ COSYVOICE_API enum ggml_status cosyvoice_get_last_status(cosyvoice_context_t ctx
 ### 返回值
 
 `ggml_status` 枚举值。
+
+## cosyvoice_set_sched_eval_callback
+
+### 语法
+
+```c
+COSYVOICE_API void cosyvoice_set_sched_eval_callback(cosyvoice_context_t ctx, cosyvoice_sched_eval_callback_t callback, void* callback_ctx);
+```
+
+### 说明
+
+为当前活动 worker 注册调度器求值回调。调用前用 `cosyvoice_set_worker_no()` 选择 worker；每个 worker 各自保存回调与用户上下文。
+
+### 参数
+
+- `ctx`：模型上下文。
+- `callback`：回调函数；传 `NULL` 表示移除已注册的回调。
+- `callback_ctx`：传给回调的用户上下文。
+
+### 返回值
+
+无返回值。
+
+### 备注
+
+- 回调在该 worker 的推理线程中执行；该 worker 推理进行期间不要注册或移除回调。
+- 回调按 worker 保存；在一个 worker 上注册不会影响其他 worker。
+- 回调在该 worker 的 `cosyvoice_empty_buffer_cache()` 之后仍然有效。
+
+## cosyvoice_set_stage_callback
+
+### 语法
+
+```c
+typedef enum cosyvoice_stage_t
+{
+    COSYVOICE_STAGE_LLM_BEGIN,
+    COSYVOICE_STAGE_LLM_TOKEN,
+    COSYVOICE_STAGE_LLM_END,
+    COSYVOICE_STAGE_TOKEN2WAV_BEGIN,
+    COSYVOICE_STAGE_FLOW_STEP,
+    COSYVOICE_STAGE_HIFT_BEGIN,
+    COSYVOICE_STAGE_TOKEN2WAV_END,
+} cosyvoice_stage_t;
+
+typedef bool (*cosyvoice_stage_callback_t)(cosyvoice_stage_t stage, int32_t value, uint32_t worker_no, void* user_data);
+
+COSYVOICE_API void cosyvoice_set_stage_callback(cosyvoice_context_t ctx, cosyvoice_stage_callback_t callback, void* user_data);
+```
+
+### 说明
+
+在上下文级注册流水线阶段回调，由所有 worker 共享。推理入口会在阶段边界调用它。
+
+### 参数
+
+- `ctx`：模型上下文。
+- `callback`：回调函数，传 `NULL` 移除已注册的回调。
+- `user_data`：传给回调的用户上下文。
+
+### 返回值
+
+无返回值。
+
+### 备注
+
+- 事件与 `value`：`LLM_BEGIN`（0）、`LLM_TOKEN`（当前序列已接受的 token 数）、`LLM_END`（已接受的 token 数）、`TOKEN2WAV_BEGIN`（0）、`FLOW_STEP`（0 起的扩散步号）、`HIFT_BEGIN`（0）、`TOKEN2WAV_END`（0）。`worker_no` 标识报告事件的 worker。
+- 返回 `false` 时：`LLM_BEGIN`/`LLM_END`/`TOKEN2WAV_BEGIN`/`TOKEN2WAV_END`/`HIFT_BEGIN` 会取消本次调用；`LLM_TOKEN` 会停止 LLM 生成并继续进入 `token2wav`；`FLOW_STEP` 在非流式模式下跳过该步（流式模式则取消调用）。第一步 flow 与编码器融合，不能跳过。
+- 回调在推理线程中执行，此时该 worker 正在使用中。不要在回调里调用会等待该 worker 的上下文 API；只读 getter 是安全的。
+- `cosyvoice_llm_full_forward` 不会触发阶段回调。
 
 ## cosyvoice_get_word_token_embed_weight
 
@@ -581,6 +683,46 @@ COSYVOICE_API const int* cosyvoice_llm_get_accepted_tokens(cosyvoice_context_t c
 ### 返回值
 
 只读 token ID 数组指针。
+
+## cosyvoice_llm_full_forward
+
+### 语法
+
+```c
+COSYVOICE_API bool cosyvoice_llm_full_forward(
+    cosyvoice_context_t ctx,
+    enum ggml_type      type,
+    const void*         data,
+    uint32_t            n_tokens,
+    float*              logits,
+    uint64_t            logits_capacity,
+    uint32_t*           n_vocab
+);
+```
+
+### 说明
+
+对给定嵌入行执行完整的 LLM 前向计算，不做采样。每一行都会经过所有层（含最后一层），并计算输出投影。
+
+### 参数
+
+- `ctx`：模型上下文。
+- `type`：`data` 中嵌入行的类型（例如 F32，或语音 token 嵌入表本身的量化类型）。
+- `data`：`n_tokens` 行嵌入数据；行宽为语音 token 嵌入宽度。
+- `n_tokens`：行数。不得超过上下文批大小（`cosyvoice_context_params_t::n_batch`）。
+- `logits`：可选的 teacher-forced logits 输出缓冲区，布局为 `[n_tokens][n_vocab]` 行优先。
+- `logits_capacity`：`logits` 的容量（float 数）。`logits` 非 `NULL` 时至少为 `n_tokens * n_vocab`。
+- `n_vocab`：接收每个 token 的 logits 数量。
+
+### 返回值
+
+成功返回 `true`。
+
+### 备注
+
+- 这些行会在活动 worker 的当前 LLM KV 缓存内容之上计算；请先用 `cosyvoice_llm_set_kv_cache_len` 截断缓存，以回放较长序列的后缀；批次超过 `n_batch` 时请分片多次调用。
+- 本函数不触发流水线阶段回调。
+- 每一行都会经过所有层，因此通常只在单 token decode 中出现的 tensor（最后一层的注意力/FFN 与输出头）也能获得统计。也可用作 warmup（空缓存即可）。
 
 ## cosyvoice_llm_job
 

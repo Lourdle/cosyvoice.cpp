@@ -1,4 +1,4 @@
-# cosyvoice-lowlevel.h API Reference
+﻿# cosyvoice-lowlevel.h API Reference
 
 This page documents all public symbols declared in `include/cosyvoice-lowlevel.h`.
 
@@ -105,6 +105,38 @@ Callback for observing or overriding random-noise buffers.
 ### Returns
 
 Buffer to use for `BEFORE_*` calls; ignored for `AFTER_*` calls.
+
+## cosyvoice_sched_eval_callback_t
+
+### Syntax
+
+```c
+typedef bool (*cosyvoice_sched_eval_callback_t)(
+    struct ggml_tensor* t,
+    bool                ask,
+    void*               ctx
+);
+```
+
+### Description
+
+Callback invoked by the backend scheduler around tensor evaluation. It observes the node graph and can request the intermediate results of selected nodes.
+
+### Parameters
+
+- `t`: Graph node about to be evaluated (`ask == true`) or just evaluated (`ask == false`).
+- `ask`: When true, return whether the result of `t` is needed. When false, `t` has just been evaluated and its data is readable.
+- `ctx`: User context registered with `cosyvoice_set_sched_eval_callback`.
+
+### Returns
+
+- `ask == true`: whether the scheduler should evaluate `t`, synchronize, and invoke the callback again with `ask == false`.
+- `ask == false`: whether evaluation should continue. Return `false` to abort the remaining nodes of the current graph.
+
+### Remarks
+
+- When `ask` is true the tensor data is not available yet; only inspect the node.
+- Requesting nodes forces node-by-node graph evaluation and reduces inference throughput. Request only what is needed.
 
 ## cosyvoice_log_callback_default
 
@@ -223,6 +255,76 @@ Gets status code from the most recent backend operation.
 ### Returns
 
 `enum ggml_status` value.
+
+## cosyvoice_set_sched_eval_callback
+
+### Syntax
+
+```c
+COSYVOICE_API void cosyvoice_set_sched_eval_callback(cosyvoice_context_t ctx, cosyvoice_sched_eval_callback_t callback, void* callback_ctx);
+```
+
+### Description
+
+Registers a scheduler evaluation callback for the active worker. Select the worker with `cosyvoice_set_worker_no()` before calling; each worker keeps its own callback and user context.
+
+### Parameters
+
+- `ctx`: Context handle.
+- `callback`: Callback function, or `NULL` to remove the registered callback.
+- `callback_ctx`: User context passed to the callback.
+
+### Returns
+
+No return value.
+
+### Remarks
+
+- The callback runs on the active worker's inference thread; do not register or remove it while inference is in flight on that worker.
+- The callback is stored per worker; registering it on one worker does not affect the others.
+- The callback persists across `cosyvoice_empty_buffer_cache()` on that worker.
+
+## cosyvoice_set_stage_callback
+
+### Syntax
+
+```c
+typedef enum cosyvoice_stage_t
+{
+    COSYVOICE_STAGE_LLM_BEGIN,
+    COSYVOICE_STAGE_LLM_TOKEN,
+    COSYVOICE_STAGE_LLM_END,
+    COSYVOICE_STAGE_TOKEN2WAV_BEGIN,
+    COSYVOICE_STAGE_FLOW_STEP,
+    COSYVOICE_STAGE_HIFT_BEGIN,
+    COSYVOICE_STAGE_TOKEN2WAV_END,
+} cosyvoice_stage_t;
+
+typedef bool (*cosyvoice_stage_callback_t)(cosyvoice_stage_t stage, int32_t value, uint32_t worker_no, void* user_data);
+
+COSYVOICE_API void cosyvoice_set_stage_callback(cosyvoice_context_t ctx, cosyvoice_stage_callback_t callback, void* user_data);
+```
+
+### Description
+
+Registers a pipeline stage callback at context level, shared by all workers. The inference entry points invoke it at stage boundaries.
+
+### Parameters
+
+- `ctx`: Context handle.
+- `callback`: Callback function, or `NULL` to remove the registered callback.
+- `user_data`: User context passed to the callback.
+
+### Returns
+
+No return value.
+
+### Remarks
+
+- Events and `value`: `LLM_BEGIN` (0), `LLM_TOKEN` (number of accepted tokens in the current sequence), `LLM_END` (number of accepted tokens), `TOKEN2WAV_BEGIN` (0), `FLOW_STEP` (0-based diffusion step index), `HIFT_BEGIN` (0), `TOKEN2WAV_END` (0). `worker_no` identifies the worker whose pipeline reported the event.
+- Returning `false` cancels the call for `LLM_BEGIN`, `LLM_END`, `TOKEN2WAV_BEGIN`, `TOKEN2WAV_END` and `HIFT_BEGIN`; stops LLM generation and continues with `token2wav` for `LLM_TOKEN`; skips the step for `FLOW_STEP` in non-streaming mode (streaming cancels the call). The first flow step is fused with the flow encoder and cannot be skipped.
+- The callback runs on the inference thread while the worker is in use. Do not call context APIs that wait for the worker from the callback; read-only getters are safe.
+- `cosyvoice_llm_full_forward` does not fire stage callbacks.
 
 ## cosyvoice_get_word_token_embed_weight
 
@@ -581,6 +683,46 @@ Gets pointer to accepted-token buffer.
 ### Returns
 
 Read-only pointer to token id array.
+
+## cosyvoice_llm_full_forward
+
+### Syntax
+
+```c
+COSYVOICE_API bool cosyvoice_llm_full_forward(
+    cosyvoice_context_t ctx,
+    enum ggml_type      type,
+    const void*         data,
+    uint32_t            n_tokens,
+    float*              logits,
+    uint64_t            logits_capacity,
+    uint32_t*           n_vocab
+);
+```
+
+### Description
+
+Runs a full LLM forward pass over the given embedding rows without sampling. Every layer is evaluated on every row, including the final layer, and the output projection is computed.
+
+### Parameters
+
+- `ctx`: Context handle.
+- `type`: Type of the embedding rows in `data` (for example F32, or the speech-token embedding table's quantized type).
+- `data`: `n_tokens` embedding rows; the row length is the speech-token embedding width.
+- `n_tokens`: Number of rows. Must not exceed the context batch size (`cosyvoice_context_params_t::n_batch`).
+- `logits`: Optional output buffer for the teacher-forced logits in `[n_tokens][n_vocab]` row-major order.
+- `logits_capacity`: Capacity of `logits` in floats. Must be at least `n_tokens * n_vocab` when `logits` is non-`NULL`.
+- `n_vocab`: Receives the number of logits per token.
+
+### Returns
+
+`true` on success.
+
+### Remarks
+
+- The rows are processed on top of the active worker's current LLM KV-cache contents; truncate the cache first with `cosyvoice_llm_set_kv_cache_len` to replay a suffix of a longer sequence, and call again with the next slice for batches larger than `n_batch`.
+- Pipeline stage callbacks are not fired by this function.
+- All layers run on every row, so tensors that normally only appear in single-token decode steps (the final layer's attention/FFN and the output head) receive statistics too. The function is also usable as a warmup pass on an empty cache.
 
 ## cosyvoice_llm_job
 
