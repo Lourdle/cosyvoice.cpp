@@ -70,13 +70,18 @@ static void debug_output(const char* text)
     }
     if (has_utf8)
     {
-        int cchWideChar = MultiByteToWideChar(CP_UTF8, 0, text, cbMultiByte, nullptr, 0);
-        auto OutputString = std::make_unique<WCHAR[]>(cchWideChar);
-        MultiByteToWideChar(CP_UTF8, 0, text, cbMultiByte, OutputString.get(), cchWideChar);
-        OutputDebugStringW(OutputString.get());
+        const int cchWideChar = MultiByteToWideChar(CP_UTF8, 0, text, cbMultiByte, nullptr, 0);
+        if (cchWideChar > 0)
+        {
+            wstring output(static_cast<size_t>(cchWideChar), L'\0');
+            if (MultiByteToWideChar(CP_UTF8, 0, text, cbMultiByte, output.data(), cchWideChar) == cchWideChar)
+            {
+                OutputDebugStringW(output.c_str());
+                return;
+            }
+        }
     }
-    else
-        OutputDebugStringA(text);
+    OutputDebugStringA(text);
 }
 #else
 static inline void debug_output(const char* text) {}
@@ -122,7 +127,7 @@ void cosyvoice_log_callback_default(ggml_log_level level, const char* text, void
 #ifdef _WIN32
     UINT uCodePage = GetConsoleOutputCP();
     if (uCodePage != CP_UTF8)
-        SetConsoleCP(CP_UTF8);
+        SetConsoleOutputCP(CP_UTF8);
 #endif
     switch (level)
     {
@@ -138,23 +143,19 @@ void cosyvoice_log_callback_default(ggml_log_level level, const char* text, void
             debug_output(text);
         break;
     case GGML_LOG_LEVEL_WARN:
-        fputs("\033[93m", stdout);
-        fputs(text, stdout);
-        fputs("\033[0m", stdout);
+        fprintf(stdout, "\033[93m%s\033[0m", text);
         debug_output(text);
         fflush(stdout);
         break;
     case GGML_LOG_LEVEL_ERROR:
-        fputs("\033[31m", stderr);
-        fputs(text, stderr);
-        fputs("\033[0m", stderr);
+        fprintf(stderr, "\033[31m%s\033[0m", text);
         debug_output(text);
         fflush(stderr);
     }
 
 #ifdef _WIN32
     if (uCodePage != CP_UTF8)
-        SetConsoleCP(uCodePage);
+        SetConsoleOutputCP(uCodePage);
 #endif
 }
 
