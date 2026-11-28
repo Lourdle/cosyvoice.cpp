@@ -135,7 +135,7 @@ quantize -f model.gguf -o model-q4k.gguf -t Q4_K
 flowchart TD
     subgraph E2E ["端到端（前端 + TTS）"]
         A["参考音频<br/>+ 转录文本"] --> B["前端 (ONNX)<br/>SpeechTokenizer + Campplus"]
-        B --> C["prompt_speech<br/>（音色嵌入）"]
+        B --> C["prompt_speech<br/>（编码后的提示语音特征）"]
         C --> D["TTS<br/>(LLM + Flow + HiFT)"]
         E["目标文本"] --> D
         D --> F["输出音频"]
@@ -148,7 +148,7 @@ flowchart TD
     end
 ```
 
-- **路径 1（端到端）**：前端从参考音频 + 转录文本提取 `prompt_speech`，然后 TTS 与目标文本合成语音。
+- **路径 1（端到端）**：前端将参考音频编码为 `prompt_speech`（语音 token、音色嵌入、mel 特征），并附带转录文本；然后 TTS 与目标文本合成语音。
   - `zero-shot` 模式需要 `--prompt-text`；`instruct` / `cross-lingual` 模式忽略它。
 - **路径 2（复用）**：通过 `--frontend-only` / `--prompt-speech-output` 运行一次前端，后续合成跳过 ONNX 模型。适合批量/重复合成。
 

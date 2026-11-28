@@ -1283,11 +1283,11 @@ COSYVOICE_API uint32_t cosyvoice_prompt_speech_get_crc32(cosyvoice_prompt_speech
 
 ### 说明
 
-计算提示语音对象的 CRC32。
+计算提示语音特征对象的 CRC32。
 
 ### 参数
 
-- `prompt_speech`：提示语音对象。
+- `prompt_speech`：提示语音特征对象。
 
 ### 返回值
 

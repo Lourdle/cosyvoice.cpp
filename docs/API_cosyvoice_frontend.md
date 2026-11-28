@@ -217,7 +217,7 @@ Extracts prompt-speech features from one waveform. Requires audio API support fo
 - `speech`: Input mono PCM samples.
 - `speech_len`: Number of input samples.
 - `sample_rate`: Input sample rate in Hz.
-- `prompt_text`: Optional text paired with the prompt speech.
+- `prompt_text`: Optional transcript of the reference speech, stored in the returned prompt-speech features.
 
 ### Returns
 
@@ -249,7 +249,7 @@ Extracts prompt-speech features from pre-resampled 16 kHz and 24 kHz waveforms.
 - `speech_16k_len`: Number of samples in `speech_16k`.
 - `speech_24k`: Input mono PCM at 24 kHz.
 - `speech_24k_len`: Number of samples in `speech_24k`.
-- `prompt_text`: Optional text paired with the prompt speech.
+- `prompt_text`: Optional transcript of the reference speech, stored in the returned prompt-speech features.
 
 ### Returns
 

@@ -1,4 +1,4 @@
-# cosyvoice.h API Reference
+﻿# cosyvoice.h API Reference
 
 This page documents all public symbols declared in `include/cosyvoice.h`.
 The runtime supports concurrent inference through multiple worker slots; context duplication lets separate threads bind to different workers while sharing loaded model resources.
@@ -303,7 +303,7 @@ typedef struct cosyvoice_prompt_speech* cosyvoice_prompt_speech_t;
 
 ### Description
 
-Opaque handle to prompt-speech features loaded or extracted for inference.
+Opaque handle to encoded prompt-speech features: speech tokens, speaker embedding, mel features, and the optional transcript. The object does not contain the raw audio waveform.
 
 ## cosyvoice_prompt_t
 
@@ -1454,7 +1454,7 @@ COSYVOICE_API cosyvoice_prompt_speech_t cosyvoice_prompt_speech_load_from_file(c
 
 ### Description
 
-Loads prompt-speech features from disk.
+Loads encoded prompt-speech features from disk.
 
 ### Parameters
 
@@ -1474,7 +1474,7 @@ COSYVOICE_API cosyvoice_prompt_speech_t cosyvoice_prompt_speech_load(const void*
 
 ### Description
 
-Loads prompt-speech features from a memory buffer.
+Loads encoded prompt-speech features from a memory buffer.
 
 ### Parameters
 
@@ -1487,7 +1487,8 @@ Prompt-speech handle on success; `NULL` on failure.
 
 ### Remarks
 
-- The data buffer must contain prompt-speech GGUF data with `feat`, `embedding`, `tokens`, and `text` tensors.
+- The data buffer must contain encoded prompt-speech GGUF data with `feat`, `embedding`, `tokens`, and `text` tensors.
+- The GGUF stores extracted features only; the raw audio waveform is not included.
 - A CRC32 checksum is verified if present in the metadata.
 - After loading, the data buffer is no longer needed and can be freed by the caller.
 
@@ -1501,7 +1502,7 @@ COSYVOICE_API bool cosyvoice_prompt_speech_save_to_file(cosyvoice_prompt_speech_
 
 ### Description
 
-Saves a prompt-speech object to disk.
+Saves encoded prompt-speech features to disk.
 
 ### Parameters
 
@@ -1522,7 +1523,7 @@ COSYVOICE_API cosyvoice_prompt_t cosyvoice_prompt_init_from_prompt_speech(cosyvo
 
 ### Description
 
-Builds a prompt object for a model context from prompt-speech features.
+Builds a prompt object for a model context from encoded prompt-speech features.
 
 ### Parameters
 

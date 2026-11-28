@@ -217,7 +217,7 @@ COSYVOICE_API cosyvoice_prompt_speech_t cosyvoice_frontend_prompt_speech(
 - `speech`：输入单声道 PCM。
 - `speech_len`：输入采样点数量。
 - `sample_rate`：输入采样率（Hz）。
-- `prompt_text`：可选提示文本。
+- `prompt_text`：参考语音的可选转录文本，保存在返回的提示语音特征中。
 
 ### 返回值
 
@@ -249,7 +249,7 @@ COSYVOICE_API cosyvoice_prompt_speech_t cosyvoice_frontend_prompt_speech_direct(
 - `speech_16k_len`：16kHz 波形采样点数量。
 - `speech_24k`：24kHz 输入波形。
 - `speech_24k_len`：24kHz 波形采样点数量。
-- `prompt_text`：可选提示文本。
+- `prompt_text`：参考语音的可选转录文本，保存在返回的提示语音特征中。
 
 ### 返回值
 

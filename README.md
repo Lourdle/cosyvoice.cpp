@@ -135,7 +135,7 @@ This project supports two equivalent inference paths:
 flowchart TD
     subgraph E2E ["End-to-end (Frontend + TTS)"]
         A["Reference Audio<br/>+ Transcript"] --> B["Frontend (ONNX)<br/>SpeechTokenizer + Campplus"]
-        B --> C["prompt_speech<br/>(voice embedding)"]
+        B --> C["prompt_speech<br/>(encoded prompt-speech features)"]
         C --> D["TTS<br/>(LLM + Flow + HiFT)"]
         E["Target Text"] --> D
         D --> F["Output Audio"]
@@ -148,7 +148,7 @@ flowchart TD
     end
 ```
 
-- **Path 1 (end-to-end)**: Frontend extracts `prompt_speech` from reference audio + transcript, then TTS synthesizes with target text.
+- **Path 1 (end-to-end)**: The frontend encodes the reference audio into `prompt_speech` (speech tokens, speaker embedding, mel features) together with the transcript; TTS then synthesizes with the target text.
   - `zero-shot` mode requires `--prompt-text`; `instruct` and `cross-lingual` modes ignore it.
 - **Path 2 (reuse)**: Run frontend once via `--frontend-only` / `--prompt-speech-output`, then skip it for all subsequent synthesis. This avoids re-running the ONNX model each time.
 

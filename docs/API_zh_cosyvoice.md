@@ -297,7 +297,7 @@ typedef struct cosyvoice_prompt_speech* cosyvoice_prompt_speech_t;
 
 ### 说明
 
-提示语音特征对象的不透明句柄。
+编码后的提示语音特征对象（语音 token、音色嵌入、mel 特征及可选转录文本）的不透明句柄；不包含原始音频波形。
 
 ## cosyvoice_prompt_t
 
@@ -1437,7 +1437,7 @@ COSYVOICE_API cosyvoice_prompt_speech_t cosyvoice_prompt_speech_load_from_file(c
 
 ### 说明
 
-从文件加载提示语音特征。
+从文件加载编码后的提示语音特征。
 
 ### 参数
 
@@ -1457,7 +1457,7 @@ COSYVOICE_API cosyvoice_prompt_speech_t cosyvoice_prompt_speech_load(const void*
 
 ### 说明
 
-从内存缓冲区加载提示语音特征。
+从内存缓冲区加载编码后的提示语音特征。
 
 ### 参数
 
@@ -1470,7 +1470,8 @@ COSYVOICE_API cosyvoice_prompt_speech_t cosyvoice_prompt_speech_load(const void*
 
 ### 备注
 
-- 数据缓冲区必须包含 `feat`、`embedding`、`tokens`、`text` 等张量的提示语音 GGUF 格式。
+- 数据缓冲区必须是包含 `feat`、`embedding`、`tokens`、`text` 等张量的编码后提示语音特征 GGUF。
+- 该 GGUF 仅保存提取后的特征，不包含原始音频波形。
 - 如果元数据中包含 CRC32 校验和，则会自动验证。
 - 加载完成后，数据缓冲区可由调用方释放。
 
@@ -1484,11 +1485,11 @@ COSYVOICE_API bool cosyvoice_prompt_speech_save_to_file(cosyvoice_prompt_speech_
 
 ### 说明
 
-将提示语音对象保存到文件。
+将编码后的提示语音特征保存到文件。
 
 ### 参数
 
-- `prompt_speech`：提示语音对象。
+- `prompt_speech`：提示语音特征对象。
 - `filename`：输出路径。
 
 ### 返回值
@@ -1505,12 +1506,12 @@ COSYVOICE_API cosyvoice_prompt_t cosyvoice_prompt_init_from_prompt_speech(cosyvo
 
 ### 说明
 
-根据提示语音对象构建提示句柄。
+根据编码后的提示语音特征对象构建提示句柄。
 
 ### 参数
 
 - `ctx`：模型上下文。
-- `prompt_speech`：提示语音对象。
+- `prompt_speech`：提示语音特征对象。
 
 ### 返回值
 
@@ -1526,7 +1527,7 @@ COSYVOICE_API void cosyvoice_prompt_speech_free(cosyvoice_prompt_speech_t prompt
 
 ### 说明
 
-释放提示语音对象。
+释放提示语音特征对象。
 
 ### 参数
 

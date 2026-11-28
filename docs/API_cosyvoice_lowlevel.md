@@ -1283,7 +1283,7 @@ COSYVOICE_API uint32_t cosyvoice_prompt_speech_get_crc32(cosyvoice_prompt_speech
 
 ### Description
 
-Computes CRC32 for prompt-speech object.
+Computes CRC32 for encoded prompt-speech features.
 
 ### Parameters
 
