@@ -583,13 +583,7 @@ void cosyvoice_server_register_api_routes(Server& server, server_runtime& runtim
             if (ct > 0)
                 cosyvoice_set_chunk_tokens(model_ctx, ct);
 
-            // Build WAV header ahead of time (static header, sent before PCM data)
-            std::string wav_header;
-            if (format == response_audio_format::wav)
-                build_wav_header(&wav_header, runtime.sample_rate);
-
             auto content_type = response_format_to_content_type(format);
-            bool has_wav = (format == response_audio_format::wav);
 
             // Capture copies of resources needed inside the provider lambda.
             // IMPORTANT: the provider runs AFTER the route handler returns, so
@@ -602,23 +596,11 @@ void cosyvoice_server_register_api_routes(Server& server, server_runtime& runtim
             auto conn_checker = req.is_connection_closed;  // copy the socket-checker function
 
             res.set_chunked_content_provider(content_type,
-                [&rt, slot, req_copy, vctx, format, wav_header, has_wav, log_ctx_copy, applied_seed, conn_checker]
+                [&rt, slot, req_copy, vctx, format, log_ctx_copy, applied_seed, conn_checker]
                 (size_t /*offset*/, DataSink& sink) -> bool
                 {
                     auto model_ctx = get_slot_model_context(rt, slot);
                     connection_monitor mon(conn_checker, rt.stop_pool, model_ctx);
-
-                    // Write WAV header first (for WAV output format)
-                    if (has_wav && !wav_header.empty())
-                    {
-                        if (!sink.write(wav_header.data(), wav_header.size()))
-                        {
-                            mon.join();
-                            release_thread_slot(rt, slot);
-                            sink.done();
-                            return true;
-                        }
-                    }
 
                     std::atomic<bool> aborted{false};
                     std::string stream_error;
@@ -629,11 +611,10 @@ void cosyvoice_server_register_api_routes(Server& server, server_runtime& runtim
 #ifndef COSYVOICE_NO_AUDIO
                     cb_ctx.encoder = rt.audio_encoder.get();
 #endif
-                    cb_ctx.format              = format;
-                    cb_ctx.sample_rate         = rt.sample_rate;
-                    cb_ctx.wav_header_written  = has_wav;
-                    cb_ctx.error_out           = &stream_error;
-                    cb_ctx.aborted             = &aborted;
+                    cb_ctx.format      = format;
+                    cb_ctx.sample_rate = rt.sample_rate;
+                    cb_ctx.error_out   = &stream_error;
+                    cb_ctx.aborted     = &aborted;
 
                     // Streaming callback: encode PCM chunk and write to HTTP sink
                     auto stream_cb = [](const float* audio, uint32_t n, void* ud) -> bool
@@ -650,23 +631,27 @@ void cosyvoice_server_register_api_routes(Server& server, server_runtime& runtim
                             req_copy.speed, stream_cb, &cb_ctx);
 
                     mon.join();
-                    release_thread_slot(rt, slot);
-                    sink.done();
 
+                    // A genuine synthesis failure (as opposed to a client abort) is
+                    // surfaced by cancelling the transfer: httplib treats a false
+                    // provider return as an aborted stream, so the client cannot read
+                    // a truncated synthesis as a complete one.
                     if (!ok && !aborted)
                     {
                         log_request_done(rt.log_level, log_ctx_copy,
                             request_log_status::failed, 200, applied_seed, 0, "stream_generation_failed");
-                    }
-                    else
-                    {
-                        log_request_done(rt.log_level, log_ctx_copy,
-                            request_log_status::ok, 200, applied_seed, 0, "stream_speech");
+                        return false;
                     }
 
+                    log_request_done(rt.log_level, log_ctx_copy,
+                        request_log_status::ok, 200, applied_seed, 0, "stream_speech");
+                    sink.done();
                     return true;
                 },
-                [](bool /*success*/) { /* resource releaser — no-op */ });
+                // httplib invokes this exactly once when the response is torn down,
+                // including when the client disconnects before the provider ever ran.
+                // That makes it the reliable place to hand the concurrency slot back.
+                [&rt, slot](bool /*success*/) { release_thread_slot(rt, slot); });
 
             log_request_details(runtime.log_level, log_ctx);
             return;

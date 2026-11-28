@@ -537,25 +537,45 @@ bool stream_audio_chunk(streaming_callback_context* ctx, const float* pcm, uint3
     constexpr size_t kBytesPerSample = sizeof(int16_t);
     const size_t chunk_bytes = static_cast<size_t>(n_samples) * kBytesPerSample;
 
-    // PCM or WAV: convert float -> int16 and write raw PCM16
+    // PCM and WAV share one path: down-convert float samples to little-endian
+    // int16 and hand the bytes to the sink.
+    //
+    // For WAV the 44-byte RIFF header stays pending until the first real audio
+    // chunk, then is prepended to that chunk and flushed in a single write. A
+    // stream that errors out before producing any audio therefore leaves nothing
+    // on the wire, instead of a bare header the client would try to decode.
     if (ctx->format == response_audio_format::pcm ||
         ctx->format == response_audio_format::wav)
     {
-        // WAV format: PCM16 data written after the header already sent
-        std::string buf;
-        buf.resize(chunk_bytes);
+        std::string out;
+        out.resize(chunk_bytes);
         for (uint32_t i = 0; i < n_samples; ++i)
         {
             const auto sample = float_to_pcm16(pcm[i]);
-            buf[2 * i]     = static_cast<char>(sample & 0xFF);
-            buf[2 * i + 1] = static_cast<char>((sample >> 8) & 0xFF);
+            out[2 * i]     = static_cast<char>(sample & 0xFF);
+            out[2 * i + 1] = static_cast<char>((sample >> 8) & 0xFF);
         }
 
-        if (!ctx->sink->write(buf.data(), buf.size()))
+        const bool prepend_header =
+            ctx->format == response_audio_format::wav && !ctx->wav_header_written;
+        if (prepend_header)
+        {
+            std::string header;
+            if (!build_wav_header(&header, ctx->sample_rate))
+            {
+                if (ctx->error_out) *ctx->error_out = "Failed to build WAV header.";
+                return false;
+            }
+            out.insert(out.begin(), header.begin(), header.end());
+        }
+
+        if (!ctx->sink->write(out.data(), out.size()))
         {
             if (ctx->aborted) *ctx->aborted = true;
             return false;
         }
+        if (prepend_header)
+            ctx->wav_header_written = true;
         return true;
     }
 

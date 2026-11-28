@@ -217,7 +217,7 @@ struct streaming_callback_context
     void*                       encoder;     // cosyvoice_audio_encoder_t or NULL
     response_audio_format       format;
     uint32_t                    sample_rate;
-    bool                        wav_header_written;
+    bool                        wav_header_written = false;
     std::string*                error_out;
     std::atomic<bool>*          aborted;
 };
