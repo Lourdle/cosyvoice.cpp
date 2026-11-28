@@ -18,7 +18,7 @@ int tool_entry(int argc, char** argv);
 
 本项目要求所有路径与字符串在所有平台上均为 **UTF-8**（见 [API_zh.md — 编码约定](API_zh.md)）。为保证这一点，`tools/common/common.cpp` 中的 `main` 在 Windows 上调用 `tool_entry` 之前会：
 
-1. `SetConsoleOutputCP(CP_UTF8)` / `SetConsoleCP(CP_UTF8)` —— 让控制台以 UTF-8 收发；
+1. `SetConsoleOutputCP(CP_UTF8)` 并对 stdout/stderr 启用虚拟终端处理 —— 控制台可正确显示 UTF-8 输出与 ANSI 颜色；同时注册 `atexit()` 与 `SetConsoleCtrlHandler` 守卫，在正常退出以及 Ctrl+C/关闭/注销/关机时先 flush stdio 再恢复原 output 代码页；
 2. `CommandLineToArgvW` + `WideCharToMultiByte(CP_UTF8, ...)` —— 从宽字符（原生）命令行重建 UTF-8 `argv`，完全绕开 ANSI 代码页。
 
 非 Windows 平台参数本就是 UTF-8，且 `tool_common.h` 已将 `tool_entry` `#define` 为 `main`，因此完全不存在包装层。
@@ -48,7 +48,7 @@ target_include_directories(my-tool PRIVATE ../include)
 
 - **`tool_common.h`**（`tools/common/tool_common.h`）：
   - 字符串/CLI 解析：`to_lower`、`str_casecmp`、`trim_copy`、`parse_float_arg`、`parse_uint32_arg`、`parse_int_arg`、`parse_uint16_port`；
-  - 其它：`elapsed_ms`、`bytes_to_mib`、`get_local_timestamp_ms`。
+  - 其它：`elapsed_ms`、`bytes_to_mib`、`get_local_timestamp_ms`、`read_line_utf8`。
 - **`tool_common_cosyvoice.h`**（`tools/common/tool_common_cosyvoice.h`）：
   - 每个需要释放的 cosyvoice API 类型的 RAII 句柄：`cosyvoice_context_handle`、`cosyvoice_frontend_handle`、`cosyvoice_prompt_speech_handle`、`cosyvoice_prompt_handle`、`cosyvoice_tts_context_handle`，以及（音频支持启用时的）`audio_buffer_handle` / `cosyvoice_audio_encoder_handle`；
   - CLI 与 server 共享的参数解析器：`parse_simd_level_arg` / `simd_level_to_string` / `simd_caps_to_string`、`parse_kv_cache_type_arg` 等。
@@ -57,6 +57,9 @@ target_include_directories(my-tool PRIVATE ../include)
 
 - 任何包含非 ASCII 字符的文件都必须保存为带 BOM 的 UTF-8；纯 ASCII 文件可加可不加。
 - 把从 `tool_entry`（或某个 cosyvoice API）收到的每个 `char*`/`std::string` 都当作 UTF-8。不要用 ANSI 代码页做任何转换。
+- 交互式控制台输入使用 `read_line_utf8()`（`tool_common.h`），不要直接 `std::getline(std::cin, ...)`：
+  - **Windows**：通过 `ReadConsoleW` 读取 UTF-16 并转换为 UTF-8；stdin 被重定向时回退到 `std::getline`（重定向输入按 UTF-8 字节处理）。
+  - **POSIX**：`std::getline` 的薄封装，因为输入本就是 UTF-8。
 - 需要把路径传给 C 运行时/操作系统函数时：
   - **POSIX**：直接把 UTF-8 `char*` 原样传递——文件 API 接收字节串，UTF-8 即为惯例。
   - **Windows**：**不要**把 UTF-8 `char*` 传给 ANSI（"A"）系列 API——它们按系统 ANSI 代码页（ACP，如 GBK）解码，而非 UTF-8，除非进程显式选用 UTF-8 代码页（Windows 10 1809+ 应用清单 `activeCodePage=UTF-8`，或系统级“使用 Unicode UTF-8”选项）——本项目**不**依赖此机制。宽字符（"W"）系列 API 接收的是 UTF-16，也非 UTF-8。请在边界处用 `utf8_to_wstr()`（`common/common.h`，基于 `MultiByteToWideChar(CP_UTF8)`）转换后再调 W API，或直接使用现成的 `open_ifstream_utf8()` / `open_ofstream_utf8()` / `file_mmap` 助手，它们已封装好（底层为 `CreateFileW`、宽字符 `std::ifstream` 构造、`ma_*_file_w` 等）。

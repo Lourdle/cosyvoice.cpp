@@ -18,7 +18,7 @@ On **Windows**, the `main(int argc, char** argv)` entry point receives arguments
 
 This project requires every path and string to be **UTF-8** on all platforms (see [API.md — encoding convention](API.md)). To guarantee that, `tools/common/common.cpp`'s `main` does the following on Windows before calling `tool_entry`:
 
-1. `SetConsoleOutputCP(CP_UTF8)` / `SetConsoleCP(CP_UTF8)` — the console talks UTF-8;
+1. `SetConsoleOutputCP(CP_UTF8)` plus virtual-terminal processing on stdout/stderr — the console renders UTF-8 output and ANSI colors; `atexit()` and a `SetConsoleCtrlHandler` guard flush stdio and restore the previous output code page at normal exit and on Ctrl+C/close/logoff/shutdown;
 2. `CommandLineToArgvW` + `WideCharToMultiByte(CP_UTF8, ...)` — rebuilds `argv` as UTF-8 strings from the wide (native) command line, bypassing the ANSI codepage entirely.
 
 On non-Windows the arguments are already UTF-8, and `tool_common.h` `#define`s `tool_entry` to `main`, so no wrapper runs at all.
@@ -48,7 +48,7 @@ Headers, include via `"tool_common.h"` (or `"tool_common_cosyvoice.h"` for the c
 
 - **`tool_common.h`** (`tools/common/tool_common.h`):
   - string/CLI parsing: `to_lower`, `str_casecmp`, `trim_copy`, `parse_float_arg`, `parse_uint32_arg`, `parse_int_arg`, `parse_uint16_port`;
-  - misc: `elapsed_ms`, `bytes_to_mib`, `get_local_timestamp_ms`.
+  - misc: `elapsed_ms`, `bytes_to_mib`, `get_local_timestamp_ms`, `read_line_utf8`.
 - **`tool_common_cosyvoice.h`** (`tools/common/tool_common_cosyvoice.h`):
   - RAII handles for every cosyvoice API type that needs freeing: `cosyvoice_context_handle`, `cosyvoice_frontend_handle`, `cosyvoice_prompt_speech_handle`, `cosyvoice_prompt_handle`, `cosyvoice_tts_context_handle`, plus `audio_buffer_handle` / `cosyvoice_audio_encoder_handle` (when audio support is enabled);
   - argument parsers shared by the CLI and server: `parse_simd_level_arg` / `simd_level_to_string` / `simd_caps_to_string`, `parse_kv_cache_type_arg`, and friends.
@@ -57,6 +57,9 @@ Headers, include via `"tool_common.h"` (or `"tool_common_cosyvoice.h"` for the c
 
 - Save every file that contains non-ASCII characters as UTF-8 with a BOM; pure-ASCII files may omit it.
 - Treat every `char*`/`std::string` you receive from `tool_entry` (or a cosyvoice API) as UTF-8. Do not convert with the ANSI codepage.
+- Read interactive console input with `read_line_utf8()` (`tool_common.h`), not `std::getline(std::cin, ...)` directly:
+  - **Windows**: reads UTF-16 via `ReadConsoleW` and converts to UTF-8; falls back to `std::getline` when stdin is redirected (redirected input is treated as UTF-8 bytes).
+  - **POSIX**: a thin `std::getline` wrapper, since input is already UTF-8.
 - When you need to hand a path to a C runtime/OS function:
   - **POSIX**: pass the UTF-8 `char*` as-is — file APIs take byte strings and UTF-8 is the convention.
   - **Windows**: do **not** pass UTF-8 `char*` to ANSI ("A") APIs — they decode with the system ANSI codepage (ACP, e.g. GBK), not UTF-8, unless the process opts into a UTF-8 codepage (Windows 10 1809+ app-manifest `activeCodePage=UTF-8` or the system "Use Unicode UTF-8" option), which this project does **not** rely on. The wide ("W") APIs take UTF-16, not UTF-8. Convert at the boundary with `utf8_to_wstr()` (`common/common.h`, `MultiByteToWideChar(CP_UTF8)`) and call the W API, or use the ready-made helpers `open_ifstream_utf8()` / `open_ofstream_utf8()` / `file_mmap`, which already do this (backed by `CreateFileW`, the wide `std::ifstream` constructor, `ma_*_file_w`, etc.).
