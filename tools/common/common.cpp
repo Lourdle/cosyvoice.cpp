@@ -12,8 +12,10 @@
 #include <charconv>
 #include <chrono>
 #include <cctype>
+#include <cstdlib>
 #include <ctime>
 #include <format>
+#include <iostream>
 #include <memory>
 
 std::string to_lower(std::string value)
@@ -99,11 +101,84 @@ std::string get_local_timestamp_ms()
         static_cast<int>(millis.count()));
 }
 
+bool read_line_utf8(std::string& line)
+{
 #ifdef _WIN32
+    const HANDLE hInput = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD dwMode = 0;
+    if (hInput && hInput != INVALID_HANDLE_VALUE && GetConsoleMode(hInput, &dwMode))
+    {
+        std::wstring wide;
+        WCHAR buffer[256];
+        for (;;)
+        {
+            DWORD read{};
+            if (!ReadConsoleW(hInput, buffer, ARRAYSIZE(buffer), &read, nullptr) || read == 0)
+                return false;
+            wide.append(buffer, read);
+            if (buffer[read - 1] == L'\n' || buffer[read - 1] == L'\r')
+                break;
+        }
+
+        const int bytes = WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), nullptr, 0, nullptr, nullptr);
+        if (bytes <= 0)
+            return false;
+        line.resize(static_cast<size_t>(bytes));
+        if (WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), line.data(), bytes, nullptr, nullptr) <= 0)
+            return false;
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+            line.pop_back();
+        return true;
+    }
+#endif
+    return static_cast<bool>(std::getline(std::cin, line));
+}
+
+#ifdef _WIN32
+static UINT g_previous_output_cp = 0;
+
+static void restore_console_output_cp()
+{
+    std::fflush(stdout);
+    std::fflush(stderr);
+    if (g_previous_output_cp != 0)
+        SetConsoleOutputCP(g_previous_output_cp);
+}
+
+static BOOL WINAPI console_ctrl_restore(DWORD ctrl_type)
+{
+    switch (ctrl_type)
+    {
+    case CTRL_C_EVENT:
+    case CTRL_BREAK_EVENT:
+    case CTRL_CLOSE_EVENT:
+    case CTRL_LOGOFF_EVENT:
+    case CTRL_SHUTDOWN_EVENT:
+        restore_console_output_cp();
+        break;
+    default:
+        break;
+    }
+    return FALSE;
+}
+
 int main(int argc, char**)
 {
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCP(CP_UTF8);
+    g_previous_output_cp = GetConsoleOutputCP();
+    if (g_previous_output_cp != 0 && g_previous_output_cp != CP_UTF8 &&
+        std::atexit(restore_console_output_cp) == 0)
+    {
+        SetConsoleCtrlHandler(console_ctrl_restore, TRUE);
+        SetConsoleOutputCP(CP_UTF8);
+    }
+
+    for (const DWORD nStdHandle : { STD_OUTPUT_HANDLE, STD_ERROR_HANDLE })
+    {
+        const HANDLE hConsole = GetStdHandle(nStdHandle);
+        DWORD dwMode = 0;
+        if (hConsole && hConsole != INVALID_HANDLE_VALUE && GetConsoleMode(hConsole, &dwMode))
+            SetConsoleMode(hConsole, dwMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    }
 
     std::unique_ptr<char[]> block;
     {

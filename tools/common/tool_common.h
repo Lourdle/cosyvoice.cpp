@@ -21,6 +21,7 @@ bool parse_int_arg(std::string_view value, int* result);
 bool parse_uint16_port(const std::string& value, uint16_t* result);
 
 std::string get_local_timestamp_ms();
+bool read_line_utf8(std::string& line);
 
 #ifdef _WIN32
 int tool_entry(int argc, char** argv);
