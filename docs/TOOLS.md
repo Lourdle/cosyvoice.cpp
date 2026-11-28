@@ -183,7 +183,9 @@ cosyvoice-imatrix -m model.gguf -F calibration.txt --llm-only -o imatrix-llm.ggu
 
 A multilingual corpus for CosyVoice3-2512 lives under `tools/imatrix/calibration/cosyvoice3-2512/`
 (`zh_cn`, `zh_hk`, `zh_tw`, `en`, `ja`, `ko`, `de`, `es`, `fr`, `it`, `ru`, `mixed`, `instruct`).
-These samples are intended for the zh-CN `prompt_speech.gguf` shipped with CosyVoice3-2512:
+These samples are intended for a zh-CN `prompt_speech.gguf` generated from the upstream CosyVoice
+zero-shot example (Chinese audio `asset/zero_shot_prompt.wav` plus its transcript) by running the
+frontend (`--frontend-only` / `--prompt-speech-output`); it is not shipped with the model.
 Chinese samples (including the traditional Hong Kong and Taiwan ones) use `zs`, other languages and
 non-Chinese mixed samples use `xl`, and `instruct` samples use the same voice with instructions.
 

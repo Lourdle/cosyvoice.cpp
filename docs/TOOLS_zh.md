@@ -178,8 +178,10 @@ cosyvoice-imatrix -m model.gguf -F calibration.txt --llm-only -o imatrix-llm.ggu
 
 CosyVoice3-2512 的多语言语料位于 `tools/imatrix/calibration/cosyvoice3-2512/`
 （`zh_cn`、`zh_hk`、`zh_tw`、`en`、`ja`、`ko`、`de`、`es`、`fr`、`it`、`ru`、`mixed`、`instruct`）。
-这些样本用于搭配 CosyVoice3-2512 随附的 zh-CN `prompt_speech.gguf`：中文样本（含港/台繁体）使用 `zs`，
-其他语言与非中文混排样本使用 `xl`，`instruct` 样本使用同一音色并附加指令。
+这些样本用于搭配一个 zh-CN `prompt_speech.gguf`：它由上游 CosyVoice 仓库的 zero-shot 中文示例音频
+`asset/zero_shot_prompt.wav` 及其转录文本经前端提取（`--frontend-only` / `--prompt-speech-output`）生成，
+并非随模型发布。中文样本（含港/台繁体）使用 `zs`，其他语言与非中文混排样本使用 `xl`，
+`instruct` 样本使用同一音色并附加指令。
 
 ### 说明
 
