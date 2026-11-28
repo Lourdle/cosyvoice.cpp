@@ -1049,7 +1049,7 @@ static void run_interactive_loop(
 
         printf("> ");
         fflush(stdout);
-        if (!std::getline(std::cin, line))
+        if (!read_line_utf8(line))
             break;
         const auto trimmed = trim_copy(line);
         if (trimmed.empty())
